@@ -137,3 +137,7 @@ async def upload_foto(file: UploadFile = File(...)):
     url = data["data"]["url"]
 
     return JSONResponse(content={"url": url})
+
+@app.get("/me", response_model=schemas.UsuarioResponse)
+def get_me(current_user: models.Usuario = Depends(get_current_user)):
+    return current_user
