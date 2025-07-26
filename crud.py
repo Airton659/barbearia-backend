@@ -38,6 +38,19 @@ def autenticar_usuario(db: Session, email: str, senha: str):
 def listar_barbeiros(db: Session):
     return db.query(models.Barbeiro).filter(models.Barbeiro.ativo == True).all()
 
+def criar_barbeiro(db: Session, barbeiro: schemas.BarbeiroCreate):
+    novo_barbeiro = models.Barbeiro(
+        id=uuid.uuid4(),
+        nome=barbeiro.nome,
+        especialidades=barbeiro.especialidades,
+        foto=barbeiro.foto,
+        ativo=barbeiro.ativo
+    )
+    db.add(novo_barbeiro)
+    db.commit()
+    db.refresh(novo_barbeiro)
+    return novo_barbeiro
+
 
 # --------- AGENDAMENTOS ---------
 

@@ -54,6 +54,10 @@ def criar_usuario(usuario: schemas.UsuarioCreate, db: Session = Depends(get_db))
 def listar_barbeiros(db: Session = Depends(get_db)):
     return crud.listar_barbeiros(db)
 
+@app.post("/barbeiros", response_model=schemas.BarbeiroResponse)
+def criar_barbeiro(barbeiro: schemas.BarbeiroCreate, db: Session = Depends(get_db)):
+    return crud.criar_barbeiro(db, barbeiro)
+
 
 # --------- AGENDAMENTOS ---------
 

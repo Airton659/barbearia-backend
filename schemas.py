@@ -40,6 +40,13 @@ class BarbeiroResponse(BaseModel):
 
     class Config:
         orm_mode = True
+    
+class BarbeiroCreate(BaseModel):
+    nome: str = Field(..., min_length=2, max_length=100, description="Nome do barbeiro", example="Carlos")
+    especialidades: Optional[str] = Field(None, max_length=200, description="Especialidades do barbeiro", example="Corte, Barba, Sobrancelha")
+    foto: Optional[str] = Field(None, description="URL da foto", example="https://cdn.com/foto.jpg")
+    ativo: bool = Field(default=True, description="Define se o barbeiro está ativo")
+
 
 
 # ---------- AGENDAMENTO ----------
