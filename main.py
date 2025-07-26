@@ -1,9 +1,11 @@
+# barbearia-backend/main.py
+
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError
 import models, schemas, crud
 import uuid
-import time # Importar a biblioteca time
+import time
 from auth import criar_token, get_current_user
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse
@@ -12,31 +14,25 @@ from database import get_db, engine
 
 app = FastAPI()
 
-# --- ALTERAÇÃO AQUI ---
-# Função de startup modificada para ser mais resiliente
 @app.on_event("startup")
 def startup():
     max_retries = 5
-    retry_delay = 4  # segundos
+    retry_delay = 4
     for attempt in range(max_retries):
         try:
-            # Tenta estabelecer uma conexão para verificar se o DB está pronto
             with engine.connect() as connection:
                 print("Conexão com o banco de dados bem-sucedida!")
-                # Se a conexão funcionar, cria as tabelas e sai do loop
                 models.Base.metadata.create_all(bind=engine)
                 print("Tabelas criadas com sucesso.")
                 break
         except OperationalError as e:
-            print(f"Tentativa {attempt + 1} de {max_retries} falhou: O banco de dados não está pronto.")
-            print(f"Erro: {e}")
+            print(f"Tentativa {attempt + 1} de {max_retries} falhou: {e}")
             if attempt < max_retries - 1:
                 print(f"Tentando novamente em {retry_delay} segundos...")
                 time.sleep(retry_delay)
             else:
-                print("Número máximo de tentativas atingido. A aplicação pode não funcionar corretamente.")
-                # Opcional: Você pode querer que a aplicação pare aqui se não puder se conectar
-                # raise e 
+                print("Número máximo de tentativas atingido. A aplicação pode não funcionar.")
+                raise e
 
 @app.get("/")
 def root():
@@ -71,22 +67,17 @@ def get_me(current_user: models.Usuario = Depends(get_current_user)):
 
 # --------- BARBEIROS ---------
 
-@app.get("/barbeiros", response_model=list[schemas.BarbeiroResponse])
+@app.get("/barbeiros", response_model=List[schemas.BarbeiroResponse])
 def listar_barbeiros(db: Session = Depends(get_db)):
-    barbeiros_from_db = crud.listar_barbeiros(db)
-    
-    response = []
-    for barbeiro in barbeiros_from_db:
-        if barbeiro.usuario:
-            response.append(
-                schemas.BarbeiroResponse.from_orm(barbeiro)
-            )
-    return response
+    return crud.listar_barbeiros(db)
 
 @app.post("/barbeiros", response_model=schemas.BarbeiroResponse)
 def criar_barbeiro(barbeiro: schemas.BarbeiroCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
-    novo_barbeiro = crud.criar_barbeiro(db=db, barbeiro=barbeiro, usuario_id=current_user.id)
-    return schemas.BarbeiroResponse.from_orm(novo_barbeiro)
+    # Verifica se o usuário já é um barbeiro
+    db_barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
+    if db_barbeiro:
+        raise HTTPException(status_code=400, detail="Este usuário já é um barbeiro.")
+    return crud.criar_barbeiro(db=db, barbeiro=barbeiro, usuario_id=current_user.id)
 
 
 # --------- AGENDAMENTOS ---------
@@ -95,7 +86,7 @@ def criar_barbeiro(barbeiro: schemas.BarbeiroCreate, db: Session = Depends(get_d
 def agendar(agendamento: schemas.AgendamentoCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
     return crud.criar_agendamento(db, agendamento, usuario_id=current_user.id)
 
-@app.get("/agendamentos", response_model=list[schemas.AgendamentoResponse])
+@app.get("/agendamentos", response_model=List[schemas.AgendamentoResponse])
 def listar_agendamentos(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
     return crud.listar_agendamentos_por_usuario(db, current_user.id)
 
@@ -109,7 +100,7 @@ def criar_postagem(postagem: schemas.PostagemCreate, db: Session = Depends(get_d
         raise HTTPException(status_code=403, detail="Apenas barbeiros podem criar postagens")
     return crud.criar_postagem(db, postagem, barbeiro_id=barbeiro.id)
 
-@app.get("/feed", response_model=list[schemas.PostagemResponse])
+@app.get("/feed", response_model=List[schemas.PostagemResponse])
 def listar_feed(db: Session = Depends(get_db), limit: int = 10, offset: int = 0):
     return crud.listar_feed(db, limit=limit, offset=offset)
 
@@ -119,6 +110,9 @@ def listar_feed(db: Session = Depends(get_db), limit: int = 10, offset: int = 0)
 @app.post("/postagens/{postagem_id}/curtir")
 def curtir_postagem(postagem_id: uuid.UUID, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
     resultado = crud.toggle_curtida(db, current_user.id, postagem_id)
+    # Se a postagem não existia, o crud retorna None.
+    if resultado is None and crud.buscar_postagem_por_id(db, postagem_id) is None:
+        raise HTTPException(status_code=404, detail="Postagem não encontrada")
     return {"curtida": bool(resultado)}
 
 
@@ -128,7 +122,7 @@ def curtir_postagem(postagem_id: uuid.UUID, db: Session = Depends(get_db), curre
 def comentar(comentario: schemas.ComentarioCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
     return crud.criar_comentario(db, comentario, usuario_id=current_user.id)
 
-@app.get("/comentarios/{postagem_id}", response_model=list[schemas.ComentarioResponse])
+@app.get("/comentarios/{postagem_id}", response_model=List[schemas.ComentarioResponse])
 def listar_comentarios(postagem_id: uuid.UUID, db: Session = Depends(get_db)):
     return crud.listar_comentarios(db, postagem_id)
 
@@ -139,7 +133,7 @@ def listar_comentarios(postagem_id: uuid.UUID, db: Session = Depends(get_db)):
 def avaliar(avaliacao: schemas.AvaliacaoCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
     return crud.criar_avaliacao(db, avaliacao, usuario_id=current_user.id)
 
-@app.get("/avaliacoes/{barbeiro_id}", response_model=list[schemas.AvaliacaoResponse])
+@app.get("/avaliacoes/{barbeiro_id}", response_model=List[schemas.AvaliacaoResponse])
 def listar_avaliacoes(barbeiro_id: uuid.UUID, db: Session = Depends(get_db)):
     return crud.listar_avaliacoes_barbeiro(db, barbeiro_id)
 
@@ -158,14 +152,13 @@ def perfil_barbeiro(barbeiro_id: uuid.UUID, db: Session = Depends(get_db)):
 @app.get("/me/barbeiro", response_model=schemas.BarbeiroResponse)
 def get_me_barbeiro(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
-    if not barbeiro or not barbeiro.usuario:
+    if not barbeiro:
         raise HTTPException(status_code=404, detail="Barbeiro não encontrado para o usuário logado")
-    
-    return schemas.BarbeiroResponse.from_orm(barbeiro)
+    return barbeiro
 
 # --------- AGENDAMENTOS DO BARBEIRO ---------
 
-@app.get("/me/agendamentos", response_model=list[schemas.AgendamentoResponse])
+@app.get("/me/agendamentos", response_model=List[schemas.AgendamentoResponse])
 def listar_agendamentos_do_barbeiro(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if not barbeiro:
@@ -181,18 +174,14 @@ IMGBB_UPLOAD_URL = "https://api.imgbb.com/1/upload"
 @app.post("/upload_foto")
 async def upload_foto(file: UploadFile = File(...)):
     contents = await file.read()
-
     async with httpx.AsyncClient() as client:
         response = await client.post(
             IMGBB_UPLOAD_URL,
             params={"key": IMGBB_API_KEY},
             files={"image": contents}
         )
-
     if response.status_code != 200:
         raise HTTPException(status_code=500, detail="Erro ao fazer upload da imagem")
-
     data = response.json()
     url = data["data"]["url"]
-
     return JSONResponse(content={"url": url})
