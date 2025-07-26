@@ -43,11 +43,15 @@ class BarbeiroResponse(BaseModel):
     class Config:
         from_attributes = True
 
-# ALTERAÇÃO: 'nome' foi removido. Um barbeiro é um usuário, ele não tem um nome separado.
 class BarbeiroCreate(BaseModel):
     especialidades: Optional[str] = Field(None, max_length=200, description="Especialidades do barbeiro", example="Corte, Barba, Sobrancelha")
     foto: Optional[str] = Field(None, description="URL da foto", example="https://cdn.com/foto.jpg")
     ativo: bool = Field(default=True, description="Define se o barbeiro está ativo")
+
+# --- ALTERAÇÃO AQUI ---
+# Novo schema para a atualização da foto do perfil do barbeiro
+class BarbeiroUpdateFoto(BaseModel):
+    foto_url: str = Field(..., description="Nova URL da foto do barbeiro")
 
 
 # ---------- AGENDAMENTO ----------
