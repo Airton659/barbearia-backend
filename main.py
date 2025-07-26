@@ -3,8 +3,7 @@
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError
-# --- ALTERAÇÃO AQUI ---
-from typing import List # Importação que estava faltando
+from typing import List, Optional # Adicionado Optional para o filtro
 import models, schemas, crud
 import uuid
 import time
@@ -69,9 +68,11 @@ def get_me(current_user: models.Usuario = Depends(get_current_user)):
 
 # --------- BARBEIROS ---------
 
+# --- ALTERAÇÃO AQUI ---
+# Adicionado o parâmetro de query opcional 'especialidade'
 @app.get("/barbeiros", response_model=List[schemas.BarbeiroResponse])
-def listar_barbeiros(db: Session = Depends(get_db)):
-    return crud.listar_barbeiros(db)
+def listar_barbeiros(db: Session = Depends(get_db), especialidade: Optional[str] = None):
+    return crud.listar_barbeiros(db, especialidade=especialidade)
 
 @app.post("/barbeiros", response_model=schemas.BarbeiroResponse)
 def criar_barbeiro(barbeiro: schemas.BarbeiroCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
