@@ -1,9 +1,11 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 import models, database, schemas, crud
-import uuid
+from uuid import uuid4
 from auth import criar_token, get_current_user
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.responses import JSONResponse
+import httpx
 
 app = FastAPI()
 
@@ -105,3 +107,28 @@ def listar_avaliacoes(barbeiro_id: uuid.UUID, db: Session = Depends(get_db)):
 @app.get("/perfil_barbeiro/{barbeiro_id}")
 def perfil_barbeiro(barbeiro_id: uuid.UUID, db: Session = Depends(get_db)):
     return crud.obter_perfil_barbeiro(db, barbeiro_id)
+
+
+# --------- UPLOAD DE FOTOS VIA ImgBB ---------
+
+IMGBB_API_KEY = "f75fe38ca523aab85bf5842130ccd27b"
+IMGBB_UPLOAD_URL = "https://api.imgbb.com/1/upload"
+
+@app.post("/upload_foto")
+async def upload_foto(file: UploadFile = File(...)):
+    contents = await file.read()
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            IMGBB_UPLOAD_URL,
+            params={"key": IMGBB_API_KEY},
+            files={"image": contents}
+        )
+
+    if response.status_code != 200:
+        raise HTTPException(status_code=500, detail="Erro ao fazer upload da imagem")
+
+    data = response.json()
+    url = data["data"]["url"]
+
+    return JSONResponse(content={"url": url})
