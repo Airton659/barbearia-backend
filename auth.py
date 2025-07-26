@@ -4,9 +4,11 @@ from jose import JWTError, jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
-import crud, models, database, schemas
+import crud, models, schemas
 import os
 from dotenv import load_dotenv
+# Alteração 1: Importar a função get_db do módulo de banco de dados
+from database import get_db
 
 load_dotenv()
 
@@ -42,9 +44,17 @@ def verificar_token(token: str):
 
 
 # ---------- Dependência ----------
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(database.SessionLocal)) -> models.Usuario:
+# Alteração 2: Corrigido para usar a dependência get_db centralizada
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> models.Usuario:
     usuario_id = verificar_token(token)
-    usuario = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
+    # Tenta converter o usuario_id para UUID para fazer a busca correta
+    try:
+        from uuid import UUID
+        uid = UUID(usuario_id)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="ID de usuário inválido no token")
+    
+    usuario = db.query(models.Usuario).filter(models.Usuario.id == uid).first()
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
     return usuario

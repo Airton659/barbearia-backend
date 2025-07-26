@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, and_
 import models, schemas
 from passlib.hash import bcrypt
@@ -35,13 +35,16 @@ def autenticar_usuario(db: Session, email: str, senha: str):
 
 # --------- BARBEIROS ---------
 
+# Alteração 1: Adicionado joinedload para otimizar a busca do nome do usuário
 def listar_barbeiros(db: Session):
-    return db.query(models.Barbeiro).filter(models.Barbeiro.ativo == True).all()
+    return db.query(models.Barbeiro).options(joinedload(models.Barbeiro.usuario)).filter(models.Barbeiro.ativo == True).all()
 
-def criar_barbeiro(db: Session, barbeiro: schemas.BarbeiroCreate):
+# Alteração 2: A função agora recebe o usuario_id para associar corretamente
+def criar_barbeiro(db: Session, barbeiro: schemas.BarbeiroCreate, usuario_id: uuid.UUID):
     novo_barbeiro = models.Barbeiro(
         id=uuid.uuid4(),
-        nome=barbeiro.nome,
+        usuario_id=usuario_id,  # Associa o ID do usuário
+        # O campo 'nome' foi removido pois não existe no modelo Barbeiro
         especialidades=barbeiro.especialidades,
         foto=barbeiro.foto,
         ativo=barbeiro.ativo
@@ -51,16 +54,18 @@ def criar_barbeiro(db: Session, barbeiro: schemas.BarbeiroCreate):
     db.refresh(novo_barbeiro)
     return novo_barbeiro
 
+# Alteração 3: Corrigido o filtro para buscar por 'usuario_id'
 def buscar_barbeiro_por_usuario_id(db: Session, usuario_id: uuid.UUID):
-    return db.query(models.Barbeiro).filter(models.Barbeiro.id == usuario_id).first()
+    return db.query(models.Barbeiro).filter(models.Barbeiro.usuario_id == usuario_id).first()
 
 
 # --------- AGENDAMENTOS ---------
 
-def criar_agendamento(db: Session, agendamento: schemas.AgendamentoCreate):
+# Alteração 4: Função recebe usuario_id para segurança
+def criar_agendamento(db: Session, agendamento: schemas.AgendamentoCreate, usuario_id: uuid.UUID):
     novo_agendamento = models.Agendamento(
         id=uuid.uuid4(),
-        usuario_id=agendamento.usuario_id,
+        usuario_id=usuario_id, # Usa o ID do usuário logado
         barbeiro_id=agendamento.barbeiro_id,
         data_hora=agendamento.data_hora
     )
@@ -79,10 +84,11 @@ def listar_agendamentos_por_barbeiro(db: Session, barbeiro_id: uuid.UUID):
 
 # --------- POSTAGENS ---------
 
-def criar_postagem(db: Session, postagem: schemas.PostagemCreate):
+# Alteração 5: Função recebe barbeiro_id para segurança
+def criar_postagem(db: Session, postagem: schemas.PostagemCreate, barbeiro_id: uuid.UUID):
     nova_postagem = models.Postagem(
         id=uuid.uuid4(),
-        barbeiro_id=postagem.barbeiro_id,
+        barbeiro_id=barbeiro_id, # Usa o ID do barbeiro logado
         titulo=postagem.titulo,
         descricao=postagem.descricao,
         foto_url=postagem.foto_url,
@@ -135,10 +141,11 @@ def toggle_curtida(db: Session, usuario_id: uuid.UUID, postagem_id: uuid.UUID):
 
 # --------- COMENTÁRIOS ---------
 
-def criar_comentario(db: Session, comentario: schemas.ComentarioCreate):
+# Alteração 6: Função recebe usuario_id para segurança
+def criar_comentario(db: Session, comentario: schemas.ComentarioCreate, usuario_id: uuid.UUID):
     novo_comentario = models.Comentario(
         id=uuid.uuid4(),
-        usuario_id=comentario.usuario_id,
+        usuario_id=usuario_id, # Usa o ID do usuário logado
         postagem_id=comentario.postagem_id,
         texto=comentario.texto,
         data=datetime.utcnow()
@@ -157,10 +164,11 @@ def listar_comentarios(db: Session, postagem_id: uuid.UUID):
 
 # --------- AVALIAÇÕES ---------
 
-def criar_avaliacao(db: Session, avaliacao: schemas.AvaliacaoCreate):
+# Alteração 7: Função recebe usuario_id para segurança
+def criar_avaliacao(db: Session, avaliacao: schemas.AvaliacaoCreate, usuario_id: uuid.UUID):
     nova = models.Avaliacao(
         id=uuid.uuid4(),
-        usuario_id=avaliacao.usuario_id,
+        usuario_id=usuario_id, # Usa o ID do usuário logado
         barbeiro_id=avaliacao.barbeiro_id,
         nota=avaliacao.nota,
         comentario=avaliacao.comentario,
@@ -181,11 +189,21 @@ def listar_avaliacoes_barbeiro(db: Session, barbeiro_id: uuid.UUID):
 # --------- PERFIL DO BARBEIRO ---------
 
 def obter_perfil_barbeiro(db: Session, barbeiro_id: uuid.UUID):
-    barbeiro = db.query(models.Barbeiro).filter(models.Barbeiro.id == barbeiro_id).first()
+    # Usando o joinedload para já carregar o nome do usuário junto
+    barbeiro = db.query(models.Barbeiro).options(joinedload(models.Barbeiro.usuario)).filter(models.Barbeiro.id == barbeiro_id).first()
+    if not barbeiro:
+        return {} # Retorna um dicionário vazio se o barbeiro não for encontrado
+    
     avaliacoes = listar_avaliacoes_barbeiro(db, barbeiro_id)
     postagens = db.query(models.Postagem).filter(models.Postagem.barbeiro_id == barbeiro_id).all()
+
+    # Monta a resposta do perfil
+    perfil_barbeiro = schemas.BarbeiroResponse.from_orm(barbeiro)
+    # Atribui o nome do usuário manualmente, caso o from_orm não pegue (depende da config)
+    perfil_barbeiro.nome = barbeiro.usuario.nome
+    
     return {
-        "barbeiro": barbeiro,
+        "barbeiro": perfil_barbeiro,
         "avaliacoes": avaliacoes,
         "postagens": postagens
     }

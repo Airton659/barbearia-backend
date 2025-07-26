@@ -1,24 +1,21 @@
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
-import models, database, schemas, crud
+import models, schemas, crud
 import uuid
 from auth import criar_token, get_current_user
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse
 import httpx
+# Alteração 1: Importar get_db e engine do local centralizado
+from database import get_db, engine
 
 app = FastAPI()
 
 @app.on_event("startup")
 def startup():
-    models.Base.metadata.create_all(bind=database.engine)
+    models.Base.metadata.create_all(bind=engine)
 
-def get_db():
-    db = database.SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+# Alteração 2: A função get_db foi removida daqui
 
 @app.get("/")
 def root():
@@ -53,21 +50,52 @@ def get_me(current_user: models.Usuario = Depends(get_current_user)):
 
 # --------- BARBEIROS ---------
 
+# Alteração 3: Corrigido para montar a resposta com o nome do usuário
 @app.get("/barbeiros", response_model=list[schemas.BarbeiroResponse])
 def listar_barbeiros(db: Session = Depends(get_db)):
-    return crud.listar_barbeiros(db)
+    barbeiros_from_db = crud.listar_barbeiros(db)
+    
+    # Monta a resposta manualmente para incluir o nome do usuário associado
+    response = []
+    for barbeiro in barbeiros_from_db:
+        # Garante que o barbeiro tem um usuário associado antes de tentar acessá-lo
+        if barbeiro.usuario:
+            response.append(
+                schemas.BarbeiroResponse(
+                    id=barbeiro.id,
+                    nome=barbeiro.usuario.nome, # Pega o nome do usuário
+                    especialidades=barbeiro.especialidades,
+                    foto=barbeiro.foto,
+                    ativo=barbeiro.ativo,
+                )
+            )
+    return response
 
+# Alteração 4: Corrigido para associar o barbeiro ao usuário logado
 @app.post("/barbeiros", response_model=schemas.BarbeiroResponse)
-def criar_barbeiro(barbeiro: schemas.BarbeiroCreate, db: Session = Depends(get_db)):
-    return crud.criar_barbeiro(db, barbeiro)
+def criar_barbeiro(barbeiro: schemas.BarbeiroCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+    # A lógica de criação será ajustada no crud.py para receber o usuario_id
+    novo_barbeiro = crud.criar_barbeiro(db=db, barbeiro=barbeiro, usuario_id=current_user.id)
+    if not novo_barbeiro.usuario:
+        # Se a relação não foi carregada, busca novamente para garantir a resposta completa
+        db.refresh(novo_barbeiro, ["usuario"])
+
+    return schemas.BarbeiroResponse(
+        id=novo_barbeiro.id,
+        nome=novo_barbeiro.usuario.nome,
+        especialidades=novo_barbeiro.especialidades,
+        foto=novo_barbeiro.foto,
+        ativo=novo_barbeiro.ativo,
+    )
 
 
 # --------- AGENDAMENTOS ---------
 
 @app.post("/agendamentos", response_model=schemas.AgendamentoResponse)
 def agendar(agendamento: schemas.AgendamentoCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
-    agendamento.usuario_id = current_user.id
-    return crud.criar_agendamento(db, agendamento)
+    # Esta linha está incorreta, pois o schema não tem `usuario_id`
+    # A atribuição será feita dentro da função crud
+    return crud.criar_agendamento(db, agendamento, usuario_id=current_user.id)
 
 @app.get("/agendamentos", response_model=list[schemas.AgendamentoResponse])
 def listar_agendamentos(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
@@ -78,7 +106,11 @@ def listar_agendamentos(db: Session = Depends(get_db), current_user: models.Usua
 
 @app.post("/postagens", response_model=schemas.PostagemResponse)
 def criar_postagem(postagem: schemas.PostagemCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
-    return crud.criar_postagem(db, postagem)
+    # Precisamos garantir que o usuário logado é um barbeiro
+    barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
+    if not barbeiro:
+        raise HTTPException(status_code=403, detail="Apenas barbeiros podem criar postagens")
+    return crud.criar_postagem(db, postagem, barbeiro_id=barbeiro.id)
 
 @app.get("/feed", response_model=list[schemas.PostagemResponse])
 def listar_feed(db: Session = Depends(get_db), limit: int = 10, offset: int = 0):
@@ -97,8 +129,8 @@ def curtir_postagem(postagem_id: uuid.UUID, db: Session = Depends(get_db), curre
 
 @app.post("/comentarios", response_model=schemas.ComentarioResponse)
 def comentar(comentario: schemas.ComentarioCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
-    comentario.usuario_id = current_user.id
-    return crud.criar_comentario(db, comentario)
+    # A atribuição do usuario_id será feita na função crud
+    return crud.criar_comentario(db, comentario, usuario_id=current_user.id)
 
 @app.get("/comentarios/{postagem_id}", response_model=list[schemas.ComentarioResponse])
 def listar_comentarios(postagem_id: uuid.UUID, db: Session = Depends(get_db)):
@@ -109,8 +141,8 @@ def listar_comentarios(postagem_id: uuid.UUID, db: Session = Depends(get_db)):
 
 @app.post("/avaliacoes", response_model=schemas.AvaliacaoResponse)
 def avaliar(avaliacao: schemas.AvaliacaoCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
-    avaliacao.usuario_id = current_user.id
-    return crud.criar_avaliacao(db, avaliacao)
+    # A atribuição do usuario_id será feita na função crud
+    return crud.criar_avaliacao(db, avaliacao, usuario_id=current_user.id)
 
 @app.get("/avaliacoes/{barbeiro_id}", response_model=list[schemas.AvaliacaoResponse])
 def listar_avaliacoes(barbeiro_id: uuid.UUID, db: Session = Depends(get_db)):
@@ -119,18 +151,28 @@ def listar_avaliacoes(barbeiro_id: uuid.UUID, db: Session = Depends(get_db)):
 
 # --------- PERFIL DO BARBEIRO ---------
 
-@app.get("/perfil_barbeiro/{barbeiro_id}")
+@app.get("/perfil_barbeiro/{barbeiro_id}", response_model=schemas.PerfilBarbeiroResponse)
 def perfil_barbeiro(barbeiro_id: uuid.UUID, db: Session = Depends(get_db)):
-    return crud.obter_perfil_barbeiro(db, barbeiro_id)
+    perfil = crud.obter_perfil_barbeiro(db, barbeiro_id)
+    if not perfil or not perfil.get("barbeiro"):
+        raise HTTPException(status_code=404, detail="Perfil do barbeiro não encontrado")
+    return perfil
 
 # --------- DADOS DO BARBEIRO LOGADO ---------
 
 @app.get("/me/barbeiro", response_model=schemas.BarbeiroResponse)
 def get_me_barbeiro(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
-    if not barbeiro:
-        raise HTTPException(status_code=404, detail="Barbeiro não encontrado")
-    return barbeiro
+    if not barbeiro or not barbeiro.usuario:
+        raise HTTPException(status_code=404, detail="Barbeiro não encontrado para o usuário logado")
+    
+    return schemas.BarbeiroResponse(
+        id=barbeiro.id,
+        nome=barbeiro.usuario.nome,
+        especialidades=barbeiro.especialidades,
+        foto=barbeiro.foto,
+        ativo=barbeiro.ativo
+    )
 
 # --------- AGENDAMENTOS DO BARBEIRO ---------
 

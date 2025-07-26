@@ -1,4 +1,6 @@
 from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Integer
+# Alteração 1: Importar a hybrid_property
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import uuid
@@ -34,10 +36,16 @@ class Barbeiro(Base):
     foto = Column(String)
     ativo = Column(Boolean, default=True)
 
-    usuario = relationship("Usuario", back_populates="barbeiro")
+    usuario = relationship("Usuario", back_populates="barbeiro", lazy="joined")
     agendamentos = relationship("Agendamento", back_populates="barbeiro")
     postagens = relationship("Postagem", back_populates="barbeiro")
     avaliacoes = relationship("Avaliacao", back_populates="barbeiro")
+
+    # Alteração 2: Adicionada a hybrid_property
+    @hybrid_property
+    def nome(self):
+        """Retorna o nome do usuário associado ao barbeiro."""
+        return self.usuario.nome
 
 
 class Agendamento(Base):
