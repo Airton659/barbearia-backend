@@ -30,6 +30,15 @@ class TokenResponse(BaseModel):
     access_token: str = Field(..., description="Token JWT de acesso")
     token_type: str = Field(default="bearer", description="Tipo do token")
 
+# --- ALTERAÇÃO AQUI ---
+# Novos schemas para o fluxo de recuperação de senha
+class RecuperarSenhaRequest(BaseModel):
+    email: EmailStr = Field(..., description="Email do usuário para iniciar a recuperação de senha")
+
+class ResetarSenhaRequest(BaseModel):
+    token: str = Field(..., description="Token de reset recebido")
+    nova_senha: str = Field(..., min_length=6, max_length=100, description="Nova senha do usuário")
+
 
 # ---------- BARBEIRO ----------
 
@@ -48,8 +57,6 @@ class BarbeiroCreate(BaseModel):
     foto: Optional[str] = Field(None, description="URL da foto", example="https://cdn.com/foto.jpg")
     ativo: bool = Field(default=True, description="Define se o barbeiro está ativo")
 
-# --- ALTERAÇÃO AQUI ---
-# Novo schema para a atualização da foto do perfil do barbeiro
 class BarbeiroUpdateFoto(BaseModel):
     foto_url: str = Field(..., description="Nova URL da foto do barbeiro")
 
