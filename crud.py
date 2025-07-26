@@ -30,14 +30,10 @@ def buscar_usuario_por_email(db: Session, email: str):
 
 # --------- BARBEIROS ---------
 
-# --- ALTERAÇÃO AQUI ---
-# A função agora aceita um parâmetro opcional 'especialidade'
 def listar_barbeiros(db: Session, especialidade: Optional[str] = None):
     query = db.query(models.Barbeiro).options(joinedload(models.Barbeiro.usuario)).filter(models.Barbeiro.ativo == True)
     
-    # Se o parâmetro 'especialidade' for fornecido, adiciona um filtro à consulta
     if especialidade:
-        # O 'ilike' faz uma busca case-insensitive que contém o texto
         query = query.filter(models.Barbeiro.especialidades.ilike(f"%{especialidade}%"))
         
     return query.all()
@@ -57,6 +53,14 @@ def criar_barbeiro(db: Session, barbeiro: schemas.BarbeiroCreate, usuario_id: uu
 
 def buscar_barbeiro_por_usuario_id(db: Session, usuario_id: uuid.UUID):
     return db.query(models.Barbeiro).options(joinedload(models.Barbeiro.usuario)).filter(models.Barbeiro.usuario_id == usuario_id).first()
+
+# --- ALTERAÇÃO AQUI ---
+# Nova função para atualizar a foto do barbeiro
+def atualizar_foto_barbeiro(db: Session, barbeiro: models.Barbeiro, foto_url: str):
+    barbeiro.foto = foto_url
+    db.commit()
+    db.refresh(barbeiro)
+    return barbeiro
 
 
 # --------- AGENDAMENTOS ---------
