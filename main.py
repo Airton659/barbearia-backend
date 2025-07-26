@@ -1,21 +1,42 @@
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError
 import models, schemas, crud
 import uuid
+import time # Importar a biblioteca time
 from auth import criar_token, get_current_user
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse
 import httpx
-# Alteração 1: Importar get_db e engine do local centralizado
 from database import get_db, engine
 
 app = FastAPI()
 
+# --- ALTERAÇÃO AQUI ---
+# Função de startup modificada para ser mais resiliente
 @app.on_event("startup")
 def startup():
-    models.Base.metadata.create_all(bind=engine)
-
-# Alteração 2: A função get_db foi removida daqui
+    max_retries = 5
+    retry_delay = 4  # segundos
+    for attempt in range(max_retries):
+        try:
+            # Tenta estabelecer uma conexão para verificar se o DB está pronto
+            with engine.connect() as connection:
+                print("Conexão com o banco de dados bem-sucedida!")
+                # Se a conexão funcionar, cria as tabelas e sai do loop
+                models.Base.metadata.create_all(bind=engine)
+                print("Tabelas criadas com sucesso.")
+                break
+        except OperationalError as e:
+            print(f"Tentativa {attempt + 1} de {max_retries} falhou: O banco de dados não está pronto.")
+            print(f"Erro: {e}")
+            if attempt < max_retries - 1:
+                print(f"Tentando novamente em {retry_delay} segundos...")
+                time.sleep(retry_delay)
+            else:
+                print("Número máximo de tentativas atingido. A aplicação pode não funcionar corretamente.")
+                # Opcional: Você pode querer que a aplicação pare aqui se não puder se conectar
+                # raise e 
 
 @app.get("/")
 def root():
@@ -50,51 +71,28 @@ def get_me(current_user: models.Usuario = Depends(get_current_user)):
 
 # --------- BARBEIROS ---------
 
-# Alteração 3: Corrigido para montar a resposta com o nome do usuário
 @app.get("/barbeiros", response_model=list[schemas.BarbeiroResponse])
 def listar_barbeiros(db: Session = Depends(get_db)):
     barbeiros_from_db = crud.listar_barbeiros(db)
     
-    # Monta a resposta manualmente para incluir o nome do usuário associado
     response = []
     for barbeiro in barbeiros_from_db:
-        # Garante que o barbeiro tem um usuário associado antes de tentar acessá-lo
         if barbeiro.usuario:
             response.append(
-                schemas.BarbeiroResponse(
-                    id=barbeiro.id,
-                    nome=barbeiro.usuario.nome, # Pega o nome do usuário
-                    especialidades=barbeiro.especialidades,
-                    foto=barbeiro.foto,
-                    ativo=barbeiro.ativo,
-                )
+                schemas.BarbeiroResponse.from_orm(barbeiro)
             )
     return response
 
-# Alteração 4: Corrigido para associar o barbeiro ao usuário logado
 @app.post("/barbeiros", response_model=schemas.BarbeiroResponse)
 def criar_barbeiro(barbeiro: schemas.BarbeiroCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
-    # A lógica de criação será ajustada no crud.py para receber o usuario_id
     novo_barbeiro = crud.criar_barbeiro(db=db, barbeiro=barbeiro, usuario_id=current_user.id)
-    if not novo_barbeiro.usuario:
-        # Se a relação não foi carregada, busca novamente para garantir a resposta completa
-        db.refresh(novo_barbeiro, ["usuario"])
-
-    return schemas.BarbeiroResponse(
-        id=novo_barbeiro.id,
-        nome=novo_barbeiro.usuario.nome,
-        especialidades=novo_barbeiro.especialidades,
-        foto=novo_barbeiro.foto,
-        ativo=novo_barbeiro.ativo,
-    )
+    return schemas.BarbeiroResponse.from_orm(novo_barbeiro)
 
 
 # --------- AGENDAMENTOS ---------
 
 @app.post("/agendamentos", response_model=schemas.AgendamentoResponse)
 def agendar(agendamento: schemas.AgendamentoCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
-    # Esta linha está incorreta, pois o schema não tem `usuario_id`
-    # A atribuição será feita dentro da função crud
     return crud.criar_agendamento(db, agendamento, usuario_id=current_user.id)
 
 @app.get("/agendamentos", response_model=list[schemas.AgendamentoResponse])
@@ -106,7 +104,6 @@ def listar_agendamentos(db: Session = Depends(get_db), current_user: models.Usua
 
 @app.post("/postagens", response_model=schemas.PostagemResponse)
 def criar_postagem(postagem: schemas.PostagemCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
-    # Precisamos garantir que o usuário logado é um barbeiro
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if not barbeiro:
         raise HTTPException(status_code=403, detail="Apenas barbeiros podem criar postagens")
@@ -129,7 +126,6 @@ def curtir_postagem(postagem_id: uuid.UUID, db: Session = Depends(get_db), curre
 
 @app.post("/comentarios", response_model=schemas.ComentarioResponse)
 def comentar(comentario: schemas.ComentarioCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
-    # A atribuição do usuario_id será feita na função crud
     return crud.criar_comentario(db, comentario, usuario_id=current_user.id)
 
 @app.get("/comentarios/{postagem_id}", response_model=list[schemas.ComentarioResponse])
@@ -141,7 +137,6 @@ def listar_comentarios(postagem_id: uuid.UUID, db: Session = Depends(get_db)):
 
 @app.post("/avaliacoes", response_model=schemas.AvaliacaoResponse)
 def avaliar(avaliacao: schemas.AvaliacaoCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
-    # A atribuição do usuario_id será feita na função crud
     return crud.criar_avaliacao(db, avaliacao, usuario_id=current_user.id)
 
 @app.get("/avaliacoes/{barbeiro_id}", response_model=list[schemas.AvaliacaoResponse])
@@ -166,13 +161,7 @@ def get_me_barbeiro(db: Session = Depends(get_db), current_user: models.Usuario 
     if not barbeiro or not barbeiro.usuario:
         raise HTTPException(status_code=404, detail="Barbeiro não encontrado para o usuário logado")
     
-    return schemas.BarbeiroResponse(
-        id=barbeiro.id,
-        nome=barbeiro.usuario.nome,
-        especialidades=barbeiro.especialidades,
-        foto=barbeiro.foto,
-        ativo=barbeiro.ativo
-    )
+    return schemas.BarbeiroResponse.from_orm(barbeiro)
 
 # --------- AGENDAMENTOS DO BARBEIRO ---------
 
