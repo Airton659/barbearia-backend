@@ -68,8 +68,6 @@ def get_me(current_user: models.Usuario = Depends(get_current_user)):
 
 # --------- BARBEIROS ---------
 
-# --- ALTERAÇÃO AQUI ---
-# Adicionado o parâmetro de query opcional 'especialidade'
 @app.get("/barbeiros", response_model=List[schemas.BarbeiroResponse])
 def listar_barbeiros(db: Session = Depends(get_db), especialidade: Optional[str] = None):
     return crud.listar_barbeiros(db, especialidade=especialidade)
@@ -156,6 +154,21 @@ def get_me_barbeiro(db: Session = Depends(get_db), current_user: models.Usuario 
     if not barbeiro:
         raise HTTPException(status_code=404, detail="Barbeiro não encontrado para o usuário logado")
     return barbeiro
+
+# --- ALTERAÇÃO AQUI ---
+# Novo endpoint para o barbeiro logado atualizar sua foto de perfil
+@app.put("/me/barbeiro/foto", response_model=schemas.BarbeiroResponse)
+def update_barbeiro_foto(
+    foto_data: schemas.BarbeiroUpdateFoto, 
+    db: Session = Depends(get_db), 
+    current_user: models.Usuario = Depends(get_current_user)
+):
+    barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
+    if not barbeiro:
+        raise HTTPException(status_code=404, detail="Barbeiro não encontrado para o usuário logado")
+    
+    return crud.atualizar_foto_barbeiro(db, barbeiro, foto_url=foto_data.foto_url)
+
 
 # --------- AGENDAMENTOS DO BARBEIRO ---------
 
