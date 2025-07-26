@@ -35,16 +35,13 @@ def autenticar_usuario(db: Session, email: str, senha: str):
 
 # --------- BARBEIROS ---------
 
-# Alteração 1: Adicionado joinedload para otimizar a busca do nome do usuário
 def listar_barbeiros(db: Session):
     return db.query(models.Barbeiro).options(joinedload(models.Barbeiro.usuario)).filter(models.Barbeiro.ativo == True).all()
 
-# Alteração 2: A função agora recebe o usuario_id para associar corretamente
 def criar_barbeiro(db: Session, barbeiro: schemas.BarbeiroCreate, usuario_id: uuid.UUID):
     novo_barbeiro = models.Barbeiro(
         id=uuid.uuid4(),
-        usuario_id=usuario_id,  # Associa o ID do usuário
-        # O campo 'nome' foi removido pois não existe no modelo Barbeiro
+        usuario_id=usuario_id,
         especialidades=barbeiro.especialidades,
         foto=barbeiro.foto,
         ativo=barbeiro.ativo
@@ -54,18 +51,16 @@ def criar_barbeiro(db: Session, barbeiro: schemas.BarbeiroCreate, usuario_id: uu
     db.refresh(novo_barbeiro)
     return novo_barbeiro
 
-# Alteração 3: Corrigido o filtro para buscar por 'usuario_id'
 def buscar_barbeiro_por_usuario_id(db: Session, usuario_id: uuid.UUID):
     return db.query(models.Barbeiro).filter(models.Barbeiro.usuario_id == usuario_id).first()
 
 
 # --------- AGENDAMENTOS ---------
 
-# Alteração 4: Função recebe usuario_id para segurança
 def criar_agendamento(db: Session, agendamento: schemas.AgendamentoCreate, usuario_id: uuid.UUID):
     novo_agendamento = models.Agendamento(
         id=uuid.uuid4(),
-        usuario_id=usuario_id, # Usa o ID do usuário logado
+        usuario_id=usuario_id,
         barbeiro_id=agendamento.barbeiro_id,
         data_hora=agendamento.data_hora
     )
@@ -84,11 +79,10 @@ def listar_agendamentos_por_barbeiro(db: Session, barbeiro_id: uuid.UUID):
 
 # --------- POSTAGENS ---------
 
-# Alteração 5: Função recebe barbeiro_id para segurança
 def criar_postagem(db: Session, postagem: schemas.PostagemCreate, barbeiro_id: uuid.UUID):
     nova_postagem = models.Postagem(
         id=uuid.uuid4(),
-        barbeiro_id=barbeiro_id, # Usa o ID do barbeiro logado
+        barbeiro_id=barbeiro_id,
         titulo=postagem.titulo,
         descricao=postagem.descricao,
         foto_url=postagem.foto_url,
@@ -114,7 +108,15 @@ def buscar_postagem_por_id(db: Session, postagem_id: uuid.UUID):
 
 # --------- CURTIDAS ---------
 
+# Alteração: Adicionada verificação de existência da postagem
 def toggle_curtida(db: Session, usuario_id: uuid.UUID, postagem_id: uuid.UUID):
+    # Primeiro, verifica se a postagem realmente existe
+    postagem = buscar_postagem_por_id(db, postagem_id)
+    if not postagem:
+        # Se a postagem não existe, retorna None e não faz nada.
+        # Isso evita o erro de chave estrangeira.
+        return None
+
     curtida = db.query(models.Curtida).filter(
         and_(
             models.Curtida.usuario_id == usuario_id,
@@ -141,11 +143,10 @@ def toggle_curtida(db: Session, usuario_id: uuid.UUID, postagem_id: uuid.UUID):
 
 # --------- COMENTÁRIOS ---------
 
-# Alteração 6: Função recebe usuario_id para segurança
 def criar_comentario(db: Session, comentario: schemas.ComentarioCreate, usuario_id: uuid.UUID):
     novo_comentario = models.Comentario(
         id=uuid.uuid4(),
-        usuario_id=usuario_id, # Usa o ID do usuário logado
+        usuario_id=usuario_id,
         postagem_id=comentario.postagem_id,
         texto=comentario.texto,
         data=datetime.utcnow()
@@ -164,11 +165,10 @@ def listar_comentarios(db: Session, postagem_id: uuid.UUID):
 
 # --------- AVALIAÇÕES ---------
 
-# Alteração 7: Função recebe usuario_id para segurança
 def criar_avaliacao(db: Session, avaliacao: schemas.AvaliacaoCreate, usuario_id: uuid.UUID):
     nova = models.Avaliacao(
         id=uuid.uuid4(),
-        usuario_id=usuario_id, # Usa o ID do usuário logado
+        usuario_id=usuario_id,
         barbeiro_id=avaliacao.barbeiro_id,
         nota=avaliacao.nota,
         comentario=avaliacao.comentario,
@@ -189,17 +189,14 @@ def listar_avaliacoes_barbeiro(db: Session, barbeiro_id: uuid.UUID):
 # --------- PERFIL DO BARBEIRO ---------
 
 def obter_perfil_barbeiro(db: Session, barbeiro_id: uuid.UUID):
-    # Usando o joinedload para já carregar o nome do usuário junto
     barbeiro = db.query(models.Barbeiro).options(joinedload(models.Barbeiro.usuario)).filter(models.Barbeiro.id == barbeiro_id).first()
     if not barbeiro:
-        return {} # Retorna um dicionário vazio se o barbeiro não for encontrado
+        return {} 
     
     avaliacoes = listar_avaliacoes_barbeiro(db, barbeiro_id)
     postagens = db.query(models.Postagem).filter(models.Postagem.barbeiro_id == barbeiro_id).all()
 
-    # Monta a resposta do perfil
     perfil_barbeiro = schemas.BarbeiroResponse.from_orm(barbeiro)
-    # Atribui o nome do usuário manualmente, caso o from_orm não pegue (depende da config)
     perfil_barbeiro.nome = barbeiro.usuario.nome
     
     return {
