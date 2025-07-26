@@ -5,8 +5,9 @@ from sqlalchemy import func, and_
 import models, schemas
 from passlib.hash import bcrypt
 import uuid
-from datetime import datetime
-from typing import Optional # Adicionado para o filtro opcional
+from datetime import datetime, timedelta # Adicionado timedelta
+from typing import Optional
+import secrets # Adicionado para gerar tokens seguros
 
 # --------- USUÁRIOS ---------
 
@@ -26,6 +27,40 @@ def criar_usuario(db: Session, usuario: schemas.UsuarioCreate):
 
 def buscar_usuario_por_email(db: Session, email: str):
     return db.query(models.Usuario).filter(models.Usuario.email == email).first()
+
+# --- ALTERAÇÃO AQUI ---
+# Novas funções para o fluxo de recuperação de senha
+
+def gerar_token_recuperacao(db: Session, usuario: models.Usuario):
+    """Gera e salva um token de recuperação de senha para um usuário."""
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.utcnow() + timedelta(hours=1) # O token expira em 1 hora
+    
+    usuario.reset_token = token
+    usuario.reset_token_expires = expires_at
+    
+    db.commit()
+    db.refresh(usuario)
+    return token
+
+def buscar_usuario_por_token_recuperacao(db: Session, token: str):
+    """Busca um usuário por um token de recuperação válido."""
+    return db.query(models.Usuario).filter(
+        models.Usuario.reset_token == token,
+        models.Usuario.reset_token_expires > datetime.utcnow()
+    ).first()
+
+def resetar_senha(db: Session, usuario: models.Usuario, nova_senha: str):
+    """Atualiza a senha do usuário e invalida o token de recuperação."""
+    nova_senha_hash = bcrypt.hash(nova_senha)
+    usuario.senha_hash = nova_senha_hash
+    
+    # Invalida o token para que não possa ser usado novamente
+    usuario.reset_token = None
+    usuario.reset_token_expires = None
+    
+    db.commit()
+    return usuario
 
 
 # --------- BARBEIROS ---------
@@ -54,8 +89,6 @@ def criar_barbeiro(db: Session, barbeiro: schemas.BarbeiroCreate, usuario_id: uu
 def buscar_barbeiro_por_usuario_id(db: Session, usuario_id: uuid.UUID):
     return db.query(models.Barbeiro).options(joinedload(models.Barbeiro.usuario)).filter(models.Barbeiro.usuario_id == usuario_id).first()
 
-# --- ALTERAÇÃO AQUI ---
-# Nova função para atualizar a foto do barbeiro
 def atualizar_foto_barbeiro(db: Session, barbeiro: models.Barbeiro, foto_url: str):
     barbeiro.foto = foto_url
     db.commit()
