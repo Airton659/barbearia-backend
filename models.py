@@ -17,6 +17,12 @@ class Usuario(Base):
     email = Column(String, unique=True, nullable=False)
     senha_hash = Column(String, nullable=False)
     tipo = Column(String, default="cliente")  # cliente ou admin
+    
+    # --- ALTERAÇÃO AQUI ---
+    # Novos campos para o fluxo de recuperação de senha
+    reset_token = Column(String, unique=True, nullable=True)
+    reset_token_expires = Column(DateTime, nullable=True)
+
 
     agendamentos = relationship("Agendamento", back_populates="usuario")
     curtidas = relationship("Curtida", back_populates="usuario")
