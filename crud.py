@@ -6,7 +6,7 @@ import models, schemas
 from passlib.hash import bcrypt
 import uuid
 from datetime import datetime
-
+from typing import Optional # Adicionado para o filtro opcional
 
 # --------- USUÁRIOS ---------
 
@@ -30,8 +30,17 @@ def buscar_usuario_por_email(db: Session, email: str):
 
 # --------- BARBEIROS ---------
 
-def listar_barbeiros(db: Session):
-    return db.query(models.Barbeiro).options(joinedload(models.Barbeiro.usuario)).filter(models.Barbeiro.ativo == True).all()
+# --- ALTERAÇÃO AQUI ---
+# A função agora aceita um parâmetro opcional 'especialidade'
+def listar_barbeiros(db: Session, especialidade: Optional[str] = None):
+    query = db.query(models.Barbeiro).options(joinedload(models.Barbeiro.usuario)).filter(models.Barbeiro.ativo == True)
+    
+    # Se o parâmetro 'especialidade' for fornecido, adiciona um filtro à consulta
+    if especialidade:
+        # O 'ilike' faz uma busca case-insensitive que contém o texto
+        query = query.filter(models.Barbeiro.especialidades.ilike(f"%{especialidade}%"))
+        
+    return query.all()
 
 def criar_barbeiro(db: Session, barbeiro: schemas.BarbeiroCreate, usuario_id: uuid.UUID):
     novo_barbeiro = models.Barbeiro(
