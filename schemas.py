@@ -1,3 +1,5 @@
+# barbearia-backend/schemas.py
+
 from pydantic import BaseModel, EmailStr, Field
 from uuid import UUID
 from datetime import datetime
@@ -22,7 +24,7 @@ class UsuarioResponse(BaseModel):
     tipo: str
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class TokenResponse(BaseModel):
     access_token: str = Field(..., description="Token JWT de acesso")
@@ -39,10 +41,10 @@ class BarbeiroResponse(BaseModel):
     ativo: bool
 
     class Config:
-        orm_mode = True
-    
+        from_attributes = True
+
+# ALTERAÇÃO: 'nome' foi removido. Um barbeiro é um usuário, ele não tem um nome separado.
 class BarbeiroCreate(BaseModel):
-    nome: str = Field(..., min_length=2, max_length=100, description="Nome do barbeiro", example="Carlos")
     especialidades: Optional[str] = Field(None, max_length=200, description="Especialidades do barbeiro", example="Corte, Barba, Sobrancelha")
     foto: Optional[str] = Field(None, description="URL da foto", example="https://cdn.com/foto.jpg")
     ativo: bool = Field(default=True, description="Define se o barbeiro está ativo")
@@ -62,7 +64,7 @@ class AgendamentoResponse(BaseModel):
     status: str
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # ---------- POSTAGEM ----------
@@ -83,7 +85,7 @@ class PostagemResponse(BaseModel):
     publicada: bool
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # ---------- CURTIDA ----------
@@ -95,7 +97,7 @@ class CurtidaResponse(BaseModel):
     data: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # ---------- COMENTÁRIO ----------
@@ -112,7 +114,7 @@ class ComentarioResponse(BaseModel):
     data: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # ---------- AVALIAÇÃO ----------
@@ -131,7 +133,7 @@ class AvaliacaoResponse(BaseModel):
     data: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # ---------- PERFIL DO BARBEIRO ----------
@@ -142,4 +144,4 @@ class PerfilBarbeiroResponse(BaseModel):
     postagens: List[PostagemResponse]
 
     class Config:
-        orm_mode = True
+        from_attributes = True
