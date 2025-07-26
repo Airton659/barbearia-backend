@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 import models, database, schemas, crud
+import uuid
 from uuid import uuid4
 from auth import criar_token, get_current_user
 from fastapi.security import OAuth2PasswordRequestForm
