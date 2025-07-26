@@ -26,6 +26,15 @@ def buscar_usuario_por_email(db: Session, email: str):
     return db.query(models.Usuario).filter(models.Usuario.email == email).first()
 
 
+def autenticar_usuario(db: Session, email: str, senha: str):
+    usuario = buscar_usuario_por_email(db, email)
+    if not usuario:
+        return None
+    if not bcrypt.verify(senha, usuario.senha_hash):
+        return None
+    return usuario
+
+
 # --------- BARBEIROS ---------
 
 def listar_barbeiros(db: Session):

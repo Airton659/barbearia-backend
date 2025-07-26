@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from uuid import UUID
 from datetime import datetime
 from typing import Optional, List
@@ -7,10 +7,13 @@ from typing import Optional, List
 # ---------- USUÁRIO ----------
 
 class UsuarioCreate(BaseModel):
-    nome: str
-    email: EmailStr
-    senha: str  # plaintext, depois faremos hash
+    nome: str = Field(..., min_length=2, max_length=50, description="Nome completo do usuário", example="João da Silva")
+    email: EmailStr = Field(..., description="Email do usuário", example="joao@email.com")
+    senha: str = Field(..., min_length=6, max_length=100, description="Senha do usuário (mínimo 6 caracteres)", example="senha123")
 
+class UsuarioLogin(BaseModel):
+    email: EmailStr = Field(..., description="Email do usuário para login", example="joao@email.com")
+    senha: str = Field(..., min_length=6, max_length=100, description="Senha do usuário", example="senha123")
 
 class UsuarioResponse(BaseModel):
     id: UUID
@@ -21,14 +24,18 @@ class UsuarioResponse(BaseModel):
     class Config:
         orm_mode = True
 
+class TokenResponse(BaseModel):
+    access_token: str = Field(..., description="Token JWT de acesso")
+    token_type: str = Field(default="bearer", description="Tipo do token")
+
 
 # ---------- BARBEIRO ----------
 
 class BarbeiroResponse(BaseModel):
     id: UUID
     nome: str
-    especialidades: Optional[str] = None
-    foto: Optional[str] = None
+    especialidades: Optional[str] = Field(None, description="Especialidades do barbeiro", example="Corte masculino, barba")
+    foto: Optional[str] = Field(None, description="URL da foto do barbeiro", example="https://cdn.com/foto.jpg")
     ativo: bool
 
     class Config:
@@ -38,10 +45,9 @@ class BarbeiroResponse(BaseModel):
 # ---------- AGENDAMENTO ----------
 
 class AgendamentoCreate(BaseModel):
-    usuario_id: UUID
-    barbeiro_id: UUID
-    data_hora: datetime
-
+    usuario_id: UUID = Field(..., description="ID do usuário que está agendando")
+    barbeiro_id: UUID = Field(..., description="ID do barbeiro escolhido")
+    data_hora: datetime = Field(..., description="Data e hora do agendamento", example="2025-08-01T15:00:00")
 
 class AgendamentoResponse(BaseModel):
     id: UUID
@@ -57,18 +63,17 @@ class AgendamentoResponse(BaseModel):
 # ---------- POSTAGEM ----------
 
 class PostagemCreate(BaseModel):
-    barbeiro_id: UUID
-    titulo: str
-    descricao: Optional[str] = None
-    foto_url: str
-    publicada: bool = True
-
+    barbeiro_id: UUID = Field(..., description="ID do barbeiro autor da postagem")
+    titulo: str = Field(..., min_length=3, max_length=100, description="Título da postagem", example="Corte degradê com navalha")
+    descricao: Optional[str] = Field(None, max_length=300, description="Descrição opcional", example="Esse corte foi feito em 40min com acabamento na navalha.")
+    foto_url: str = Field(..., description="URL da foto da postagem", example="https://cdn.com/corte1.jpg")
+    publicada: bool = Field(default=True, description="Define se a postagem está publicada")
 
 class PostagemResponse(BaseModel):
     id: UUID
     barbeiro_id: UUID
     titulo: str
-    descricao: Optional[str] = None
+    descricao: Optional[str]
     foto_url: str
     data_postagem: datetime
     publicada: bool
@@ -92,10 +97,9 @@ class CurtidaResponse(BaseModel):
 # ---------- COMENTÁRIO ----------
 
 class ComentarioCreate(BaseModel):
-    usuario_id: UUID
-    postagem_id: UUID
-    texto: str
-
+    usuario_id: UUID = Field(..., description="ID do usuário que comentou")
+    postagem_id: UUID = Field(..., description="ID da postagem comentada")
+    texto: str = Field(..., min_length=1, max_length=300, description="Texto do comentário", example="Ficou top esse corte!")
 
 class ComentarioResponse(BaseModel):
     id: UUID
@@ -111,18 +115,17 @@ class ComentarioResponse(BaseModel):
 # ---------- AVALIAÇÃO ----------
 
 class AvaliacaoCreate(BaseModel):
-    usuario_id: UUID
-    barbeiro_id: UUID
-    nota: int
-    comentario: Optional[str] = None
-
+    usuario_id: UUID = Field(..., description="ID do usuário que avaliou")
+    barbeiro_id: UUID = Field(..., description="ID do barbeiro avaliado")
+    nota: int = Field(..., ge=1, le=5, description="Nota de avaliação de 1 a 5", example=5)
+    comentario: Optional[str] = Field(None, max_length=300, description="Comentário opcional sobre a experiência")
 
 class AvaliacaoResponse(BaseModel):
     id: UUID
     usuario_id: UUID
     barbeiro_id: UUID
     nota: int
-    comentario: Optional[str] = None
+    comentario: Optional[str]
     data: datetime
 
     class Config:

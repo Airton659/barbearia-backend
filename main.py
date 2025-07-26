@@ -1,15 +1,15 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 import models, database, schemas, crud
 import uuid
+from auth import criar_token, get_current_user
+from fastapi.security import OAuth2PasswordRequestForm
 
 app = FastAPI()
-
 
 @app.on_event("startup")
 def startup():
     models.Base.metadata.create_all(bind=database.engine)
-
 
 def get_db():
     db = database.SessionLocal()
@@ -18,10 +18,21 @@ def get_db():
     finally:
         db.close()
 
-
 @app.get("/")
 def root():
     return {"mensagem": "API da barbearia funcionando"}
+
+
+# --------- LOGIN ---------
+
+@app.post("/login", response_model=schemas.TokenResponse)
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    usuario = crud.buscar_usuario_por_email(db, form_data.username)
+    if not usuario or not usuario.verificar_senha(form_data.password):
+        raise HTTPException(status_code=401, detail="Credenciais inválidas")
+    
+    token = criar_token({"sub": str(usuario.id)})
+    return {"access_token": token, "token_type": "bearer"}
 
 
 # --------- USUÁRIOS ---------
@@ -54,7 +65,6 @@ def agendar(agendamento: schemas.AgendamentoCreate, db: Session = Depends(get_db
 def criar_postagem(postagem: schemas.PostagemCreate, db: Session = Depends(get_db)):
     return crud.criar_postagem(db, postagem)
 
-
 @app.get("/feed", response_model=list[schemas.PostagemResponse])
 def listar_feed(db: Session = Depends(get_db), limit: int = 10, offset: int = 0):
     return crud.listar_feed(db, limit=limit, offset=offset)
@@ -74,7 +84,6 @@ def curtir_postagem(postagem_id: uuid.UUID, usuario_id: uuid.UUID, db: Session =
 def comentar(comentario: schemas.ComentarioCreate, db: Session = Depends(get_db)):
     return crud.criar_comentario(db, comentario)
 
-
 @app.get("/comentarios/{postagem_id}", response_model=list[schemas.ComentarioResponse])
 def listar_comentarios(postagem_id: uuid.UUID, db: Session = Depends(get_db)):
     return crud.listar_comentarios(db, postagem_id)
@@ -85,7 +94,6 @@ def listar_comentarios(postagem_id: uuid.UUID, db: Session = Depends(get_db)):
 @app.post("/avaliacoes", response_model=schemas.AvaliacaoResponse)
 def avaliar(avaliacao: schemas.AvaliacaoCreate, db: Session = Depends(get_db)):
     return crud.criar_avaliacao(db, avaliacao)
-
 
 @app.get("/avaliacoes/{barbeiro_id}", response_model=list[schemas.AvaliacaoResponse])
 def listar_avaliacoes(barbeiro_id: uuid.UUID, db: Session = Depends(get_db)):
