@@ -3,6 +3,8 @@
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError
+# --- ALTERAÇÃO AQUI ---
+from typing import List # Importação que estava faltando
 import models, schemas, crud
 import uuid
 import time
@@ -73,7 +75,6 @@ def listar_barbeiros(db: Session = Depends(get_db)):
 
 @app.post("/barbeiros", response_model=schemas.BarbeiroResponse)
 def criar_barbeiro(barbeiro: schemas.BarbeiroCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
-    # Verifica se o usuário já é um barbeiro
     db_barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if db_barbeiro:
         raise HTTPException(status_code=400, detail="Este usuário já é um barbeiro.")
@@ -110,7 +111,6 @@ def listar_feed(db: Session = Depends(get_db), limit: int = 10, offset: int = 0)
 @app.post("/postagens/{postagem_id}/curtir")
 def curtir_postagem(postagem_id: uuid.UUID, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
     resultado = crud.toggle_curtida(db, current_user.id, postagem_id)
-    # Se a postagem não existia, o crud retorna None.
     if resultado is None and crud.buscar_postagem_por_id(db, postagem_id) is None:
         raise HTTPException(status_code=404, detail="Postagem não encontrada")
     return {"curtida": bool(resultado)}
