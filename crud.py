@@ -28,9 +28,7 @@ def buscar_usuario_por_email(db: Session, email: str):
 
 def autenticar_usuario(db: Session, email: str, senha: str):
     usuario = buscar_usuario_por_email(db, email)
-    if not usuario:
-        return None
-    if not bcrypt.verify(senha, usuario.senha_hash):
+    if not usuario or not usuario.verificar_senha(senha):
         return None
     return usuario
 

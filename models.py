@@ -3,6 +3,9 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import uuid
 from database import Base
+from passlib.context import CryptContext
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class Usuario(Base):
@@ -17,6 +20,9 @@ class Usuario(Base):
     curtidas = relationship("Curtida", back_populates="usuario")
     comentarios = relationship("Comentario", back_populates="usuario")
     avaliacoes = relationship("Avaliacao", back_populates="usuario")
+
+    def verificar_senha(self, senha: str) -> bool:
+        return pwd_context.verify(senha, self.senha_hash)
 
 
 class Barbeiro(Base):
