@@ -65,6 +65,36 @@ def criar_usuario(usuario: schemas.UsuarioCreate, db: Session = Depends(get_db))
 def get_me(current_user: models.Usuario = Depends(get_current_user)):
     return current_user
 
+# --- ALTERAÇÃO AQUI ---
+# Novos endpoints para recuperação de senha
+
+@app.post("/recuperar-senha")
+def recuperar_senha(request: schemas.RecuperarSenhaRequest, db: Session = Depends(get_db)):
+    usuario = crud.buscar_usuario_por_email(db, email=request.email)
+    if not usuario:
+        # Nota de segurança: Mesmo que o e-mail não exista, retornamos uma mensagem genérica
+        # para não permitir que um atacante descubra quais e-mails estão cadastrados.
+        return {"mensagem": "Se um usuário com este e-mail existir, um link de recuperação foi enviado."}
+    
+    # Gera e salva o token de recuperação
+    token = crud.gerar_token_recuperacao(db, usuario)
+    
+    # Em uma aplicação real, aqui você enviaria um e-mail para o usuário.
+    # Para este projeto, vamos apenas retornar uma mensagem de sucesso com o token (para facilitar os testes).
+    print(f"TOKEN DE RECUPERAÇÃO PARA {usuario.email}: {token}") # Simula o envio
+    return {"mensagem": "Token de recuperação gerado com sucesso.", "reset_token": token}
+
+
+@app.post("/resetar-senha")
+def resetar_senha(request: schemas.ResetarSenhaRequest, db: Session = Depends(get_db)):
+    usuario = crud.buscar_usuario_por_token_recuperacao(db, token=request.token)
+    
+    if not usuario:
+        raise HTTPException(status_code=400, detail="Token inválido ou expirado.")
+    
+    crud.resetar_senha(db, usuario, nova_senha=request.nova_senha)
+    return {"mensagem": "Senha atualizada com sucesso."}
+
 
 # --------- BARBEIROS ---------
 
@@ -155,8 +185,6 @@ def get_me_barbeiro(db: Session = Depends(get_db), current_user: models.Usuario 
         raise HTTPException(status_code=404, detail="Barbeiro não encontrado para o usuário logado")
     return barbeiro
 
-# --- ALTERAÇÃO AQUI ---
-# Novo endpoint para o barbeiro logado atualizar sua foto de perfil
 @app.put("/me/barbeiro/foto", response_model=schemas.BarbeiroResponse)
 def update_barbeiro_foto(
     foto_data: schemas.BarbeiroUpdateFoto, 
