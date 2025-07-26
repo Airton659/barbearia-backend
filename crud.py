@@ -1,3 +1,5 @@
+# barbearia-backend/crud.py
+
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, and_
 import models, schemas
@@ -26,13 +28,6 @@ def buscar_usuario_por_email(db: Session, email: str):
     return db.query(models.Usuario).filter(models.Usuario.email == email).first()
 
 
-def autenticar_usuario(db: Session, email: str, senha: str):
-    usuario = buscar_usuario_por_email(db, email)
-    if not usuario or not usuario.verificar_senha(senha):
-        return None
-    return usuario
-
-
 # --------- BARBEIROS ---------
 
 def listar_barbeiros(db: Session):
@@ -52,7 +47,7 @@ def criar_barbeiro(db: Session, barbeiro: schemas.BarbeiroCreate, usuario_id: uu
     return novo_barbeiro
 
 def buscar_barbeiro_por_usuario_id(db: Session, usuario_id: uuid.UUID):
-    return db.query(models.Barbeiro).filter(models.Barbeiro.usuario_id == usuario_id).first()
+    return db.query(models.Barbeiro).options(joinedload(models.Barbeiro.usuario)).filter(models.Barbeiro.usuario_id == usuario_id).first()
 
 
 # --------- AGENDAMENTOS ---------
@@ -108,13 +103,9 @@ def buscar_postagem_por_id(db: Session, postagem_id: uuid.UUID):
 
 # --------- CURTIDAS ---------
 
-# Alteração: Adicionada verificação de existência da postagem
 def toggle_curtida(db: Session, usuario_id: uuid.UUID, postagem_id: uuid.UUID):
-    # Primeiro, verifica se a postagem realmente existe
     postagem = buscar_postagem_por_id(db, postagem_id)
     if not postagem:
-        # Se a postagem não existe, retorna None e não faz nada.
-        # Isso evita o erro de chave estrangeira.
         return None
 
     curtida = db.query(models.Curtida).filter(
@@ -189,18 +180,15 @@ def listar_avaliacoes_barbeiro(db: Session, barbeiro_id: uuid.UUID):
 # --------- PERFIL DO BARBEIRO ---------
 
 def obter_perfil_barbeiro(db: Session, barbeiro_id: uuid.UUID):
-    barbeiro = db.query(models.Barbeiro).options(joinedload(models.Barbeiro.usuario)).filter(models.Barbeiro.id == barbeiro_id).first()
+    barbeiro = db.query(models.Barbeiro).filter(models.Barbeiro.id == barbeiro_id).first()
     if not barbeiro:
-        return {} 
+        return {}
     
     avaliacoes = listar_avaliacoes_barbeiro(db, barbeiro_id)
     postagens = db.query(models.Postagem).filter(models.Postagem.barbeiro_id == barbeiro_id).all()
-
-    perfil_barbeiro = schemas.BarbeiroResponse.from_orm(barbeiro)
-    perfil_barbeiro.nome = barbeiro.usuario.nome
     
     return {
-        "barbeiro": perfil_barbeiro,
+        "barbeiro": barbeiro,
         "avaliacoes": avaliacoes,
         "postagens": postagens
     }
