@@ -48,11 +48,9 @@ class BarbeiroCreate(BaseModel):
     ativo: bool = Field(default=True, description="Define se o barbeiro está ativo")
 
 
-
 # ---------- AGENDAMENTO ----------
 
 class AgendamentoCreate(BaseModel):
-    usuario_id: UUID = Field(..., description="ID do usuário que está agendando")
     barbeiro_id: UUID = Field(..., description="ID do barbeiro escolhido")
     data_hora: datetime = Field(..., description="Data e hora do agendamento", example="2025-08-01T15:00:00")
 
@@ -70,7 +68,6 @@ class AgendamentoResponse(BaseModel):
 # ---------- POSTAGEM ----------
 
 class PostagemCreate(BaseModel):
-    barbeiro_id: UUID = Field(..., description="ID do barbeiro autor da postagem")
     titulo: str = Field(..., min_length=3, max_length=100, description="Título da postagem", example="Corte degradê com navalha")
     descricao: Optional[str] = Field(None, max_length=300, description="Descrição opcional", example="Esse corte foi feito em 40min com acabamento na navalha.")
     foto_url: str = Field(..., description="URL da foto da postagem", example="https://cdn.com/corte1.jpg")
@@ -104,7 +101,6 @@ class CurtidaResponse(BaseModel):
 # ---------- COMENTÁRIO ----------
 
 class ComentarioCreate(BaseModel):
-    usuario_id: UUID = Field(..., description="ID do usuário que comentou")
     postagem_id: UUID = Field(..., description="ID da postagem comentada")
     texto: str = Field(..., min_length=1, max_length=300, description="Texto do comentário", example="Ficou top esse corte!")
 
@@ -122,7 +118,6 @@ class ComentarioResponse(BaseModel):
 # ---------- AVALIAÇÃO ----------
 
 class AvaliacaoCreate(BaseModel):
-    usuario_id: UUID = Field(..., description="ID do usuário que avaliou")
     barbeiro_id: UUID = Field(..., description="ID do barbeiro avaliado")
     nota: int = Field(..., ge=1, le=5, description="Nota de avaliação de 1 a 5", example=5)
     comentario: Optional[str] = Field(None, max_length=300, description="Comentário opcional sobre a experiência")

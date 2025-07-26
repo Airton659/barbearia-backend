@@ -2,7 +2,6 @@ from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 import models, database, schemas, crud
 import uuid
-from uuid import uuid4
 from auth import criar_token, get_current_user
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse
@@ -47,6 +46,10 @@ def criar_usuario(usuario: schemas.UsuarioCreate, db: Session = Depends(get_db))
         raise HTTPException(status_code=400, detail="Email já cadastrado")
     return crud.criar_usuario(db, usuario)
 
+@app.get("/me", response_model=schemas.UsuarioResponse)
+def get_me(current_user: models.Usuario = Depends(get_current_user)):
+    return current_user
+
 
 # --------- BARBEIROS ---------
 
@@ -62,14 +65,19 @@ def criar_barbeiro(barbeiro: schemas.BarbeiroCreate, db: Session = Depends(get_d
 # --------- AGENDAMENTOS ---------
 
 @app.post("/agendamentos", response_model=schemas.AgendamentoResponse)
-def agendar(agendamento: schemas.AgendamentoCreate, db: Session = Depends(get_db)):
+def agendar(agendamento: schemas.AgendamentoCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+    agendamento.usuario_id = current_user.id
     return crud.criar_agendamento(db, agendamento)
+
+@app.get("/agendamentos", response_model=list[schemas.AgendamentoResponse])
+def listar_agendamentos(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+    return crud.listar_agendamentos_por_usuario(db, current_user.id)
 
 
 # --------- FEED / POSTAGENS ---------
 
 @app.post("/postagens", response_model=schemas.PostagemResponse)
-def criar_postagem(postagem: schemas.PostagemCreate, db: Session = Depends(get_db)):
+def criar_postagem(postagem: schemas.PostagemCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
     return crud.criar_postagem(db, postagem)
 
 @app.get("/feed", response_model=list[schemas.PostagemResponse])
@@ -80,15 +88,16 @@ def listar_feed(db: Session = Depends(get_db), limit: int = 10, offset: int = 0)
 # --------- CURTIDAS ---------
 
 @app.post("/postagens/{postagem_id}/curtir")
-def curtir_postagem(postagem_id: uuid.UUID, usuario_id: uuid.UUID, db: Session = Depends(get_db)):
-    resultado = crud.toggle_curtida(db, usuario_id, postagem_id)
+def curtir_postagem(postagem_id: uuid.UUID, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+    resultado = crud.toggle_curtida(db, current_user.id, postagem_id)
     return {"curtida": bool(resultado)}
 
 
 # --------- COMENTÁRIOS ---------
 
 @app.post("/comentarios", response_model=schemas.ComentarioResponse)
-def comentar(comentario: schemas.ComentarioCreate, db: Session = Depends(get_db)):
+def comentar(comentario: schemas.ComentarioCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+    comentario.usuario_id = current_user.id
     return crud.criar_comentario(db, comentario)
 
 @app.get("/comentarios/{postagem_id}", response_model=list[schemas.ComentarioResponse])
@@ -99,7 +108,8 @@ def listar_comentarios(postagem_id: uuid.UUID, db: Session = Depends(get_db)):
 # --------- AVALIAÇÕES ---------
 
 @app.post("/avaliacoes", response_model=schemas.AvaliacaoResponse)
-def avaliar(avaliacao: schemas.AvaliacaoCreate, db: Session = Depends(get_db)):
+def avaliar(avaliacao: schemas.AvaliacaoCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+    avaliacao.usuario_id = current_user.id
     return crud.criar_avaliacao(db, avaliacao)
 
 @app.get("/avaliacoes/{barbeiro_id}", response_model=list[schemas.AvaliacaoResponse])
@@ -112,6 +122,24 @@ def listar_avaliacoes(barbeiro_id: uuid.UUID, db: Session = Depends(get_db)):
 @app.get("/perfil_barbeiro/{barbeiro_id}")
 def perfil_barbeiro(barbeiro_id: uuid.UUID, db: Session = Depends(get_db)):
     return crud.obter_perfil_barbeiro(db, barbeiro_id)
+
+# --------- DADOS DO BARBEIRO LOGADO ---------
+
+@app.get("/me/barbeiro", response_model=schemas.BarbeiroResponse)
+def get_me_barbeiro(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+    barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
+    if not barbeiro:
+        raise HTTPException(status_code=404, detail="Barbeiro não encontrado")
+    return barbeiro
+
+# --------- AGENDAMENTOS DO BARBEIRO ---------
+
+@app.get("/me/agendamentos", response_model=list[schemas.AgendamentoResponse])
+def listar_agendamentos_do_barbeiro(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+    barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
+    if not barbeiro:
+        raise HTTPException(status_code=404, detail="Barbeiro não encontrado")
+    return crud.listar_agendamentos_por_barbeiro(db, barbeiro.id)
 
 
 # --------- UPLOAD DE FOTOS VIA ImgBB ---------
@@ -137,7 +165,3 @@ async def upload_foto(file: UploadFile = File(...)):
     url = data["data"]["url"]
 
     return JSONResponse(content={"url": url})
-
-@app.get("/me", response_model=schemas.UsuarioResponse)
-def get_me(current_user: models.Usuario = Depends(get_current_user)):
-    return current_user

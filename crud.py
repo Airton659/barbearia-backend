@@ -51,6 +51,9 @@ def criar_barbeiro(db: Session, barbeiro: schemas.BarbeiroCreate):
     db.refresh(novo_barbeiro)
     return novo_barbeiro
 
+def buscar_barbeiro_por_usuario_id(db: Session, usuario_id: uuid.UUID):
+    return db.query(models.Barbeiro).filter(models.Barbeiro.id == usuario_id).first()
+
 
 # --------- AGENDAMENTOS ---------
 
@@ -65,6 +68,13 @@ def criar_agendamento(db: Session, agendamento: schemas.AgendamentoCreate):
     db.commit()
     db.refresh(novo_agendamento)
     return novo_agendamento
+
+
+def listar_agendamentos_por_usuario(db: Session, usuario_id: uuid.UUID):
+    return db.query(models.Agendamento).filter(models.Agendamento.usuario_id == usuario_id).all()
+
+def listar_agendamentos_por_barbeiro(db: Session, barbeiro_id: uuid.UUID):
+    return db.query(models.Agendamento).filter(models.Agendamento.barbeiro_id == barbeiro_id).all()
 
 
 # --------- POSTAGENS ---------

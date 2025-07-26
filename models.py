@@ -20,6 +20,7 @@ class Usuario(Base):
     curtidas = relationship("Curtida", back_populates="usuario")
     comentarios = relationship("Comentario", back_populates="usuario")
     avaliacoes = relationship("Avaliacao", back_populates="usuario")
+    barbeiro = relationship("Barbeiro", back_populates="usuario", uselist=False)
 
     def verificar_senha(self, senha: str) -> bool:
         return pwd_context.verify(senha, self.senha_hash)
@@ -28,11 +29,12 @@ class Usuario(Base):
 class Barbeiro(Base):
     __tablename__ = "barbeiros"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    nome = Column(String, nullable=False)
+    usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), unique=True, nullable=False)
     especialidades = Column(String)
     foto = Column(String)
     ativo = Column(Boolean, default=True)
 
+    usuario = relationship("Usuario", back_populates="barbeiro")
     agendamentos = relationship("Agendamento", back_populates="barbeiro")
     postagens = relationship("Postagem", back_populates="barbeiro")
     avaliacoes = relationship("Avaliacao", back_populates="barbeiro")
