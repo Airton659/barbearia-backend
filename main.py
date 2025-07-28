@@ -187,6 +187,18 @@ def get_me_barbeiro(db: Session = Depends(get_db), current_user: models.Usuario 
         raise HTTPException(status_code=404, detail="Barbeiro não encontrado para o usuário logado")
     return barbeiro
 
+# NOVO ENDPOINT ADICIONADO
+@app.put("/me/barbeiro", response_model=schemas.BarbeiroResponse)
+def update_me_barbeiro(
+    dados_update: schemas.BarbeiroUpdate,
+    db: Session = Depends(get_db), 
+    current_user: models.Usuario = Depends(get_current_user)
+):
+    barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
+    if not barbeiro:
+        raise HTTPException(status_code=404, detail="Barbeiro não encontrado")
+    return crud.atualizar_perfil_barbeiro(db, barbeiro, dados_update)
+
 @app.put("/me/barbeiro/foto", response_model=schemas.BarbeiroResponse)
 def update_barbeiro_foto(foto_data: schemas.BarbeiroUpdateFoto, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
