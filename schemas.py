@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, EmailStr, Field
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, time # Adicionado o tipo 'time'
 from typing import Optional, List
 
 
@@ -167,6 +167,38 @@ class PerfilBarbeiroResponse(BaseModel):
     barbeiro: BarbeiroResponse
     avaliacoes: List[AvaliacaoResponse]
     postagens: List[PostagemResponse]
+
+    class Config:
+        from_attributes = True
+
+# ---------- DISPONIBILIDADE ----------
+
+class HorarioTrabalhoBase(BaseModel):
+    dia_semana: int = Field(..., ge=0, le=6, description="Dia da semana (0=Seg, 6=Dom)")
+    hora_inicio: time = Field(..., description="Hora de início do expediente")
+    hora_fim: time = Field(..., description="Hora de fim do expediente")
+
+class HorarioTrabalhoCreate(HorarioTrabalhoBase):
+    pass
+
+class HorarioTrabalhoResponse(HorarioTrabalhoBase):
+    id: UUID
+    barbeiro_id: UUID
+
+    class Config:
+        from_attributes = True
+
+class BloqueioBase(BaseModel):
+    inicio: datetime = Field(..., description="Início do período de bloqueio")
+    fim: datetime = Field(..., description="Fim do período de bloqueio")
+    motivo: Optional[str] = Field(None, description="Motivo do bloqueio (opcional)")
+
+class BloqueioCreate(BloqueioBase):
+    pass
+
+class BloqueioResponse(BloqueioBase):
+    id: UUID
+    barbeiro_id: UUID
 
     class Config:
         from_attributes = True
