@@ -17,7 +17,8 @@ def criar_usuario(db: Session, usuario: schemas.UsuarioCreate):
         id=uuid.uuid4(),
         nome=usuario.nome,
         email=usuario.email,
-        senha_hash=senha_hash
+        senha_hash=senha_hash,
+        tipo='cliente'  # Mantendo o nome do campo como 'tipo'
     )
     db.add(novo_usuario)
     db.commit()
@@ -143,10 +144,16 @@ def criar_agendamento(db: Session, agendamento: schemas.AgendamentoCreate, usuar
 
 
 def listar_agendamentos_por_usuario(db: Session, usuario_id: uuid.UUID):
-    return db.query(models.Agendamento).filter(models.Agendamento.usuario_id == usuario_id).all()
+    # ALTERAÇÃO AQUI: Adicionado joinedload para carregar dados do barbeiro
+    return db.query(models.Agendamento)\
+        .options(joinedload(models.Agendamento.barbeiro))\
+        .filter(models.Agendamento.usuario_id == usuario_id).all()
 
 def listar_agendamentos_por_barbeiro(db: Session, barbeiro_id: uuid.UUID):
-    return db.query(models.Agendamento).filter(models.Agendamento.barbeiro_id == barbeiro_id).all()
+    # ALTERAÇÃO AQUI: Adicionado joinedload para carregar dados do cliente (usuário)
+    return db.query(models.Agendamento)\
+        .options(joinedload(models.Agendamento.usuario))\
+        .filter(models.Agendamento.barbeiro_id == barbeiro_id).all()
 
 
 # --------- POSTAGENS ---------
