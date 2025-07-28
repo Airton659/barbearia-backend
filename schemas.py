@@ -68,6 +68,10 @@ class BarbeiroCreate(BaseModel):
 class BarbeiroUpdateFoto(BaseModel):
     foto_url: str = Field(..., description="Nova URL da foto do barbeiro")
 
+# NOVO SCHEMA ADICIONADO PARA ATUALIZAR O PERFIL DO BARBEIRO
+class BarbeiroUpdate(BaseModel):
+    especialidades: Optional[str] = Field(None, max_length=200, description="Novas especialidades do barbeiro")
+
 # NOVO SCHEMA ADICIONADO PARA O ADMIN
 class BarbeiroPromote(BaseModel):
     especialidades: str = Field(..., description="Especialidades iniciais do barbeiro")
