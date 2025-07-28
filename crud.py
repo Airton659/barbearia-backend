@@ -123,6 +123,15 @@ def atualizar_foto_barbeiro(db: Session, barbeiro: models.Barbeiro, foto_url: st
     db.refresh(barbeiro)
     return barbeiro
 
+# NOVA FUNÇÃO ADICIONADA PARA ATUALIZAR DADOS DO PERFIL
+def atualizar_perfil_barbeiro(db: Session, barbeiro: models.Barbeiro, dados_update: schemas.BarbeiroUpdate):
+    if dados_update.especialidades is not None:
+        barbeiro.especialidades = dados_update.especialidades
+    
+    db.commit()
+    db.refresh(barbeiro)
+    return barbeiro
+
 
 # --------- AGENDAMENTOS ---------
 
@@ -152,7 +161,6 @@ def listar_agendamentos_por_barbeiro(db: Session, barbeiro_id: uuid.UUID):
 
 # --------- POSTAGENS E INTERAÇÕES (O restante do arquivo continua o mesmo até o final) ---------
 
-# ... (todas as funções de Postagens, Curtidas, Comentários, Avaliações e Perfil continuam aqui) ...
 def criar_postagem(db: Session, postagem: schemas.PostagemCreate, barbeiro_id: uuid.UUID):
     nova_postagem = models.Postagem(id=uuid.uuid4(),barbeiro_id=barbeiro_id,titulo=postagem.titulo,descricao=postagem.descricao,foto_url=postagem.foto_url,publicada=postagem.publicada,data_postagem=datetime.utcnow())
     db.add(nova_postagem)
@@ -211,7 +219,6 @@ def obter_perfil_barbeiro(db: Session, barbeiro_id: uuid.UUID):
 # --------- DISPONIBILIDADE ---------
 
 def definir_horarios_trabalho(db: Session, barbeiro_id: uuid.UUID, horarios: List[schemas.HorarioTrabalhoCreate]):
-    # Apaga os horários antigos para substituir pelos novos
     db.query(models.HorarioTrabalho).filter(models.HorarioTrabalho.barbeiro_id == barbeiro_id).delete()
     
     novos_horarios = []
@@ -253,18 +260,16 @@ def deletar_bloqueio(db: Session, bloqueio_id: uuid.UUID, barbeiro_id: uuid.UUID
     return False
 
 def calcular_horarios_disponiveis(db: Session, barbeiro_id: uuid.UUID, dia: date, duracao_servico_min: int = 60) -> List[time]:
-    dia_semana = dia.weekday() # 0=Seg, 1=Ter, ...
+    dia_semana = dia.weekday()
 
-    # 1. Encontrar o horário de trabalho para o dia da semana
     horario_trabalho = db.query(models.HorarioTrabalho).filter(
         models.HorarioTrabalho.barbeiro_id == barbeiro_id,
         models.HorarioTrabalho.dia_semana == dia_semana
     ).first()
 
     if not horario_trabalho:
-        return [] # Barbeiro não trabalha neste dia
+        return []
 
-    # 2. Gerar todos os slots de horário possíveis para o dia
     slots_disponiveis = []
     hora_atual = datetime.combine(dia, horario_trabalho.hora_inicio)
     hora_fim = datetime.combine(dia, horario_trabalho.hora_fim)
@@ -273,7 +278,6 @@ def calcular_horarios_disponiveis(db: Session, barbeiro_id: uuid.UUID, dia: date
         slots_disponiveis.append(hora_atual.time())
         hora_atual += timedelta(minutes=duracao_servico_min)
 
-    # 3. Buscar agendamentos e bloqueios para o dia
     agendamentos_no_dia = db.query(models.Agendamento).filter(
         models.Agendamento.barbeiro_id == barbeiro_id,
         func.date(models.Agendamento.data_hora) == dia
@@ -287,7 +291,6 @@ def calcular_horarios_disponiveis(db: Session, barbeiro_id: uuid.UUID, dia: date
 
     horarios_ocupados = {ag.data_hora.time() for ag in agendamentos_no_dia}
 
-    # 4. Remover slots ocupados por agendamentos ou bloqueios
     horarios_finais = []
     for slot in slots_disponiveis:
         if slot in horarios_ocupados:
