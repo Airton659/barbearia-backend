@@ -7,7 +7,7 @@ from typing import List, Optional
 import models, schemas, crud
 import uuid
 import time
-from datetime import date, time # Adicionado date e time
+from datetime import date, time
 from auth import criar_token, get_current_user, get_current_admin_user
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse
@@ -187,13 +187,8 @@ def get_me_barbeiro(db: Session = Depends(get_db), current_user: models.Usuario 
         raise HTTPException(status_code=404, detail="Barbeiro não encontrado para o usuário logado")
     return barbeiro
 
-# NOVO ENDPOINT ADICIONADO
 @app.put("/me/barbeiro", response_model=schemas.BarbeiroResponse)
-def update_me_barbeiro(
-    dados_update: schemas.BarbeiroUpdate,
-    db: Session = Depends(get_db), 
-    current_user: models.Usuario = Depends(get_current_user)
-):
+def update_me_barbeiro(dados_update: schemas.BarbeiroUpdate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if not barbeiro:
         raise HTTPException(status_code=404, detail="Barbeiro não encontrado")
@@ -259,3 +254,17 @@ def deletar_bloqueio(bloqueio_id: uuid.UUID, db: Session = Depends(get_db), curr
 @app.get("/barbeiros/{barbeiro_id}/horarios-disponiveis", response_model=List[time])
 def get_horarios_disponiveis(barbeiro_id: uuid.UUID, dia: date, db: Session = Depends(get_db)):
     return crud.calcular_horarios_disponiveis(db, barbeiro_id, dia)
+
+
+# --------- SERVIÇOS ---------
+
+@app.post("/me/servicos", response_model=schemas.ServicoResponse)
+def criar_servico(servico: schemas.ServicoCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+    barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
+    if not barbeiro:
+        raise HTTPException(status_code=403, detail="Apenas barbeiros podem criar serviços.")
+    return crud.criar_servico(db, servico, barbeiro.id)
+
+@app.get("/barbeiros/{barbeiro_id}/servicos", response_model=List[schemas.ServicoResponse])
+def listar_servicos(barbeiro_id: uuid.UUID, db: Session = Depends(get_db)):
+    return crud.listar_servicos_por_barbeiro(db, barbeiro_id)
