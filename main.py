@@ -7,7 +7,7 @@ from typing import List, Optional # Adicionado Optional para o filtro
 import models, schemas, crud
 import uuid
 import time
-from auth import criar_token, get_current_user
+from auth import criar_token, get_current_user, get_current_admin_user # Dependência de admin importada
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse
 import httpx
@@ -48,7 +48,9 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     if not usuario or not usuario.verificar_senha(form_data.password):
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
     
-    token = criar_token({"sub": str(usuario.id)})
+    # Adicionado o 'tipo' do usuário ao payload do token
+    token_data = {"sub": str(usuario.id), "tipo": usuario.tipo}
+    token = criar_token(token_data)
     return {"access_token": token, "token_type": "bearer"}
 
 
@@ -65,23 +67,16 @@ def criar_usuario(usuario: schemas.UsuarioCreate, db: Session = Depends(get_db))
 def get_me(current_user: models.Usuario = Depends(get_current_user)):
     return current_user
 
-# --- ALTERAÇÃO AQUI ---
-# Novos endpoints para recuperação de senha
+# --- Endpoints para recuperação de senha ---
 
 @app.post("/recuperar-senha")
 def recuperar_senha(request: schemas.RecuperarSenhaRequest, db: Session = Depends(get_db)):
     usuario = crud.buscar_usuario_por_email(db, email=request.email)
     if not usuario:
-        # Nota de segurança: Mesmo que o e-mail não exista, retornamos uma mensagem genérica
-        # para não permitir que um atacante descubra quais e-mails estão cadastrados.
         return {"mensagem": "Se um usuário com este e-mail existir, um link de recuperação foi enviado."}
     
-    # Gera e salva o token de recuperação
     token = crud.gerar_token_recuperacao(db, usuario)
-    
-    # Em uma aplicação real, aqui você enviaria um e-mail para o usuário.
-    # Para este projeto, vamos apenas retornar uma mensagem de sucesso com o token (para facilitar os testes).
-    print(f"TOKEN DE RECUPERAÇÃO PARA {usuario.email}: {token}") # Simula o envio
+    print(f"TOKEN DE RECUPERAÇÃO PARA {usuario.email}: {token}")
     return {"mensagem": "Token de recuperação gerado com sucesso.", "reset_token": token}
 
 
@@ -96,18 +91,38 @@ def resetar_senha(request: schemas.ResetarSenhaRequest, db: Session = Depends(ge
     return {"mensagem": "Senha atualizada com sucesso."}
 
 
+# --------- ADMIN ---------
+
+@app.get("/admin/usuarios", response_model=List[schemas.UsuarioResponse])
+def admin_listar_usuarios(db: Session = Depends(get_db), admin: models.Usuario = Depends(get_current_admin_user)):
+    """
+    [ADMIN] Retorna uma lista de todos os usuários do sistema.
+    """
+    return crud.listar_todos_usuarios(db)
+
+@app.put("/admin/usuarios/{usuario_id}/promover", response_model=schemas.BarbeiroResponse)
+def admin_promover_para_barbeiro(
+    usuario_id: uuid.UUID,
+    info_barbeiro: schemas.BarbeiroPromote, 
+    db: Session = Depends(get_db), 
+    admin: models.Usuario = Depends(get_current_admin_user)
+):
+    """
+    [ADMIN] Promove um usuário para o tipo de barbeiro e cria seu perfil.
+    """
+    barbeiro_criado = crud.promover_usuario_para_barbeiro(db, usuario_id, info_barbeiro)
+    if not barbeiro_criado:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    return barbeiro_criado
+
+
 # --------- BARBEIROS ---------
 
 @app.get("/barbeiros", response_model=List[schemas.BarbeiroResponse])
 def listar_barbeiros(db: Session = Depends(get_db), especialidade: Optional[str] = None):
     return crud.listar_barbeiros(db, especialidade=especialidade)
 
-@app.post("/barbeiros", response_model=schemas.BarbeiroResponse)
-def criar_barbeiro(barbeiro: schemas.BarbeiroCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
-    db_barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
-    if db_barbeiro:
-        raise HTTPException(status_code=400, detail="Este usuário já é um barbeiro.")
-    return crud.criar_barbeiro(db=db, barbeiro=barbeiro, usuario_id=current_user.id)
+# O endpoint POST /barbeiros foi REMOVIDO daqui
 
 
 # --------- AGENDAMENTOS ---------
