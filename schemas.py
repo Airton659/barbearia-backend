@@ -26,6 +26,14 @@ class UsuarioResponse(BaseModel):
     class Config:
         from_attributes = True
 
+# NOVO SCHEMA ADICIONADO PARA USAR DENTRO DO AGENDAMENTO
+class UsuarioParaAgendamento(BaseModel):
+    id: UUID
+    nome: str
+
+    class Config:
+        from_attributes = True
+
 class TokenResponse(BaseModel):
     access_token: str = Field(..., description="Token JWT de acesso")
     token_type: str = Field(default="bearer", description="Tipo do token")
@@ -78,6 +86,7 @@ class AgendamentoResponse(BaseModel):
     barbeiro_id: UUID
     data_hora: datetime
     status: str
+    usuario: UsuarioParaAgendamento # CAMPO ADICIONADO PARA INCLUIR DADOS DO CLIENTE
 
     class Config:
         from_attributes = True
