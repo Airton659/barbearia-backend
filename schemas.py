@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, EmailStr, Field
 from uuid import UUID
-from datetime import datetime, time # Adicionado o tipo 'time'
+from datetime import datetime, time 
 from typing import Optional, List
 
 
@@ -26,7 +26,6 @@ class UsuarioResponse(BaseModel):
     class Config:
         from_attributes = True
 
-# NOVO SCHEMA ADICIONADO PARA USAR DENTRO DO AGENDAMENTO
 class UsuarioParaAgendamento(BaseModel):
     id: UUID
     nome: str
@@ -38,8 +37,6 @@ class TokenResponse(BaseModel):
     access_token: str = Field(..., description="Token JWT de acesso")
     token_type: str = Field(default="bearer", description="Tipo do token")
 
-# --- ALTERAÇÃO AQUI ---
-# Novos schemas para o fluxo de recuperação de senha
 class RecuperarSenhaRequest(BaseModel):
     email: EmailStr = Field(..., description="Email do usuário para iniciar a recuperação de senha")
 
@@ -68,11 +65,9 @@ class BarbeiroCreate(BaseModel):
 class BarbeiroUpdateFoto(BaseModel):
     foto_url: str = Field(..., description="Nova URL da foto do barbeiro")
 
-# NOVO SCHEMA ADICIONADO PARA ATUALIZAR O PERFIL DO BARBEIRO
 class BarbeiroUpdate(BaseModel):
     especialidades: Optional[str] = Field(None, max_length=200, description="Novas especialidades do barbeiro")
 
-# NOVO SCHEMA ADICIONADO PARA O ADMIN
 class BarbeiroPromote(BaseModel):
     especialidades: str = Field(..., description="Especialidades iniciais do barbeiro")
     foto: Optional[str] = Field(None, description="URL da foto inicial do barbeiro")
@@ -90,7 +85,7 @@ class AgendamentoResponse(BaseModel):
     barbeiro_id: UUID
     data_hora: datetime
     status: str
-    usuario: UsuarioParaAgendamento # CAMPO ADICIONADO PARA INCLUIR DADOS DO CLIENTE
+    usuario: UsuarioParaAgendamento
 
     class Config:
         from_attributes = True
@@ -201,6 +196,24 @@ class BloqueioCreate(BloqueioBase):
     pass
 
 class BloqueioResponse(BloqueioBase):
+    id: UUID
+    barbeiro_id: UUID
+
+    class Config:
+        from_attributes = True
+        
+# ---------- SERVIÇOS ----------
+
+class ServicoBase(BaseModel):
+    nome: str = Field(..., max_length=100, description="Nome do serviço", example="Corte Masculino")
+    descricao: Optional[str] = Field(None, max_length=300, description="Descrição do serviço")
+    preco: float = Field(..., gt=0, description="Preço do serviço em Reais", example=50.00)
+    duracao_minutos: int = Field(..., gt=0, description="Duração do serviço em minutos", example=45)
+
+class ServicoCreate(ServicoBase):
+    pass
+
+class ServicoResponse(ServicoBase):
     id: UUID
     barbeiro_id: UUID
 
