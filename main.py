@@ -1,6 +1,6 @@
 # barbearia-backend/main.py
 
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, status # Importe 'status'
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError
 from typing import List, Optional
@@ -129,6 +129,23 @@ def agendar(agendamento: schemas.AgendamentoCreate, db: Session = Depends(get_db
 def listar_agendamentos(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
     return crud.listar_agendamentos_por_usuario(db, current_user.id)
 
+# --- NOVO ENDPOINT ADICIONADO: CANCELAR AGENDAMENTO ---
+@app.delete("/agendamentos/{agendamento_id}", status_code=status.HTTP_204_NO_CONTENT)
+def cancelar_agendamento_endpoint(
+    agendamento_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: models.Usuario = Depends(get_current_user)
+):
+    """
+    Permite ao usuário cancelar um agendamento.
+    """
+    agendamento_cancelado = crud.cancelar_agendamento(db, agendamento_id, current_user.id)
+    
+    if agendamento_cancelado is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agendamento não encontrado ou você não tem permissão para cancelá-lo.")
+    
+    return {"message": "Agendamento cancelado com sucesso."}
+
 
 # --------- FEED / POSTAGENS ---------
 
@@ -210,7 +227,7 @@ def listar_agendamentos_do_barbeiro(db: Session = Depends(get_db), current_user:
         raise HTTPException(status_code=404, detail="Barbeiro não encontrado")
     return crud.listar_agendamentos_por_barbeiro(db, barbeiro.id)
 
-# --- NOVO ENDPOINT ADICIONADO ---
+# --- NOVO ENDPOINT ADICIONADO (Já existia no contexto anterior) ---
 @app.get("/me/horarios-trabalho", response_model=List[schemas.HorarioTrabalhoResponse])
 def get_me_horarios_trabalho(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
     """
@@ -225,8 +242,8 @@ def get_me_horarios_trabalho(db: Session = Depends(get_db), current_user: models
 # --------- UPLOAD DE FOTOS ---------
 
 # IMGBB_API_KEY e IMGBB_UPLOAD_URL serão removidos ao migrar para Cloud Storage
-IMGBB_API_KEY = "f75fe38ca523aab85bf5842130ccd27b" #
-IMGBB_UPLOAD_URL = "https://api.imgbb.com/1/upload" #
+IMGBB_API_KEY = "f75fe38ca523aab85bf5842130ccd27b"
+IMGBB_UPLOAD_URL = "https://api.imgbb.com/1/upload"
 
 # Defina o nome do seu bucket do Cloud Storage (será uma variável de ambiente no Cloud Run)
 CLOUD_STORAGE_BUCKET_NAME = os.getenv("CLOUD_STORAGE_BUCKET_NAME")

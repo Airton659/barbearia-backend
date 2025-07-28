@@ -88,13 +88,30 @@ def promover_usuario_para_barbeiro(db: Session, usuario_id: uuid.UUID, info_barb
 
 # --------- BARBEIROS ---------
 
-def listar_barbeiros(db: Session, especialidade: Optional[str] = None):
+def listar_barbeiros(db: Session, especialidade: Optional[str] = None) -> List[schemas.BarbeiroResponse]:
+    # Carrega os barbeiros com o relacionamento de usuário já unido para o nome
     query = db.query(models.Barbeiro).options(joinedload(models.Barbeiro.usuario)).filter(models.Barbeiro.ativo == True)
     
     if especialidade:
         query = query.filter(models.Barbeiro.especialidades.ilike(f"%{especialidade}%"))
         
-    return query.all()
+    barbeiros_db = query.all()
+    
+    # Processa cada barbeiro para incluir seus serviços
+    barbeiros_com_servicos = []
+    for barbeiro in barbeiros_db:
+        # Pega os serviços para o barbeiro atual
+        servicos_do_barbeiro = listar_servicos_por_barbeiro(db, barbeiro.id)
+        
+        # Cria uma instância de BarbeiroResponse e preenche os campos
+        # Usa .from_orm() para preencher automaticamente campos mapeados e, em seguida, adiciona os serviços
+        barbeiro_response = schemas.BarbeiroResponse.model_validate(barbeiro)
+        barbeiro_response.servicos = [schemas.ServicoResponse.model_validate(s) for s in servicos_do_barbeiro]
+        
+        barbeiros_com_servicos.append(barbeiro_response)
+        
+    return barbeiros_com_servicos
+
 
 def criar_barbeiro(db: Session, barbeiro: schemas.BarbeiroCreate, usuario_id: uuid.UUID):
     novo_barbeiro = models.Barbeiro(
@@ -142,15 +159,56 @@ def criar_agendamento(db: Session, agendamento: schemas.AgendamentoCreate, usuar
     return novo_agendamento
 
 
-def listar_agendamentos_por_usuario(db: Session, usuario_id: uuid.UUID):
-    return db.query(models.Agendamento)\
-        .options(joinedload(models.Agendamento.barbeiro))\
-        .filter(models.Agendamento.usuario_id == usuario_id).all()
+def listar_agendamentos_por_usuario(db: Session, usuario_id: uuid.UUID) -> List[schemas.AgendamentoResponse]:
+    # Carrega os agendamentos, juntando eagermente os detalhes do usuário e do barbeiro
+    agendamentos_db = db.query(models.Agendamento)\
+        .options(joinedload(models.Agendamento.usuario))\
+        .options(joinedload(models.Agendamento.barbeiro).joinedload(models.Barbeiro.usuario))\
+        .filter(models.Agendamento.usuario_id == usuario_id)\
+        .order_by(models.Agendamento.data_hora.desc())\
+        .all()
+    
+    # Mapeia para o schema de resposta, preenchendo os detalhes do barbeiro
+    agendamentos_response = []
+    for agendamento in agendamentos_db:
+        ag_response = schemas.AgendamentoResponse.model_validate(agendamento)
+        # Garante que o objeto barbeiro na resposta inclui nome e foto do usuário associado
+        if agendamento.barbeiro:
+            ag_response.barbeiro = schemas.BarbeiroParaAgendamento(
+                id=agendamento.barbeiro.id,
+                nome=agendamento.barbeiro.usuario.nome, # Nome do barbeiro vem do relacionamento com usuário
+                foto=agendamento.barbeiro.foto
+            )
+        agendamentos_response.append(ag_response)
+        
+    return agendamentos_response
+
 
 def listar_agendamentos_por_barbeiro(db: Session, barbeiro_id: uuid.UUID):
     return db.query(models.Agendamento)\
         .options(joinedload(models.Agendamento.usuario))\
         .filter(models.Agendamento.barbeiro_id == barbeiro_id).all()
+
+# --- NOVA FUNÇÃO ADICIONADA: CANCELAR AGENDAMENTO ---
+def cancelar_agendamento(db: Session, agendamento_id: uuid.UUID, usuario_id: uuid.UUID) -> Optional[models.Agendamento]:
+    """
+    Cancela um agendamento. Permite cancelamento apenas pelo usuário que agendou.
+    Retorna o agendamento cancelado ou None se não encontrado/não autorizado.
+    """
+    agendamento = db.query(models.Agendamento).filter(models.Agendamento.id == agendamento_id).first()
+    
+    if not agendamento:
+        return None # Agendamento não encontrado
+    
+    # Verifica se o usuário logado é o dono do agendamento
+    if str(agendamento.usuario_id) != str(usuario_id):
+        return None # Usuário não autorizado
+        
+    # Altera o status para "cancelado"
+    agendamento.status = "cancelado"
+    db.commit()
+    db.refresh(agendamento)
+    return agendamento
 
 
 # --------- POSTAGENS E INTERAÇÕES ---------
@@ -208,7 +266,7 @@ def obter_perfil_barbeiro(db: Session, barbeiro_id: uuid.UUID):
     if not barbeiro: return {}
     avaliacoes = listar_avaliacoes_barbeiro(db, barbeiro_id)
     postagens = db.query(models.Postagem).filter(models.Postagem.barbeiro_id == barbeiro_id).all()
-    servicos = listar_servicos_por_barbeiro(db, barbeiro_id) # Adicionado
+    servicos = listar_servicos_por_barbeiro(db, barbeiro_id)
     return {"barbeiro": barbeiro, "avaliacoes": avaliacoes, "postagens": postagens, "servicos": servicos}
 
 

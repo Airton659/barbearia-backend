@@ -33,7 +33,7 @@ class UsuarioParaAgendamento(BaseModel):
     class Config:
         from_attributes = True
 
-class TokenResponse(BaseModel):
+class TokenResponse(BaseBaseModel):
     access_token: str = Field(..., description="Token JWT de acesso")
     token_type: str = Field(default="bearer", description="Tipo do token")
 
@@ -53,6 +53,16 @@ class BarbeiroResponse(BaseModel):
     especialidades: Optional[str] = Field(None, description="Especialidades do barbeiro", example="Corte masculino, barba")
     foto: Optional[str] = Field(None, description="URL da foto do barbeiro", example="https://cdn.com/foto.jpg")
     ativo: bool
+    servicos: List['ServicoResponse'] = [] 
+
+    class Config:
+        from_attributes = True
+
+# --- NOVA CLASSE ADICIONADA: DETALHES DO BARBEIRO PARA AGENDAMENTO ---
+class BarbeiroParaAgendamento(BaseModel):
+    id: UUID
+    nome: str
+    foto: Optional[str] = Field(None, description="URL da foto do barbeiro", example="https://cdn.com/foto.jpg")
 
     class Config:
         from_attributes = True
@@ -86,6 +96,7 @@ class AgendamentoResponse(BaseModel):
     data_hora: datetime
     status: str
     usuario: UsuarioParaAgendamento
+    barbeiro: Optional[BarbeiroParaAgendamento] = None # <--- CAMPO ADICIONADO AQUI!
 
     class Config:
         from_attributes = True
@@ -195,7 +206,7 @@ class BloqueioBase(BaseModel):
 class BloqueioCreate(BloqueioBase):
     pass
 
-class BloqueioResponse(BloqueioBase):
+class BloqueioResponse(BaseModel):
     id: UUID
     barbeiro_id: UUID
 
