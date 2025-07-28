@@ -62,6 +62,37 @@ def resetar_senha(db: Session, usuario: models.Usuario, nova_senha: str):
     db.commit()
     return usuario
 
+# --- NOVAS FUNÇÕES DE ADMIN ADICIONADAS ---
+
+def listar_todos_usuarios(db: Session):
+    """[ADMIN] Retorna uma lista de todos os usuários."""
+    return db.query(models.Usuario).order_by(models.Usuario.nome).all()
+
+def promover_usuario_para_barbeiro(db: Session, usuario_id: uuid.UUID, info_barbeiro: schemas.BarbeiroPromote):
+    """[ADMIN] Promove um usuário para barbeiro e cria seu perfil."""
+    usuario = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
+    if not usuario:
+        return None  # Usuário não encontrado
+
+    barbeiro_existente = buscar_barbeiro_por_usuario_id(db, usuario_id)
+    if barbeiro_existente:
+        return barbeiro_existente  # Usuário já é um barbeiro
+
+    # Promove o usuário mudando seu tipo
+    usuario.tipo = "barbeiro"
+    
+    # Cria o perfil de barbeiro associado
+    barbeiro_data = schemas.BarbeiroCreate(
+        especialidades=info_barbeiro.especialidades,
+        foto=info_barbeiro.foto,
+        ativo=True  # Barbeiros são ativados por padrão ao serem promovidos
+    )
+    novo_barbeiro = criar_barbeiro(db=db, barbeiro=barbeiro_data, usuario_id=usuario_id)
+    
+    db.commit()
+    db.refresh(novo_barbeiro)
+    return novo_barbeiro
+
 
 # --------- BARBEIROS ---------
 
