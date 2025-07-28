@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Integer, Time
+from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Integer, Time, Float
 # Alteração 1: Importar a hybrid_property
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.dialects.postgresql import UUID
@@ -16,10 +16,8 @@ class Usuario(Base):
     nome = Column(String, nullable=False)
     email = Column(String, unique=True, nullable=False)
     senha_hash = Column(String, nullable=False)
-    tipo = Column(String, default="cliente")  # cliente ou admin
+    tipo = Column(String, default="cliente")  # cliente, barbeiro, admin
     
-    # --- ALTERAÇÃO AQUI ---
-    # Novos campos para o fluxo de recuperação de senha
     reset_token = Column(String, unique=True, nullable=True)
     reset_token_expires = Column(DateTime, nullable=True)
 
@@ -47,14 +45,14 @@ class Barbeiro(Base):
     postagens = relationship("Postagem", back_populates="barbeiro")
     avaliacoes = relationship("Avaliacao", back_populates="barbeiro")
     
-    # NOVOS RELACIONAMENTOS ADICIONADOS
     horarios_trabalho = relationship("HorarioTrabalho", back_populates="barbeiro", cascade="all, delete-orphan")
     bloqueios = relationship("Bloqueio", back_populates="barbeiro", cascade="all, delete-orphan")
+    
+    # NOVO RELACIONAMENTO PARA SERVIÇOS
+    servicos = relationship("Servico", back_populates="barbeiro", cascade="all, delete-orphan")
 
-    # Alteração 2: Adicionada a hybrid_property
     @hybrid_property
     def nome(self):
-        """Retorna o nome do usuário associado ao barbeiro."""
         return self.usuario.nome
 
 
@@ -120,13 +118,10 @@ class Avaliacao(Base):
     usuario = relationship("Usuario", back_populates="avaliacoes")
     barbeiro = relationship("Barbeiro", back_populates="avaliacoes")
 
-# --- NOVAS TABELAS PARA DISPONIBILIDADE ---
-
 class HorarioTrabalho(Base):
     __tablename__ = "horarios_trabalho"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     barbeiro_id = Column(UUID(as_uuid=True), ForeignKey("barbeiros.id"), nullable=False)
-    # 0 = Segunda-feira, 1 = Terça-feira, ..., 6 = Domingo
     dia_semana = Column(Integer, nullable=False)
     hora_inicio = Column(Time, nullable=False)
     hora_fim = Column(Time, nullable=False)
@@ -143,3 +138,16 @@ class Bloqueio(Base):
     motivo = Column(String, nullable=True)
 
     barbeiro = relationship("Barbeiro", back_populates="bloqueios")
+
+# --- NOVA TABELA PARA SERVIÇOS ---
+
+class Servico(Base):
+    __tablename__ = "servicos"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    barbeiro_id = Column(UUID(as_uuid=True), ForeignKey("barbeiros.id"), nullable=False)
+    nome = Column(String, nullable=False)
+    descricao = Column(String, nullable=True)
+    preco = Column(Float, nullable=False)
+    duracao_minutos = Column(Integer, nullable=False)
+
+    barbeiro = relationship("Barbeiro", back_populates="servicos")
