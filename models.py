@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Integer
+from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Integer, Time
 # Alteração 1: Importar a hybrid_property
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.dialects.postgresql import UUID
@@ -46,6 +46,10 @@ class Barbeiro(Base):
     agendamentos = relationship("Agendamento", back_populates="barbeiro")
     postagens = relationship("Postagem", back_populates="barbeiro")
     avaliacoes = relationship("Avaliacao", back_populates="barbeiro")
+    
+    # NOVOS RELACIONAMENTOS ADICIONADOS
+    horarios_trabalho = relationship("HorarioTrabalho", back_populates="barbeiro", cascade="all, delete-orphan")
+    bloqueios = relationship("Bloqueio", back_populates="barbeiro", cascade="all, delete-orphan")
 
     # Alteração 2: Adicionada a hybrid_property
     @hybrid_property
@@ -115,3 +119,27 @@ class Avaliacao(Base):
 
     usuario = relationship("Usuario", back_populates="avaliacoes")
     barbeiro = relationship("Barbeiro", back_populates="avaliacoes")
+
+# --- NOVAS TABELAS PARA DISPONIBILIDADE ---
+
+class HorarioTrabalho(Base):
+    __tablename__ = "horarios_trabalho"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    barbeiro_id = Column(UUID(as_uuid=True), ForeignKey("barbeiros.id"), nullable=False)
+    # 0 = Segunda-feira, 1 = Terça-feira, ..., 6 = Domingo
+    dia_semana = Column(Integer, nullable=False)
+    hora_inicio = Column(Time, nullable=False)
+    hora_fim = Column(Time, nullable=False)
+    
+    barbeiro = relationship("Barbeiro", back_populates="horarios_trabalho")
+
+
+class Bloqueio(Base):
+    __tablename__ = "bloqueios"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    barbeiro_id = Column(UUID(as_uuid=True), ForeignKey("barbeiros.id"), nullable=False)
+    inicio = Column(DateTime, nullable=False)
+    fim = Column(DateTime, nullable=False)
+    motivo = Column(String, nullable=True)
+
+    barbeiro = relationship("Barbeiro", back_populates="bloqueios")
