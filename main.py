@@ -3,11 +3,12 @@
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError
-from typing import List, Optional # Adicionado Optional para o filtro
+from typing import List, Optional
 import models, schemas, crud
 import uuid
 import time
-from auth import criar_token, get_current_user, get_current_admin_user # Dependência de admin importada
+from datetime import date, time # Adicionado date e time
+from auth import criar_token, get_current_user, get_current_admin_user
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse
 import httpx
@@ -48,7 +49,6 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     if not usuario or not usuario.verificar_senha(form_data.password):
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
     
-    # Adicionado o 'tipo' do usuário ao payload do token
     token_data = {"sub": str(usuario.id), "tipo": usuario.tipo}
     token = criar_token(token_data)
     return {"access_token": token, "token_type": "bearer"}
@@ -95,9 +95,6 @@ def resetar_senha(request: schemas.ResetarSenhaRequest, db: Session = Depends(ge
 
 @app.get("/admin/usuarios", response_model=List[schemas.UsuarioResponse])
 def admin_listar_usuarios(db: Session = Depends(get_db), admin: models.Usuario = Depends(get_current_admin_user)):
-    """
-    [ADMIN] Retorna uma lista de todos os usuários do sistema.
-    """
     return crud.listar_todos_usuarios(db)
 
 @app.put("/admin/usuarios/{usuario_id}/promover", response_model=schemas.BarbeiroResponse)
@@ -107,9 +104,6 @@ def admin_promover_para_barbeiro(
     db: Session = Depends(get_db), 
     admin: models.Usuario = Depends(get_current_admin_user)
 ):
-    """
-    [ADMIN] Promove um usuário para o tipo de barbeiro e cria seu perfil.
-    """
     barbeiro_criado = crud.promover_usuario_para_barbeiro(db, usuario_id, info_barbeiro)
     if not barbeiro_criado:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
@@ -121,8 +115,6 @@ def admin_promover_para_barbeiro(
 @app.get("/barbeiros", response_model=List[schemas.BarbeiroResponse])
 def listar_barbeiros(db: Session = Depends(get_db), especialidade: Optional[str] = None):
     return crud.listar_barbeiros(db, especialidade=especialidade)
-
-# O endpoint POST /barbeiros foi REMOVIDO daqui
 
 
 # --------- AGENDAMENTOS ---------
@@ -150,7 +142,7 @@ def listar_feed(db: Session = Depends(get_db), limit: int = 10, offset: int = 0)
     return crud.listar_feed(db, limit=limit, offset=offset)
 
 
-# --------- CURTIDAS ---------
+# --------- CURTIDAS E COMENTÁRIOS ---------
 
 @app.post("/postagens/{postagem_id}/curtir")
 def curtir_postagem(postagem_id: uuid.UUID, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
@@ -158,9 +150,6 @@ def curtir_postagem(postagem_id: uuid.UUID, db: Session = Depends(get_db), curre
     if resultado is None and crud.buscar_postagem_por_id(db, postagem_id) is None:
         raise HTTPException(status_code=404, detail="Postagem não encontrada")
     return {"curtida": bool(resultado)}
-
-
-# --------- COMENTÁRIOS ---------
 
 @app.post("/comentarios", response_model=schemas.ComentarioResponse)
 def comentar(comentario: schemas.ComentarioCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
@@ -171,7 +160,7 @@ def listar_comentarios(postagem_id: uuid.UUID, db: Session = Depends(get_db)):
     return crud.listar_comentarios(db, postagem_id)
 
 
-# --------- AVALIAÇÕES ---------
+# --------- AVALIAÇÕES E PERFIS ---------
 
 @app.post("/avaliacoes", response_model=schemas.AvaliacaoResponse)
 def avaliar(avaliacao: schemas.AvaliacaoCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
@@ -181,9 +170,6 @@ def avaliar(avaliacao: schemas.AvaliacaoCreate, db: Session = Depends(get_db), c
 def listar_avaliacoes(barbeiro_id: uuid.UUID, db: Session = Depends(get_db)):
     return crud.listar_avaliacoes_barbeiro(db, barbeiro_id)
 
-
-# --------- PERFIL DO BARBEIRO ---------
-
 @app.get("/perfil_barbeiro/{barbeiro_id}", response_model=schemas.PerfilBarbeiroResponse)
 def perfil_barbeiro(barbeiro_id: uuid.UUID, db: Session = Depends(get_db)):
     perfil = crud.obter_perfil_barbeiro(db, barbeiro_id)
@@ -191,7 +177,8 @@ def perfil_barbeiro(barbeiro_id: uuid.UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Perfil do barbeiro não encontrado")
     return perfil
 
-# --------- DADOS DO BARBEIRO LOGADO ---------
+
+# --------- DADOS E AGENDA DO BARBEIRO LOGADO ---------
 
 @app.get("/me/barbeiro", response_model=schemas.BarbeiroResponse)
 def get_me_barbeiro(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
@@ -201,19 +188,11 @@ def get_me_barbeiro(db: Session = Depends(get_db), current_user: models.Usuario 
     return barbeiro
 
 @app.put("/me/barbeiro/foto", response_model=schemas.BarbeiroResponse)
-def update_barbeiro_foto(
-    foto_data: schemas.BarbeiroUpdateFoto, 
-    db: Session = Depends(get_db), 
-    current_user: models.Usuario = Depends(get_current_user)
-):
+def update_barbeiro_foto(foto_data: schemas.BarbeiroUpdateFoto, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if not barbeiro:
-        raise HTTPException(status_code=404, detail="Barbeiro não encontrado para o usuário logado")
-    
+        raise HTTPException(status_code=404, detail="Barbeiro não encontrado")
     return crud.atualizar_foto_barbeiro(db, barbeiro, foto_url=foto_data.foto_url)
-
-
-# --------- AGENDAMENTOS DO BARBEIRO ---------
 
 @app.get("/me/agendamentos", response_model=List[schemas.AgendamentoResponse])
 def listar_agendamentos_do_barbeiro(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
@@ -223,7 +202,7 @@ def listar_agendamentos_do_barbeiro(db: Session = Depends(get_db), current_user:
     return crud.listar_agendamentos_por_barbeiro(db, barbeiro.id)
 
 
-# --------- UPLOAD DE FOTOS VIA ImgBB ---------
+# --------- UPLOAD DE FOTOS ---------
 
 IMGBB_API_KEY = "f75fe38ca523aab85bf5842130ccd27b"
 IMGBB_UPLOAD_URL = "https://api.imgbb.com/1/upload"
@@ -232,13 +211,39 @@ IMGBB_UPLOAD_URL = "https://api.imgbb.com/1/upload"
 async def upload_foto(file: UploadFile = File(...)):
     contents = await file.read()
     async with httpx.AsyncClient() as client:
-        response = await client.post(
-            IMGBB_UPLOAD_URL,
-            params={"key": IMGBB_API_KEY},
-            files={"image": contents}
-        )
+        response = await client.post(IMGBB_UPLOAD_URL, params={"key": IMGBB_API_KEY}, files={"image": contents})
     if response.status_code != 200:
         raise HTTPException(status_code=500, detail="Erro ao fazer upload da imagem")
     data = response.json()
     url = data["data"]["url"]
     return JSONResponse(content={"url": url})
+
+
+# --------- DISPONIBILIDADE E HORÁRIOS ---------
+
+@app.post("/me/horarios-trabalho", response_model=List[schemas.HorarioTrabalhoResponse])
+def definir_horarios(horarios: List[schemas.HorarioTrabalhoCreate], db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+    barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
+    if not barbeiro:
+        raise HTTPException(status_code=403, detail="Apenas barbeiros podem definir horários.")
+    return crud.definir_horarios_trabalho(db, barbeiro.id, horarios)
+
+@app.post("/me/bloqueios", response_model=schemas.BloqueioResponse)
+def criar_bloqueio(bloqueio: schemas.BloqueioCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+    barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
+    if not barbeiro:
+        raise HTTPException(status_code=403, detail="Apenas barbeiros podem criar bloqueios.")
+    return crud.criar_bloqueio(db, barbeiro.id, bloqueio)
+
+@app.delete("/me/bloqueios/{bloqueio_id}", status_code=204)
+def deletar_bloqueio(bloqueio_id: uuid.UUID, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+    barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
+    if not barbeiro:
+        raise HTTPException(status_code=403, detail="Acesso negado.")
+    if not crud.deletar_bloqueio(db, bloqueio_id, barbeiro.id):
+        raise HTTPException(status_code=404, detail="Bloqueio não encontrado.")
+    return
+
+@app.get("/barbeiros/{barbeiro_id}/horarios-disponiveis", response_model=List[time])
+def get_horarios_disponiveis(barbeiro_id: uuid.UUID, dia: date, db: Session = Depends(get_db)):
+    return crud.calcular_horarios_disponiveis(db, barbeiro_id, dia)
