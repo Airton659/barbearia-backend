@@ -5,9 +5,9 @@ from sqlalchemy import func, and_
 import models, schemas
 from passlib.hash import bcrypt
 import uuid
-from datetime import datetime, timedelta, date, time # Adicionado date e time
-from typing import Optional, List # Adicionado List
-import secrets # Adicionado para gerar tokens seguros
+from datetime import datetime, timedelta, date, time
+from typing import Optional, List
+import secrets
 
 # --------- USUÁRIOS ---------
 
@@ -32,7 +32,6 @@ def buscar_usuario_por_email(db: Session, email: str):
 # --- Funções para o fluxo de recuperação de senha ---
 
 def gerar_token_recuperacao(db: Session, usuario: models.Usuario):
-    """Gera e salva um token de recuperação de senha para um usuário."""
     token = secrets.token_urlsafe(32)
     expires_at = datetime.utcnow() + timedelta(hours=1)
     
@@ -44,14 +43,12 @@ def gerar_token_recuperacao(db: Session, usuario: models.Usuario):
     return token
 
 def buscar_usuario_por_token_recuperacao(db: Session, token: str):
-    """Busca um usuário por um token de recuperação válido."""
     return db.query(models.Usuario).filter(
         models.Usuario.reset_token == token,
         models.Usuario.reset_token_expires > datetime.utcnow()
     ).first()
 
 def resetar_senha(db: Session, usuario: models.Usuario, nova_senha: str):
-    """Atualiza a senha do usuário e invalida o token de recuperação."""
     nova_senha_hash = bcrypt.hash(nova_senha)
     usuario.senha_hash = nova_senha_hash
     
@@ -64,11 +61,9 @@ def resetar_senha(db: Session, usuario: models.Usuario, nova_senha: str):
 # --- Funções de ADMIN ---
 
 def listar_todos_usuarios(db: Session):
-    """[ADMIN] Retorna uma lista de todos os usuários."""
     return db.query(models.Usuario).order_by(models.Usuario.nome).all()
 
 def promover_usuario_para_barbeiro(db: Session, usuario_id: uuid.UUID, info_barbeiro: schemas.BarbeiroPromote):
-    """[ADMIN] Promove um usuário para barbeiro e cria seu perfil."""
     usuario = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
     if not usuario:
         return None
@@ -123,7 +118,6 @@ def atualizar_foto_barbeiro(db: Session, barbeiro: models.Barbeiro, foto_url: st
     db.refresh(barbeiro)
     return barbeiro
 
-# NOVA FUNÇÃO ADICIONADA PARA ATUALIZAR DADOS DO PERFIL
 def atualizar_perfil_barbeiro(db: Session, barbeiro: models.Barbeiro, dados_update: schemas.BarbeiroUpdate):
     if dados_update.especialidades is not None:
         barbeiro.especialidades = dados_update.especialidades
@@ -159,7 +153,7 @@ def listar_agendamentos_por_barbeiro(db: Session, barbeiro_id: uuid.UUID):
         .filter(models.Agendamento.barbeiro_id == barbeiro_id).all()
 
 
-# --------- POSTAGENS E INTERAÇÕES (O restante do arquivo continua o mesmo até o final) ---------
+# --------- POSTAGENS E INTERAÇÕES ---------
 
 def criar_postagem(db: Session, postagem: schemas.PostagemCreate, barbeiro_id: uuid.UUID):
     nova_postagem = models.Postagem(id=uuid.uuid4(),barbeiro_id=barbeiro_id,titulo=postagem.titulo,descricao=postagem.descricao,foto_url=postagem.foto_url,publicada=postagem.publicada,data_postagem=datetime.utcnow())
@@ -214,7 +208,9 @@ def obter_perfil_barbeiro(db: Session, barbeiro_id: uuid.UUID):
     if not barbeiro: return {}
     avaliacoes = listar_avaliacoes_barbeiro(db, barbeiro_id)
     postagens = db.query(models.Postagem).filter(models.Postagem.barbeiro_id == barbeiro_id).all()
-    return {"barbeiro": barbeiro, "avaliacoes": avaliacoes, "postagens": postagens}
+    servicos = listar_servicos_por_barbeiro(db, barbeiro_id) # Adicionado
+    return {"barbeiro": barbeiro, "avaliacoes": avaliacoes, "postagens": postagens, "servicos": servicos}
+
 
 # --------- DISPONIBILIDADE ---------
 
@@ -223,11 +219,7 @@ def definir_horarios_trabalho(db: Session, barbeiro_id: uuid.UUID, horarios: Lis
     
     novos_horarios = []
     for horario in horarios:
-        novo = models.HorarioTrabalho(
-            id=uuid.uuid4(),
-            barbeiro_id=barbeiro_id,
-            **horario.dict()
-        )
+        novo = models.HorarioTrabalho(id=uuid.uuid4(),barbeiro_id=barbeiro_id,**horario.dict())
         novos_horarios.append(novo)
     
     db.add_all(novos_horarios)
@@ -238,21 +230,14 @@ def listar_horarios_trabalho(db: Session, barbeiro_id: uuid.UUID):
     return db.query(models.HorarioTrabalho).filter(models.HorarioTrabalho.barbeiro_id == barbeiro_id).all()
 
 def criar_bloqueio(db: Session, barbeiro_id: uuid.UUID, bloqueio: schemas.BloqueioCreate):
-    novo_bloqueio = models.Bloqueio(
-        id=uuid.uuid4(),
-        barbeiro_id=barbeiro_id,
-        **bloqueio.dict()
-    )
+    novo_bloqueio = models.Bloqueio(id=uuid.uuid4(),barbeiro_id=barbeiro_id,**bloqueio.dict())
     db.add(novo_bloqueio)
     db.commit()
     db.refresh(novo_bloqueio)
     return novo_bloqueio
 
 def deletar_bloqueio(db: Session, bloqueio_id: uuid.UUID, barbeiro_id: uuid.UUID):
-    bloqueio = db.query(models.Bloqueio).filter(
-        models.Bloqueio.id == bloqueio_id,
-        models.Bloqueio.barbeiro_id == barbeiro_id
-    ).first()
+    bloqueio = db.query(models.Bloqueio).filter(models.Bloqueio.id == bloqueio_id, models.Bloqueio.barbeiro_id == barbeiro_id).first()
     if bloqueio:
         db.delete(bloqueio)
         db.commit()
@@ -261,11 +246,7 @@ def deletar_bloqueio(db: Session, bloqueio_id: uuid.UUID, barbeiro_id: uuid.UUID
 
 def calcular_horarios_disponiveis(db: Session, barbeiro_id: uuid.UUID, dia: date, duracao_servico_min: int = 60) -> List[time]:
     dia_semana = dia.weekday()
-
-    horario_trabalho = db.query(models.HorarioTrabalho).filter(
-        models.HorarioTrabalho.barbeiro_id == barbeiro_id,
-        models.HorarioTrabalho.dia_semana == dia_semana
-    ).first()
+    horario_trabalho = db.query(models.HorarioTrabalho).filter(models.HorarioTrabalho.barbeiro_id == barbeiro_id, models.HorarioTrabalho.dia_semana == dia_semana).first()
 
     if not horario_trabalho:
         return []
@@ -278,16 +259,9 @@ def calcular_horarios_disponiveis(db: Session, barbeiro_id: uuid.UUID, dia: date
         slots_disponiveis.append(hora_atual.time())
         hora_atual += timedelta(minutes=duracao_servico_min)
 
-    agendamentos_no_dia = db.query(models.Agendamento).filter(
-        models.Agendamento.barbeiro_id == barbeiro_id,
-        func.date(models.Agendamento.data_hora) == dia
-    ).all()
+    agendamentos_no_dia = db.query(models.Agendamento).filter(models.Agendamento.barbeiro_id == barbeiro_id,func.date(models.Agendamento.data_hora) == dia).all()
     
-    bloqueios_no_dia = db.query(models.Bloqueio).filter(
-        models.Bloqueio.barbeiro_id == barbeiro_id,
-        func.date(models.Bloqueio.inicio) <= dia,
-        func.date(models.Bloqueio.fim) >= dia
-    ).all()
+    bloqueios_no_dia = db.query(models.Bloqueio).filter(models.Bloqueio.barbeiro_id == barbeiro_id, func.date(models.Bloqueio.inicio) <= dia, func.date(models.Bloqueio.fim) >= dia).all()
 
     horarios_ocupados = {ag.data_hora.time() for ag in agendamentos_no_dia}
 
@@ -307,3 +281,19 @@ def calcular_horarios_disponiveis(db: Session, barbeiro_id: uuid.UUID, dia: date
             horarios_finais.append(slot)
             
     return horarios_finais
+
+# --------- SERVIÇOS ---------
+
+def criar_servico(db: Session, servico: schemas.ServicoCreate, barbeiro_id: uuid.UUID):
+    novo_servico = models.Servico(
+        id=uuid.uuid4(),
+        barbeiro_id=barbeiro_id,
+        **servico.dict()
+    )
+    db.add(novo_servico)
+    db.commit()
+    db.refresh(novo_servico)
+    return novo_servico
+
+def listar_servicos_por_barbeiro(db: Session, barbeiro_id: uuid.UUID):
+    return db.query(models.Servico).filter(models.Servico.barbeiro_id == barbeiro_id).order_by(models.Servico.nome).all()
