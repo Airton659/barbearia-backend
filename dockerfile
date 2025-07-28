@@ -1,5 +1,5 @@
 # Usa uma imagem base Python otimizada para aplicações web
-FROM python:3.12-slim-buster
+FROM python:3.11-slim-buster
 
 # Define o diretório de trabalho dentro do contêiner
 WORKDIR /app
