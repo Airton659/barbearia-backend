@@ -1,7 +1,7 @@
 import pytest
 import httpx
 
-API_URL = "https://barbearia-backend-dw3o.onrender.com"
+API_URL = "https://barbearia-backend-service-198513369137.southamerica-east1.run.app"
 # Define um timeout padrão para os testes, evitando erros no "cold start" do Render
 DEFAULT_TIMEOUT = 30.0
 

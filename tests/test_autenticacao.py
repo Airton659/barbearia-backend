@@ -1,7 +1,7 @@
 import requests
 import uuid
 
-BASE_URL = "https://barbearia-backend-dw3o.onrender.com"
+BASE_URL = "https://barbearia-backend-service-198513369137.southamerica-east1.run.app"
 
 def test_criar_usuario_e_autenticar():
     email = f"teste_{uuid.uuid4()}@email.com"

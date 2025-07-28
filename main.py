@@ -7,6 +7,7 @@ from typing import List, Optional
 import models, schemas, crud
 import uuid
 import time
+import os
 from datetime import date, time
 from auth import criar_token, get_current_user, get_current_admin_user
 from fastapi.security import OAuth2PasswordRequestForm

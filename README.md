@@ -14,7 +14,7 @@ Esta API foi desenvolvida para ser o backend de uma aplicação de agendamento e
 
 Após um ciclo intenso de desenvolvimento e depuração, todos os endpoints planejados foram implementados e validados por uma suíte de 12 testes automatizados. A base do projeto está estável e pronta para ser consumida por uma aplicação frontend.
 
-**URL Base da API:** `https://barbearia-backend-dw3o.onrender.com`
+**URL Base da API:** `https://barbearia-backend-service-198513369137.southamerica-east1.run.app`
 
 -----
 
@@ -23,7 +23,7 @@ Após um ciclo intenso de desenvolvimento e depuração, todos os endpoints plan
 Para interagir com os endpoints, você pode usar uma ferramenta de cliente HTTP como o [Postman](https://www.postman.com/) ou [Insomnia](https://insomnia.rest/).
 
 1.  **Copie a URL Base** acima.
-2.  Combine-a com um dos endpoints listados abaixo (ex: `https://barbearia-backend-dw3o.onrender.com/barbeiros`).
+2.  Combine-a com um dos endpoints listados abaixo (ex: `https://barbearia-backend-service-198513369137.southamerica-east1.run.app/barbeiros`).
 3.  Escolha o método HTTP correto (GET, POST, etc.).
 4.  Para endpoints que exigem autenticação, primeiro use o endpoint `POST /login` para obter um `access_token` e adicione-o ao cabeçalho (Header) das suas requisições da seguinte forma:
       * **Key**: `Authorization`
