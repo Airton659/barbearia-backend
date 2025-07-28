@@ -58,3 +58,17 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
     return usuario
+
+# --- NOVA FUNÇÃO DE DEPENDÊNCIA ADICIONADA ---
+
+def get_current_admin_user(current_user: models.Usuario = Depends(get_current_user)) -> models.Usuario:
+    """
+    Verifica se o usuário atual é um administrador.
+    Se não for, lança uma exceção HTTP 403 (Forbidden).
+    """
+    if current_user.tipo != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado: esta operação requer privilégios de administrador."
+        )
+    return current_user
