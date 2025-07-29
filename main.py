@@ -1,6 +1,6 @@
 # barbearia-backend/main.py
 
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, status # Importe 'status'
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError
 from typing import List, Optional
@@ -8,13 +8,13 @@ import models, schemas, crud
 import uuid
 import time
 import os
-from datetime import date, time
+from datetime import date, time, timedelta # Adicionado timedelta aqui
 from auth import criar_token, get_current_user, get_current_admin_user
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse
 import httpx
 from database import get_db, engine
-from google.cloud import storage # Necessário para o upload de fotos para o Cloud Storage
+from google.cloud import storage 
 
 app = FastAPI()
 
@@ -129,7 +129,6 @@ def agendar(agendamento: schemas.AgendamentoCreate, db: Session = Depends(get_db
 def listar_agendamentos(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
     return crud.listar_agendamentos_por_usuario(db, current_user.id)
 
-# --- NOVO ENDPOINT ADICIONADO: CANCELAR AGENDAMENTO ---
 @app.delete("/agendamentos/{agendamento_id}", status_code=status.HTTP_204_NO_CONTENT)
 def cancelar_agendamento_endpoint(
     agendamento_id: uuid.UUID,
@@ -227,7 +226,6 @@ def listar_agendamentos_do_barbeiro(db: Session = Depends(get_db), current_user:
         raise HTTPException(status_code=404, detail="Barbeiro não encontrado")
     return crud.listar_agendamentos_por_barbeiro(db, barbeiro.id)
 
-# --- NOVO ENDPOINT ADICIONADO (Já existia no contexto anterior) ---
 @app.get("/me/horarios-trabalho", response_model=List[schemas.HorarioTrabalhoResponse])
 def get_me_horarios_trabalho(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
     """
@@ -241,16 +239,14 @@ def get_me_horarios_trabalho(db: Session = Depends(get_db), current_user: models
 
 # --------- UPLOAD DE FOTOS ---------
 
-# IMGBB_API_KEY e IMGBB_UPLOAD_URL serão removidos ao migrar para Cloud Storage
 IMGBB_API_KEY = "f75fe38ca523aab85bf5842130ccd27b"
 IMGBB_UPLOAD_URL = "https://api.imgbb.com/1/upload"
 
-# Defina o nome do seu bucket do Cloud Storage (será uma variável de ambiente no Cloud Run)
 CLOUD_STORAGE_BUCKET_NAME = os.getenv("CLOUD_STORAGE_BUCKET_NAME")
 
 @app.post("/upload_foto")
-async def upload_foto(file: UploadFile = File(...)):
-    # Lógica de upload para ImgBB (original)
+async def upload_foto(file: UploadFile = File(...), current_user: models.Usuario = Depends(get_current_user)): # <--- ADIÇÃO DO security requirement
+    # Lógica de upload para ImgBB (original) - MANTIDA COMENTADA
     # contents = await file.read()
     # async with httpx.AsyncClient() as client:
     #     response = await client.post(IMGBB_UPLOAD_URL, params={"key": IMGBB_API_KEY}, files={"image": contents})
@@ -272,9 +268,9 @@ async def upload_foto(file: UploadFile = File(...)):
     blob = bucket.blob(filename)
 
     contents = await file.read()
-    blob.upload_from_string(contents, content_type=file.content_type)
+    blob.upload_from_string(contents, content_type=file.content_type, predefined_acl='publicRead') # ALTERAÇÃO: predefined_acl
 
-    # A URL pública do objeto no Cloud Storage (ajuste conforme a configuração de acesso do seu bucket)
+    # A URL pública do objeto no Cloud Storage
     url = f"https://storage.googleapis.com/{CLOUD_STORAGE_BUCKET_NAME}/{filename}"
     return JSONResponse(content={"url": url})
 

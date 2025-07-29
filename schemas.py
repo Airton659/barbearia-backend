@@ -33,7 +33,7 @@ class UsuarioParaAgendamento(BaseModel):
     class Config:
         from_attributes = True
 
-class TokenResponse(BaseBaseModel):
+class TokenResponse(BaseModel):
     access_token: str = Field(..., description="Token JWT de acesso")
     token_type: str = Field(default="bearer", description="Tipo do token")
 
