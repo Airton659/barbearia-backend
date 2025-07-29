@@ -246,34 +246,44 @@ CLOUD_STORAGE_BUCKET_NAME = os.getenv("CLOUD_STORAGE_BUCKET_NAME")
 
 @app.post("/upload_foto")
 async def upload_foto(file: UploadFile = File(...), current_user: models.Usuario = Depends(get_current_user)): # <--- ADIÇÃO DO security requirement
-    # Lógica de upload para ImgBB (original) - MANTIDA COMENTADA
-    # contents = await file.read()
-    # async with httpx.AsyncClient() as client:
-    #     response = await client.post(IMGBB_UPLOAD_URL, params={"key": IMGBB_API_KEY}, files={"image": contents})
-    # if response.status_code != 200:
-    #     raise HTTPException(status_code=500, detail="Erro ao fazer upload da imagem")
-    # data = response.json()
-    # url = data["data"]["url"]
-    # return JSONResponse(content={"url": url})
+    try: # Início do bloco try
+        # Lógica de upload para ImgBB (original) - MANTIDA COMENTADA
+        # contents = await file.read()
+        # async with httpx.AsyncClient() as client:
+        #     response = await client.post(IMGBB_UPLOAD_URL, params={"key": IMGBB_API_KEY}, files={"image": contents})
+        # if response.status_code != 200:
+        #     raise HTTPException(status_code=500, detail="Erro ao fazer upload da imagem")
+        # data = response.json()
+        # url = data["data"]["url"]
+        # return JSONResponse(content={"url": url})
 
-    # Lógica de upload para Google Cloud Storage (nova)
-    if not CLOUD_STORAGE_BUCKET_NAME:
-        raise HTTPException(status_code=500, detail="Nome do bucket do Cloud Storage não configurado.")
+        # Lógica de upload para Google Cloud Storage (nova)
+        if not CLOUD_STORAGE_BUCKET_NAME:
+            raise HTTPException(status_code=500, detail="Nome do bucket do Cloud Storage não configurado.")
 
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(CLOUD_STORAGE_BUCKET_NAME)
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(CLOUD_STORAGE_BUCKET_NAME)
 
-    # Gere um nome de arquivo único para evitar colisões
-    filename = f"uploads/{uuid.uuid4()}-{file.filename}"
-    blob = bucket.blob(filename)
+        # Gere um nome de arquivo único para evitar colisões
+        filename = f"uploads/{uuid.uuid4()}-{file.filename}"
+        blob = bucket.blob(filename)
 
-    contents = await file.read()
-    blob.upload_from_string(contents, content_type=file.content_type, predefined_acl='publicRead') # ALTERAÇÃO: predefined_acl
+        contents = await file.read()
+        # >>> A LINHA ABAIXO É A QUE PRECISA SER MODIFICADA <<<
+        # ANTES: blob.upload_from_string(contents, content_type=file.content_type, predefined_acl='publicRead')
+        # DEPOIS:
+        blob.upload_from_string(contents, content_type=file.content_type) # ALTERAÇÃO: predefined_acl foi REMOVIDO
 
-    # A URL pública do objeto no Cloud Storage
-    url = f"https://storage.googleapis.com/{CLOUD_STORAGE_BUCKET_NAME}/{filename}"
-    return JSONResponse(content={"url": url})
+        # A URL pública do objeto no Cloud Storage
+        url = f"https://storage.googleapis.com/{CLOUD_STORAGE_BUCKET_NAME}/{filename}"
+        return JSONResponse(content={"url": url})
 
+    except Exception as e: # Captura qualquer exceção
+        # ESTA É A PARTE MAIS IMPORTANTE!
+        # Isso força o erro a ser impresso nos logs do Cloud Run.
+        print(f"ERRO CRÍTICO NO UPLOAD: {e}") 
+        # Retorna um erro 500 genérico para o cliente
+        raise HTTPException(status_code=500, detail=f"Ocorreu um erro interno no servidor: {e}")
 
 # --------- DISPONIBILIDADE E HORÁRIOS ---------
 
