@@ -51,7 +51,10 @@ class BarbeiroResponse(BaseModel):
     id: UUID
     nome: str
     especialidades: Optional[str] = Field(None, description="Especialidades do barbeiro", example="Corte masculino, barba")
-    foto: Optional[str] = Field(None, description="URL da foto do barbeiro", example="https://cdn.com/foto.jpg")
+    # ALTERAÇÃO AQUI: renomear 'foto' para 'foto_original' e adicionar novos campos
+    foto_original: Optional[str] = Field(None, description="URL da foto original do barbeiro", example="https://cdn.com/foto_original.jpg")
+    foto_medium: Optional[str] = Field(None, description="URL da foto média do barbeiro") # Novo campo
+    foto_thumbnail: Optional[str] = Field(None, description="URL da foto em miniatura do barbeiro") # Novo campo
     ativo: bool
     servicos: List['ServicoResponse'] = [] 
 
@@ -62,26 +65,30 @@ class BarbeiroResponse(BaseModel):
 class BarbeiroParaAgendamento(BaseModel):
     id: UUID
     nome: str
-    foto: Optional[str] = Field(None, description="URL da foto do barbeiro", example="https://cdn.com/foto.jpg")
+    # ALTERAÇÃO AQUI: Usar a URL mais apropriada para a listagem (thumbnail ou medium)
+    foto_thumbnail: Optional[str] = Field(None, description="URL da foto em miniatura do barbeiro", example="https://cdn.com/foto_thumb.jpg")
 
     class Config:
         from_attributes = True
 
 class BarbeiroCreate(BaseModel):
     especialidades: Optional[str] = Field(None, max_length=200, description="Especialidades do barbeiro", example="Corte, Barba, Sobrancelha")
-    foto: Optional[str] = Field(None, description="URL da foto", example="https://cdn.com/foto.jpg")
+    # Remover 'foto' aqui, pois ela virá do upload, não da criação inicial
     ativo: bool = Field(default=True, description="Define se o barbeiro está ativo")
 
 class BarbeiroUpdateFoto(BaseModel):
-    foto_url: str = Field(..., description="Nova URL da foto do barbeiro")
+    # Esta classe ainda pode ser usada, mas o upload_foto endpoint será o principal para gerar as URLs
+    # Esta classe agora aceitará um dicionário de URLs, ou será usada de forma mais limitada.
+    # Por enquanto, mantendo foto_url para compatibilidade, mas o endpoint de upload retornará mais.
+    foto_url: str = Field(..., description="URL da foto original do barbeiro (para casos específicos de update ou se o frontend enviar apenas uma)")
 
 class BarbeiroUpdate(BaseModel):
     especialidades: Optional[str] = Field(None, max_length=200, description="Novas especialidades do barbeiro")
 
 class BarbeiroPromote(BaseModel):
     especialidades: str = Field(..., description="Especialidades iniciais do barbeiro")
-    foto: Optional[str] = Field(None, description="URL da foto inicial do barbeiro")
-
+    # Remover 'foto' aqui, pois ela virá do upload, não da promoção
+    
 
 # ---------- AGENDAMENTO ----------
 
@@ -96,7 +103,7 @@ class AgendamentoResponse(BaseModel):
     data_hora: datetime
     status: str
     usuario: UsuarioParaAgendamento
-    barbeiro: Optional[BarbeiroParaAgendamento] = None # <--- CAMPO ADICIONADO AQUI!
+    barbeiro: Optional[BarbeiroParaAgendamento] = None
 
     class Config:
         from_attributes = True
@@ -107,7 +114,8 @@ class AgendamentoResponse(BaseModel):
 class PostagemCreate(BaseModel):
     titulo: str = Field(..., min_length=3, max_length=100, description="Título da postagem", example="Corte degradê com navalha")
     descricao: Optional[str] = Field(None, max_length=300, description="Descrição opcional", example="Esse corte foi feito em 40min com acabamento na navalha.")
-    foto_url: str = Field(..., description="URL da foto da postagem", example="https://cdn.com/corte1.jpg")
+    # Remover 'foto_url' aqui, pois ela virá do processo de upload e será manipulada pelo backend
+    # O endpoint criar_postagem receberá as URLs diretamente do backend ou de um passo anterior
     publicada: bool = Field(default=True, description="Define se a postagem está publicada")
 
 class PostagemResponse(BaseModel):
@@ -115,7 +123,10 @@ class PostagemResponse(BaseModel):
     barbeiro_id: UUID
     titulo: str
     descricao: Optional[str]
-    foto_url: str
+    # ALTERAÇÃO AQUI: renomear 'foto_url' para 'foto_url_original' e adicionar novos campos
+    foto_url_original: str
+    foto_url_medium: Optional[str] # Novo campo
+    foto_url_thumbnail: Optional[str] # Novo campo
     data_postagem: datetime
     publicada: bool
 

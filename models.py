@@ -37,7 +37,10 @@ class Barbeiro(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), unique=True, nullable=False)
     especialidades = Column(String)
-    foto = Column(String)
+    # ALTERAÇÃO AQUI: renomear 'foto' para 'foto_original' e adicionar novos campos
+    foto_original = Column(String)
+    foto_medium = Column(String) # Novo campo
+    foto_thumbnail = Column(String) # Novo campo
     ativo = Column(Boolean, default=True)
 
     usuario = relationship("Usuario", back_populates="barbeiro", lazy="joined")
@@ -74,7 +77,10 @@ class Postagem(Base):
     barbeiro_id = Column(UUID(as_uuid=True), ForeignKey("barbeiros.id"))
     titulo = Column(String, nullable=False)
     descricao = Column(String)
-    foto_url = Column(String, nullable=False)
+    # ALTERAÇÃO AQUI: renomear 'foto_url' para 'foto_url_original' e adicionar novos campos
+    foto_url_original = Column(String, nullable=False)
+    foto_url_medium = Column(String) # Novo campo
+    foto_url_thumbnail = Column(String) # Novo campo
     data_postagem = Column(DateTime, nullable=False)
     publicada = Column(Boolean, default=True)
 

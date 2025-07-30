@@ -8,15 +8,21 @@ import models, schemas, crud
 import uuid
 import time
 import os
-from datetime import date, time, timedelta # Adicionado timedelta aqui
+from datetime import date, time, timedelta
 from auth import criar_token, get_current_user, get_current_admin_user
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse
 import httpx
 from database import get_db, engine
 from google.cloud import storage 
+from PIL import Image
+from io import BytesIO
 
 app = FastAPI()
+
+# AQUI: A variável CLOUD_STORAGE_BUCKET_NAME é definida globalmente
+# Vamos manter a definição global, mas garantir a verificação dentro das funções.
+CLOUD_STORAGE_BUCKET_NAME_GLOBAL = os.getenv("CLOUD_STORAGE_BUCKET_NAME")
 
 @app.on_event("startup")
 def startup():
@@ -149,11 +155,26 @@ def cancelar_agendamento_endpoint(
 # --------- FEED / POSTAGENS ---------
 
 @app.post("/postagens", response_model=schemas.PostagemResponse)
-def criar_postagem(postagem: schemas.PostagemCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+async def criar_postagem(
+    postagem: schemas.PostagemCreate, 
+    db: Session = Depends(get_db), 
+    current_user: models.Usuario = Depends(get_current_user),
+    # Esperamos que o frontend envie as URLs de diferentes tamanhos
+    foto_urls: dict = File(..., description="URLs da imagem em diferentes tamanhos (original, medium, thumbnail)")
+):
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if not barbeiro:
         raise HTTPException(status_code=403, detail="Apenas barbeiros podem criar postagens")
-    return crud.criar_postagem(db, postagem, barbeiro_id=barbeiro.id)
+
+    # Passa as URLs recebidas para a função CRUD
+    return crud.criar_postagem(
+        db, 
+        postagem, 
+        barbeiro_id=barbeiro.id,
+        foto_url_original=foto_urls.get("original"),
+        foto_url_medium=foto_urls.get("medium"),
+        foto_url_thumbnail=foto_urls.get("thumbnail")
+    )
 
 @app.get("/feed", response_model=List[schemas.PostagemResponse])
 def listar_feed(db: Session = Depends(get_db), limit: int = 10, offset: int = 0):
@@ -213,11 +234,45 @@ def update_me_barbeiro(dados_update: schemas.BarbeiroUpdate, db: Session = Depen
     return crud.atualizar_perfil_barbeiro(db, barbeiro, dados_update)
 
 @app.put("/me/barbeiro/foto", response_model=schemas.BarbeiroResponse)
-def update_barbeiro_foto(foto_data: schemas.BarbeiroUpdateFoto, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+async def update_barbeiro_foto(
+    file: UploadFile = File(...), # Recebe o arquivo diretamente como no /upload_foto
+    db: Session = Depends(get_db), 
+    current_user: models.Usuario = Depends(get_current_user)
+):
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if not barbeiro:
         raise HTTPException(status_code=404, detail="Barbeiro não encontrado")
-    return crud.atualizar_foto_barbeiro(db, barbeiro, foto_url=foto_data.foto_url)
+
+    try:
+        # ATENÇÃO AQUI: Acessando a variável global CLOUD_STORAGE_BUCKET_NAME_GLOBAL
+        # e verificando se ela tem um valor antes de usar.
+        if not CLOUD_STORAGE_BUCKET_NAME_GLOBAL:
+            raise HTTPException(status_code=500, detail="Nome do bucket do Cloud Storage não configurado.")
+
+        file_content = await file.read()
+        filename_base = f"barbeiro_{barbeiro.id}-{os.path.splitext(file.filename)[0]}" 
+        
+        # Chama a nova função auxiliar para fazer upload e redimensionar, passando o bucket name
+        uploaded_urls = await upload_and_resize_image(
+            file_content=file_content,
+            filename_base=filename_base,
+            bucket_name=CLOUD_STORAGE_BUCKET_NAME_GLOBAL, # <-- Usando a variável GLOBAL corrigida
+            content_type=file.content_type # Passa o content_type original do arquivo
+        )
+        
+        # Atualiza o banco de dados com todas as URLs geradas
+        return crud.atualizar_foto_barbeiro(
+            db, 
+            barbeiro, 
+            foto_url_original=uploaded_urls.get("original"),
+            foto_url_medium=uploaded_urls.get("medium"),
+            foto_url_thumbnail=uploaded_urls.get("thumbnail")
+        )
+
+    except Exception as e:
+        print(f"ERRO CRÍTICO NO UPLOAD DE FOTO DE BARBEIRO: {e}") 
+        raise HTTPException(status_code=500, detail=f"Ocorreu um erro interno no servidor ao atualizar a foto: {e}")
+
 
 @app.get("/me/agendamentos", response_model=List[schemas.AgendamentoResponse])
 def listar_agendamentos_do_barbeiro(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
@@ -237,53 +292,100 @@ def get_me_horarios_trabalho(db: Session = Depends(get_db), current_user: models
     return crud.listar_horarios_trabalho(db, barbeiro.id)
 
 
-# --------- UPLOAD DE FOTOS ---------
+# FUNÇÃO AUXILIAR PARA UPLOAD E REDIMENSIONAMENTO
+async def upload_and_resize_image(
+    file_content: bytes, 
+    filename_base: str, 
+    bucket_name: str,
+    content_type: str # Adicionar content_type para garantir formato correto
+) -> dict:
+    """
+    Faz o upload da imagem original e de versões redimensionadas para o GCS.
+    Retorna um dicionário com as URLs de cada tamanho.
+    """
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
 
-IMGBB_API_KEY = "f75fe38ca523aab85bf5842130ccd27b"
-IMGBB_UPLOAD_URL = "https://api.imgbb.com/1/upload"
+    urls = {}
+    
+    # Gerar a extensão do arquivo a partir do content_type ou do filename_base, por segurança
+    # Assumindo que o content_type é 'image/jpeg' ou 'image/png'
+    extension = ".jpeg"
+    if "png" in content_type:
+        extension = ".png"
+    elif "gif" in content_type:
+        extension = ".gif" # Adicionar suporte se necessário
 
-CLOUD_STORAGE_BUCKET_NAME = os.getenv("CLOUD_STORAGE_BUCKET_NAME")
+    # Upload da imagem original
+    original_blob_name = f"uploads/{filename_base}_original{extension}"
+    original_blob = bucket.blob(original_blob_name)
+    original_blob.upload_from_string(file_content, content_type=content_type)
+    urls['original'] = f"https://storage.googleapis.com/{bucket_name}/{original_blob_name}"
+
+    # Abrir a imagem para redimensionamento
+    image = Image.open(BytesIO(file_content))
+    # Converter para RGB se for PNG com RGBA, para evitar erros ao salvar como JPEG
+    if image.mode == 'RGBA':
+        image = image.convert('RGB')
+
+    # Redimensionamento e Upload de versão média
+    medium_size = (800, 800) # Exemplo: 800px de largura máxima, altura proporcional
+    image_medium = image.copy() # Copia para não alterar a original
+    image_medium.thumbnail(medium_size, Image.Resampling.LANCZOS) # Melhor qualidade de redimensionamento
+    
+    buffer_medium = BytesIO()
+    # Salvar como JPEG para otimização, mesmo que a original fosse PNG
+    image_medium.save(buffer_medium, format="JPEG", quality=85) 
+    buffer_medium.seek(0)
+    
+    medium_blob_name = f"uploads/{filename_base}_medium.jpeg" # Sempre JPEG para versões otimizadas
+    medium_blob = bucket.blob(medium_blob_name)
+    medium_blob.upload_from_string(buffer_medium.getvalue(), content_type="image/jpeg")
+    urls['medium'] = f"https://storage.googleapis.com/{bucket_name}/{medium_blob_name}"
+
+    # Redimensionamento e Upload de thumbnail
+    thumbnail_size = (200, 200) # Exemplo: 200x200 para thumbnails
+    image_thumbnail = image.copy() # Abrir a original novamente (ou a RGB convertida)
+    image_thumbnail.thumbnail(thumbnail_size, Image.Resampling.LANCZOS)
+    
+    buffer_thumbnail = BytesIO()
+    image_thumbnail.save(buffer_thumbnail, format="JPEG", quality=85)
+    buffer_thumbnail.seek(0)
+    
+    thumbnail_blob_name = f"uploads/{filename_base}_thumbnail.jpeg" # Sempre JPEG para versões otimizadas
+    thumbnail_blob = bucket.blob(thumbnail_blob_name)
+    thumbnail_blob.upload_from_string(buffer_thumbnail.getvalue(), content_type="image/jpeg")
+    urls['thumbnail'] = f"https://storage.googleapis.com/{bucket_name}/{thumbnail_blob_name}"
+
+    return urls
 
 @app.post("/upload_foto")
-async def upload_foto(file: UploadFile = File(...), current_user: models.Usuario = Depends(get_current_user)): # <--- ADIÇÃO DO security requirement
-    try: # Início do bloco try
-        # Lógica de upload para ImgBB (original) - MANTIDA COMENTADA
-        # contents = await file.read()
-        # async with httpx.AsyncClient() as client:
-        #     response = await client.post(IMGBB_UPLOAD_URL, params={"key": IMGBB_API_KEY}, files={"image": contents})
-        # if response.status_code != 200:
-        #     raise HTTPException(status_code=500, detail="Erro ao fazer upload da imagem")
-        # data = response.json()
-        # url = data["data"]["url"]
-        # return JSONResponse(content={"url": url})
-
-        # Lógica de upload para Google Cloud Storage (nova)
-        if not CLOUD_STORAGE_BUCKET_NAME:
+async def upload_foto(file: UploadFile = File(...), current_user: models.Usuario = Depends(get_current_user)):
+    try:
+        # ATENÇÃO AQUI: Acessando a variável global CLOUD_STORAGE_BUCKET_NAME_GLOBAL
+        # e verificando se ela tem um valor antes de usar.
+        if not CLOUD_STORAGE_BUCKET_NAME_GLOBAL:
             raise HTTPException(status_code=500, detail="Nome do bucket do Cloud Storage não configurado.")
 
-        storage_client = storage.Client()
-        bucket = storage_client.bucket(CLOUD_STORAGE_BUCKET_NAME)
+        file_content = await file.read()
+        # Usa o nome original do arquivo para base, mas sem a extensão para que a função auxiliar adicione
+        filename_base = f"{uuid.uuid4()}-{os.path.splitext(file.filename)[0]}" 
+        
+        # Chama a nova função auxiliar para fazer upload e redimensionar
+        uploaded_urls = await upload_and_resize_image(
+            file_content=file_content,
+            filename_base=filename_base,
+            bucket_name=CLOUD_STORAGE_BUCKET_NAME_GLOBAL, # <-- Usando a variável GLOBAL corrigida
+            content_type=file.content_type # Passa o content_type original do arquivo
+        )
 
-        # Gere um nome de arquivo único para evitar colisões
-        filename = f"uploads/{uuid.uuid4()}-{file.filename}"
-        blob = bucket.blob(filename)
+        # Retorna todas as URLs geradas
+        return JSONResponse(content=uploaded_urls)
 
-        contents = await file.read()
-        # >>> A LINHA ABAIXO É A QUE PRECISA SER MODIFICADA <<<
-        # ANTES: blob.upload_from_string(contents, content_type=file.content_type, predefined_acl='publicRead')
-        # DEPOIS:
-        blob.upload_from_string(contents, content_type=file.content_type) # ALTERAÇÃO: predefined_acl foi REMOVIDO
-
-        # A URL pública do objeto no Cloud Storage
-        url = f"https://storage.googleapis.com/{CLOUD_STORAGE_BUCKET_NAME}/{filename}"
-        return JSONResponse(content={"url": url})
-
-    except Exception as e: # Captura qualquer exceção
-        # ESTA É A PARTE MAIS IMPORTANTE!
-        # Isso força o erro a ser impresso nos logs do Cloud Run.
+    except Exception as e:
         print(f"ERRO CRÍTICO NO UPLOAD: {e}") 
-        # Retorna um erro 500 genérico para o cliente
         raise HTTPException(status_code=500, detail=f"Ocorreu um erro interno no servidor: {e}")
+
 
 # --------- DISPONIBILIDADE E HORÁRIOS ---------
 

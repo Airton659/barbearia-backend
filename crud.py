@@ -74,10 +74,11 @@ def promover_usuario_para_barbeiro(db: Session, usuario_id: uuid.UUID, info_barb
 
     usuario.tipo = "barbeiro"
     
+    # O campo 'foto' foi removido de BarbeiroCreate no schemas, então ele não pode ser passado diretamente aqui.
+    # A foto será manipulada pelo upload_foto e depois atualizada via atualizar_foto_barbeiro, se necessário.
     barbeiro_data = schemas.BarbeiroCreate(
         especialidades=info_barbeiro.especialidades,
-        foto=info_barbeiro.foto,
-        ativo=True
+        ativo=True # foto foi removida do schemas.BarbeiroCreate
     )
     novo_barbeiro = criar_barbeiro(db=db, barbeiro=barbeiro_data, usuario_id=usuario_id)
     
@@ -103,8 +104,7 @@ def listar_barbeiros(db: Session, especialidade: Optional[str] = None) -> List[s
         # Pega os serviços para o barbeiro atual
         servicos_do_barbeiro = listar_servicos_por_barbeiro(db, barbeiro.id)
         
-        # Cria uma instância de BarbeiroResponse e preenche os campos
-        # Usa .from_orm() para preencher automaticamente campos mapeados e, em seguida, adiciona os serviços
+        # Cria uma instância de BarbeiroResponse e preenche os campos, incluindo as novas URLs de foto
         barbeiro_response = schemas.BarbeiroResponse.model_validate(barbeiro)
         barbeiro_response.servicos = [schemas.ServicoResponse.model_validate(s) for s in servicos_do_barbeiro]
         
@@ -118,7 +118,10 @@ def criar_barbeiro(db: Session, barbeiro: schemas.BarbeiroCreate, usuario_id: uu
         id=uuid.uuid4(),
         usuario_id=usuario_id,
         especialidades=barbeiro.especialidades,
-        foto=barbeiro.foto,
+        # foto foi removida de schemas.BarbeiroCreate, então inicializamos como None
+        foto_original=None, 
+        foto_medium=None,
+        foto_thumbnail=None,
         ativo=barbeiro.ativo
     )
     db.add(novo_barbeiro)
@@ -129,8 +132,17 @@ def criar_barbeiro(db: Session, barbeiro: schemas.BarbeiroCreate, usuario_id: uu
 def buscar_barbeiro_por_usuario_id(db: Session, usuario_id: uuid.UUID):
     return db.query(models.Barbeiro).options(joinedload(models.Barbeiro.usuario)).filter(models.Barbeiro.usuario_id == usuario_id).first()
 
-def atualizar_foto_barbeiro(db: Session, barbeiro: models.Barbeiro, foto_url: str):
-    barbeiro.foto = foto_url
+# ALTERAÇÃO AQUI: Atualizar para receber todas as URLs de foto
+def atualizar_foto_barbeiro(
+    db: Session, 
+    barbeiro: models.Barbeiro, 
+    foto_url_original: str, 
+    foto_url_medium: Optional[str] = None, 
+    foto_url_thumbnail: Optional[str] = None
+):
+    barbeiro.foto_original = foto_url_original
+    barbeiro.foto_medium = foto_url_medium
+    barbeiro.foto_thumbnail = foto_url_thumbnail
     db.commit()
     db.refresh(barbeiro)
     return barbeiro
@@ -177,7 +189,7 @@ def listar_agendamentos_por_usuario(db: Session, usuario_id: uuid.UUID) -> List[
             ag_response.barbeiro = schemas.BarbeiroParaAgendamento(
                 id=agendamento.barbeiro.id,
                 nome=agendamento.barbeiro.usuario.nome, # Nome do barbeiro vem do relacionamento com usuário
-                foto=agendamento.barbeiro.foto
+                foto_thumbnail=agendamento.barbeiro.foto_thumbnail # ALTERAÇÃO AQUI: usar foto_thumbnail
             )
         agendamentos_response.append(ag_response)
         
@@ -213,8 +225,26 @@ def cancelar_agendamento(db: Session, agendamento_id: uuid.UUID, usuario_id: uui
 
 # --------- POSTAGENS E INTERAÇÕES ---------
 
-def criar_postagem(db: Session, postagem: schemas.PostagemCreate, barbeiro_id: uuid.UUID):
-    nova_postagem = models.Postagem(id=uuid.uuid4(),barbeiro_id=barbeiro_id,titulo=postagem.titulo,descricao=postagem.descricao,foto_url=postagem.foto_url,publicada=postagem.publicada,data_postagem=datetime.utcnow())
+# ALTERAÇÃO AQUI: Atualizar para receber todas as URLs de foto
+def criar_postagem(
+    db: Session, 
+    postagem: schemas.PostagemCreate, 
+    barbeiro_id: uuid.UUID,
+    foto_url_original: str,
+    foto_url_medium: Optional[str] = None,
+    foto_url_thumbnail: Optional[str] = None
+):
+    nova_postagem = models.Postagem(
+        id=uuid.uuid4(),
+        barbeiro_id=barbeiro_id,
+        titulo=postagem.titulo,
+        descricao=postagem.descricao,
+        foto_url_original=foto_url_original, # Usar a URL original
+        foto_url_medium=foto_url_medium, # Novo campo
+        foto_url_thumbnail=foto_url_thumbnail, # Novo campo
+        publicada=postagem.publicada,
+        data_postagem=datetime.utcnow()
+    )
     db.add(nova_postagem)
     db.commit()
     db.refresh(nova_postagem)
@@ -267,7 +297,13 @@ def obter_perfil_barbeiro(db: Session, barbeiro_id: uuid.UUID):
     avaliacoes = listar_avaliacoes_barbeiro(db, barbeiro_id)
     postagens = db.query(models.Postagem).filter(models.Postagem.barbeiro_id == barbeiro_id).all()
     servicos = listar_servicos_por_barbeiro(db, barbeiro_id)
-    return {"barbeiro": barbeiro, "avaliacoes": avaliacoes, "postagens": postagens, "servicos": servicos}
+    # ALTERAÇÃO AQUI: Retornar o perfil do barbeiro usando o schema BarbeiroResponse para incluir as URLs de foto
+    return {
+        "barbeiro": schemas.BarbeiroResponse.model_validate(barbeiro), # Usar o schema para incluir as URLs
+        "avaliacoes": [schemas.AvaliacaoResponse.model_validate(a) for a in avaliacoes],
+        "postagens": [schemas.PostagemResponse.model_validate(p) for p in postagens],
+        "servicos": [schemas.ServicoResponse.model_validate(s) for s in servicos]
+    }
 
 
 # --------- DISPONIBILIDADE ---------
