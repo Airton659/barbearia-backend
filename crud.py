@@ -407,13 +407,50 @@ def obter_perfil_barbeiro(db: Session, barbeiro_id: uuid.UUID):
     barbeiro = db.query(models.Barbeiro).filter(models.Barbeiro.id == barbeiro_id).first()
     if not barbeiro: return {}
     avaliacoes = listar_avaliacoes_barbeiro(db, barbeiro_id)
-    postagens = db.query(models.Postagem).filter(models.Postagem.barbeiro_id == barbeiro_id).all()
+    
+    # MODIFICATION START
+    # Fetch postagens and eager load the 'barbeiro' and 'usuario' relationships for proper display
+    postagens_db = db.query(models.Postagem)\
+        .options(joinedload(models.Postagem.barbeiro).joinedload(models.Barbeiro.usuario))\
+        .filter(models.Postagem.barbeiro_id == barbeiro_id)\
+        .all()
+
+    processed_postagens = []
+    for postagem in postagens_db:
+        # Calculate the total number of curtidas for this postagem
+        total_curtidas = db.query(func.count(models.Curtida.id)).filter(models.Curtida.postagem_id == postagem.id).scalar()
+
+        # Manually construct PostagemResponse to ensure 'curtidas' is an integer
+        post_response = schemas.PostagemResponse(
+            id=postagem.id,
+            barbeiro_id=postagem.barbeiro_id,
+            titulo=postagem.titulo,
+            descricao=postagem.descricao,
+            foto_url_original=postagem.foto_url_original,
+            foto_url_medium=postagem.foto_url_medium,
+            foto_url_thumbnail=postagem.foto_url_thumbnail,
+            data_postagem=postagem.data_postagem,
+            publicada=postagem.publicada,
+            curtidas=total_curtidas, # Assign the calculated integer count
+            curtido_pelo_usuario=False # Default to False, can be adjusted if user context is available
+        )
+        
+        # Populate the 'barbeiro' object within the postagem response
+        if postagem.barbeiro:
+            post_response.barbeiro = schemas.BarbeiroParaPostagem(
+                id=postagem.barbeiro.id,
+                nome=postagem.barbeiro.usuario.nome,
+                foto_thumbnail=postagem.barbeiro.foto_thumbnail
+            )
+        processed_postagens.append(post_response)
+    # MODIFICATION END
+
     servicos = listar_servicos_por_barbeiro(db, barbeiro_id)
-    # ALTERAÇÃO AQUI: Retornar o perfil do barbeiro usando o schema BarbeiroResponse para incluir as URLs de foto
+    
     return {
         "barbeiro": schemas.BarbeiroResponse.model_validate(barbeiro), # Usar o schema para incluir as URLs
         "avaliacoes": [schemas.AvaliacaoResponse.model_validate(a) for a in avaliacoes],
-        "postagens": [schemas.PostagemResponse.model_validate(p) for p in postagens],
+        "postagens": processed_postagens, # Use the list of processed PostagemResponse objects
         "servicos": [schemas.ServicoResponse.model_validate(s) for s in servicos]
     }
 
