@@ -183,7 +183,7 @@ class AvaliacaoResponse(BaseModel):
     nota: int
     comentario: Optional[str]
     data: datetime
-    usuario: Optional[UsuarioParaAgendamento] = None # <-- ADDED THIS LINE
+    usuario: Optional[UsuarioParaAgendamento] = None
 
     class Config:
         from_attributes = True
@@ -245,6 +245,7 @@ class ServicoCreate(ServicoBase):
 class ServicoResponse(BaseModel):
     id: UUID
     barbeiro_id: UUID
+    nome: str # <-- ADDED THIS LINE
 
     class Config:
         from_attributes = True
