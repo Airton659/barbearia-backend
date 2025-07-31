@@ -401,14 +401,42 @@ def criar_avaliacao(db: Session, avaliacao: schemas.AvaliacaoCreate, usuario_id:
     return nova
 
 def listar_avaliacoes_barbeiro(db: Session, barbeiro_id: uuid.UUID):
-    return db.query(models.Avaliacao).filter(models.Avaliacao.barbeiro_id == barbeiro_id).order_by(models.Avaliacao.data.desc()).all()
+    # Fetch evaluations, eager loading the 'usuario' relationship
+    avaliacoes_db = db.query(models.Avaliacao)\
+        .options(joinedload(models.Avaliacao.usuario))\
+        .filter(models.Avaliacao.barbeiro_id == barbeiro_id)\
+        .order_by(models.Avaliacao.data.desc())\
+        .all()
+    
+    # Map to the response schema, explicitly including user data
+    avaliacoes_response = []
+    for avaliacao in avaliacoes_db:
+        # Create an instance of AvaliacaoResponse and populate fields, including nested user
+        avaliacao_response = schemas.AvaliacaoResponse(
+            id=avaliacao.id,
+            usuario_id=avaliacao.usuario_id,
+            barbeiro_id=avaliacao.barbeiro_id,
+            nota=avaliacao.nota,
+            comentario=avaliacao.comentario,
+            data=avaliacao.data
+        )
+        
+        # Ensure the 'usuario' object is populated if the relationship exists
+        if avaliacao.usuario:
+            avaliacao_response.usuario = schemas.UsuarioParaAgendamento(
+                id=avaliacao.usuario.id,
+                nome=avaliacao.usuario.nome
+            )
+        avaliacoes_response.append(avaliacao_response)
+        
+    return avaliacoes_response
 
 def obter_perfil_barbeiro(db: Session, barbeiro_id: uuid.UUID):
     barbeiro = db.query(models.Barbeiro).filter(models.Barbeiro.id == barbeiro_id).first()
     if not barbeiro: return {}
     avaliacoes = listar_avaliacoes_barbeiro(db, barbeiro_id)
     
-    # MODIFICATION START
+    # MODIFICATION START (from previous turn, keeping it here for completeness)
     # Fetch postagens and eager load the 'barbeiro' and 'usuario' relationships for proper display
     postagens_db = db.query(models.Postagem)\
         .options(joinedload(models.Postagem.barbeiro).joinedload(models.Barbeiro.usuario))\
@@ -449,7 +477,7 @@ def obter_perfil_barbeiro(db: Session, barbeiro_id: uuid.UUID):
     
     return {
         "barbeiro": schemas.BarbeiroResponse.model_validate(barbeiro), # Usar o schema para incluir as URLs
-        "avaliacoes": [schemas.AvaliacaoResponse.model_validate(a) for a in avaliacoes],
+        "avaliacoes": avaliacoes, # Now using the modified 'avaliacoes' list
         "postagens": processed_postagens, # Use the list of processed PostagemResponse objects
         "servicos": [schemas.ServicoResponse.model_validate(s) for s in servicos]
     }
