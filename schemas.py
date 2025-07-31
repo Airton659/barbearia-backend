@@ -183,6 +183,7 @@ class AvaliacaoResponse(BaseModel):
     nota: int
     comentario: Optional[str]
     data: datetime
+    usuario: Optional[UsuarioParaAgendamento] = None # <-- ADDED THIS LINE
 
     class Config:
         from_attributes = True
