@@ -68,6 +68,15 @@ class BarbeiroParaAgendamento(BaseModel):
     class Config:
         from_attributes = True
 
+# NOVA CLASSE ADICIONADA: DETALHES DO BARBEIRO PARA POSTAGEM NO FEED
+class BarbeiroParaPostagem(BaseModel):
+    id: UUID
+    nome: str
+    foto_thumbnail: Optional[str] = Field(None, description="URL da foto em miniatura do barbeiro", example="https://cdn.com/foto_thumb.jpg")
+
+    class Config:
+        from_attributes = True
+
 class BarbeiroCreate(BaseModel):
     especialidades: Optional[str] = Field(None, max_length=200, description="Especialidades do barbeiro", example="Corte, Barba, Sobrancelha")
     ativo: bool = Field(default=True, description="Define se o barbeiro está ativo")
@@ -118,7 +127,9 @@ class PostagemResponse(BaseModel):
     foto_url_thumbnail: Optional[str]
     data_postagem: datetime
     publicada: bool
-    curtido_pelo_usuario: Optional[bool] = None # <-- ALTERAÇÃO AQUI: Novo campo para indicar se o usuário curtiu
+    curtido_pelo_usuario: Optional[bool] = None
+    curtidas: Optional[int] = None
+    barbeiro: Optional[BarbeiroParaPostagem] = None # <-- ALTERAÇÃO AQUI: Novo campo para o objeto barbeiro
 
     class Config:
         from_attributes = True

@@ -252,7 +252,9 @@ def criar_postagem(
 
 # ALTERAÇÃO AQUI: Modificar listar_feed para incluir curtidas
 def listar_feed(db: Session, limit: int = 10, offset: int = 0, usuario_id_logado: Optional[uuid.UUID] = None) -> List[schemas.PostagemResponse]:
+    # Carregamos a relação 'barbeiro' e 'usuario' do barbeiro
     query = db.query(models.Postagem)\
+        .options(joinedload(models.Postagem.barbeiro).joinedload(models.Barbeiro.usuario))\
         .filter(models.Postagem.publicada == True)\
         .order_by(models.Postagem.data_postagem.desc())\
         .offset(offset)\
@@ -262,10 +264,31 @@ def listar_feed(db: Session, limit: int = 10, offset: int = 0, usuario_id_logado
     
     postagens_response = []
     for postagem in postagens_db:
+        # ATENÇÃO AQUI: Passamos APENAS os atributos escalares para model_validate
+        # para evitar o conflito com a relação 'curtidas' do SQLAlchemy.
+        post_response = schemas.PostagemResponse(
+            id=postagem.id,
+            barbeiro_id=postagem.barbeiro_id,
+            titulo=postagem.titulo,
+            descricao=postagem.descricao,
+            foto_url_original=postagem.foto_url_original,
+            foto_url_medium=postagem.foto_url_medium,
+            foto_url_thumbnail=postagem.foto_url_thumbnail,
+            data_postagem=postagem.data_postagem,
+            publicada=postagem.publicada,
+            # curtido_pelo_usuario e curtidas serão preenchidos abaixo
+        )
+        
+        # Preenche o objeto barbeiro na resposta da postagem
+        if postagem.barbeiro:
+            post_response.barbeiro = schemas.BarbeiroParaPostagem(
+                id=postagem.barbeiro.id,
+                nome=postagem.barbeiro.usuario.nome,
+                foto_thumbnail=postagem.barbeiro.foto_thumbnail
+            )
+
         # Consulta o número total de curtidas para esta postagem
         total_curtidas = db.query(func.count(models.Curtida.id)).filter(models.Curtida.postagem_id == postagem.id).scalar()
-        
-        post_response = schemas.PostagemResponse.model_validate(postagem)
         post_response.curtidas = total_curtidas # Preenche o campo curtidas com a contagem
 
         # Verifica se o usuário logado curtiu esta postagem
