@@ -470,6 +470,13 @@ def criar_servico(servico: schemas.ServicoCreate, db: Session = Depends(get_db),
     raise HTTPException(status_code=403, detail="Apenas barbeiros podem criar serviços.")
   return crud.criar_servico(db, servico, barbeiro.id)
 
+@app.get("/me/servicos", response_model=List[schemas.ServicoResponse])
+def listar_meus_servicos(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+    barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
+    if not barbeiro:
+        raise HTTPException(status_code=404, detail="Barbeiro não encontrado")
+    return crud.listar_servicos_por_barbeiro(db, barbeiro.id)
+
 @app.get("/barbeiros/{barbeiro_id}/servicos", response_model=List[schemas.ServicoResponse])
 def listar_servicos(barbeiro_id: uuid.UUID, db: Session = Depends(get_db)):
   return crud.listar_servicos_por_barbeiro(db, barbeiro_id)
