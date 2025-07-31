@@ -250,8 +250,40 @@ def criar_postagem(
     db.refresh(nova_postagem)
     return nova_postagem
 
-def listar_feed(db: Session, limit=10, offset=0):
-    return db.query(models.Postagem).filter(models.Postagem.publicada == True).order_by(models.Postagem.data_postagem.desc()).offset(offset).limit(limit).all()
+# ALTERAÇÃO AQUI: Modificar listar_feed para incluir curtidas
+def listar_feed(db: Session, limit: int = 10, offset: int = 0, usuario_id_logado: Optional[uuid.UUID] = None) -> List[schemas.PostagemResponse]:
+    query = db.query(models.Postagem)\
+        .filter(models.Postagem.publicada == True)\
+        .order_by(models.Postagem.data_postagem.desc())\
+        .offset(offset)\
+        .limit(limit)
+    
+    postagens_db = query.all()
+    
+    postagens_response = []
+    for postagem in postagens_db:
+        # Consulta o número total de curtidas para esta postagem
+        total_curtidas = db.query(func.count(models.Curtida.id)).filter(models.Curtida.postagem_id == postagem.id).scalar()
+        
+        post_response = schemas.PostagemResponse.model_validate(postagem)
+        post_response.curtidas = total_curtidas # Preenche o campo curtidas com a contagem
+
+        # Verifica se o usuário logado curtiu esta postagem
+        if usuario_id_logado:
+            curtida_existente = db.query(models.Curtida).filter(
+                and_(
+                    models.Curtida.usuario_id == usuario_id_logado,
+                    models.Curtida.postagem_id == postagem.id
+                )
+            ).first()
+            post_response.curtido_pelo_usuario = bool(curtida_existente)
+        else:
+            post_response.curtido_pelo_usuario = False # Se não houver usuário logado, não está curtido
+            
+        postagens_response.append(post_response)
+        
+    return postagens_response
+
 
 def buscar_postagem_por_id(db: Session, postagem_id: uuid.UUID):
     return db.query(models.Postagem).filter(models.Postagem.id == postagem_id).first()
@@ -279,7 +311,64 @@ def criar_comentario(db: Session, comentario: schemas.ComentarioCreate, usuario_
     return novo_comentario
 
 def listar_comentarios(db: Session, postagem_id: uuid.UUID):
-    return db.query(models.Comentario).filter(models.Comentario.postagem_id == postagem_id).order_by(models.Comentario.data.desc()).all()
+    # ALTERAÇÃO AQUI: Carrega os comentários e o usuário associado em uma única consulta
+    comentarios_db = db.query(models.Comentario)\
+        .options(joinedload(models.Comentario.usuario))\
+        .filter(models.Comentario.postagem_id == postagem_id)\
+        .order_by(models.Comentario.data.desc())\
+        .all()
+    
+    # Mapeia para o schema de resposta, preenchendo os detalhes do usuário
+    comentarios_response = []
+    for comentario in comentarios_db:
+        com_response = schemas.ComentarioResponse.model_validate(comentario)
+        if comentario.usuario:
+            com_response.usuario = schemas.UsuarioParaAgendamento(
+                id=comentario.usuario.id,
+                nome=comentario.usuario.nome
+            )
+        comentarios_response.append(com_response)
+        
+    return comentarios_response
+
+# NOVA FUNÇÃO: Deletar comentário
+def deletar_comentario(db: Session, comentario_id: uuid.UUID, usuario_id: uuid.UUID) -> Optional[models.Comentario]:
+    """
+    Deleta um comentário. Apenas o usuário que o criou pode deletá-lo.
+    Retorna o comentário deletado ou None se não encontrado/não autorizado.
+    """
+    comentario = db.query(models.Comentario).filter(models.Comentario.id == comentario_id).first()
+    
+    if not comentario:
+        return None # Comentário não encontrado
+    
+    # Verifica se o usuário logado é o dono do comentário
+    if str(comentario.usuario_id) != str(usuario_id):
+        return None # Usuário não autorizado
+        
+    db.delete(comentario)
+    db.commit()
+    return comentario # Retorna o objeto deletado para confirmação
+
+# NOVA FUNÇÃO: Deletar Postagem
+def deletar_postagem(db: Session, postagem_id: uuid.UUID, barbeiro_id: uuid.UUID) -> Optional[models.Postagem]:
+    """
+    Deleta uma postagem. Apenas o barbeiro que a criou pode deletá-la.
+    Retorna a postagem deletada ou None se não encontrada/não autorizado.
+    """
+    postagem = db.query(models.Postagem).filter(models.Postagem.id == postagem_id).first()
+    
+    if not postagem:
+        return None # Postagem não encontrada
+    
+    # Verifica se o barbeiro logado é o autor da postagem
+    if str(postagem.barbeiro_id) != str(barbeiro_id):
+        return None # Barbeiro não autorizado
+        
+    db.delete(postagem)
+    db.commit()
+    return postagem # Retorna o objeto deletado para confirmação
+
 
 def criar_avaliacao(db: Session, avaliacao: schemas.AvaliacaoCreate, usuario_id: uuid.UUID):
     nova = models.Avaliacao(id=uuid.uuid4(), usuario_id=usuario_id, barbeiro_id=avaliacao.barbeiro_id, nota=avaliacao.nota, comentario=avaliacao.comentario, data=datetime.utcnow())

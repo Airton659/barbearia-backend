@@ -1,7 +1,7 @@
 # barbearia-backend/main.py
 
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload # Adicionado joinedload para buscar barbeiro
 from sqlalchemy.exc import OperationalError
 from typing import List, Optional
 import models, schemas, crud
@@ -58,6 +58,13 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
     
     token_data = {"sub": str(usuario.id), "tipo": usuario.tipo}
+    
+    # ALTERAÇÃO AQUI: Adiciona barbeiro_id ao token_data se o usuário for um barbeiro
+    if usuario.tipo == "barbeiro":
+        barbeiro = crud.buscar_barbeiro_por_usuario_id(db, usuario.id)
+        if barbeiro: # Verifica se o objeto barbeiro realmente existe
+            token_data["barbeiro_id"] = str(barbeiro.id)
+
     token = criar_token(token_data)
     return {"access_token": token, "token_type": "bearer"}
 
@@ -156,29 +163,53 @@ def cancelar_agendamento_endpoint(
 
 @app.post("/postagens", response_model=schemas.PostagemResponse)
 async def criar_postagem(
-    postagem: schemas.PostagemCreate, 
+    request_data: schemas.PostagemCreateRequest,
     db: Session = Depends(get_db), 
-    current_user: models.Usuario = Depends(get_current_user),
-    # Esperamos que o frontend envie as URLs de diferentes tamanhos
-    foto_urls: dict = File(..., description="URLs da imagem em diferentes tamanhos (original, medium, thumbnail)")
+    current_user: models.Usuario = Depends(get_current_user)
 ):
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if not barbeiro:
         raise HTTPException(status_code=403, detail="Apenas barbeiros podem criar postagens")
 
-    # Passa as URLs recebidas para a função CRUD
     return crud.criar_postagem(
         db, 
-        postagem, 
+        request_data.postagem,
         barbeiro_id=barbeiro.id,
-        foto_url_original=foto_urls.get("original"),
-        foto_url_medium=foto_urls.get("medium"),
-        foto_url_thumbnail=foto_urls.get("thumbnail")
+        foto_url_original=request_data.foto_urls.get("original"),
+        foto_url_medium=request_data.foto_urls.get("medium"),
+        foto_url_thumbnail=request_data.foto_urls.get("thumbnail")
     )
 
 @app.get("/feed", response_model=List[schemas.PostagemResponse])
-def listar_feed(db: Session = Depends(get_db), limit: int = 10, offset: int = 0):
-    return crud.listar_feed(db, limit=limit, offset=offset)
+def listar_feed(
+    db: Session = Depends(get_db), 
+    limit: int = 10, 
+    offset: int = 0,
+    current_user: Optional[models.Usuario] = Depends(get_current_user) # Torna o usuário atual opcional
+):
+    # A lógica para verificar a curtida será adicionada no crud.py
+    return crud.listar_feed(db, limit=limit, offset=offset, usuario_id_logado=current_user.id if current_user else None)
+
+
+@app.delete("/postagens/{postagem_id}", status_code=status.HTTP_204_NO_CONTENT)
+def deletar_postagem_endpoint(
+    postagem_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: models.Usuario = Depends(get_current_user)
+):
+    """
+    Permite ao barbeiro logado excluir uma postagem que ele mesmo criou.
+    """
+    barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
+    if not barbeiro:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Apenas barbeiros podem deletar postagens.")
+
+    postagem_deletada = crud.deletar_postagem(db, postagem_id, barbeiro.id)
+    
+    if postagem_deletada is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Postagem não encontrada ou você não tem permissão para deletá-la.")
+    
+    return {"message": "Postagem deletada com sucesso."}
 
 
 # --------- CURTIDAS E COMENTÁRIOS ---------
@@ -197,6 +228,22 @@ def comentar(comentario: schemas.ComentarioCreate, db: Session = Depends(get_db)
 @app.get("/comentarios/{postagem_id}", response_model=List[schemas.ComentarioResponse])
 def listar_comentarios(postagem_id: uuid.UUID, db: Session = Depends(get_db)):
     return crud.listar_comentarios(db, postagem_id)
+
+@app.delete("/comentarios/{comentario_id}", status_code=status.HTTP_204_NO_CONTENT)
+def deletar_comentario_endpoint(
+    comentario_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: models.Usuario = Depends(get_current_user)
+):
+    """
+    Permite ao usuário logado excluir um comentário que ele mesmo fez.
+    """
+    comentario_deletado = crud.deletar_comentario(db, comentario_id, current_user.id)
+    
+    if comentario_deletado is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comentário não encontrado ou você não tem permissão para deletá-lo.")
+    
+    return {"message": "Comentário deletado com sucesso."}
 
 
 # --------- AVALIAÇÕES E PERFIS ---------
@@ -223,7 +270,7 @@ def perfil_barbeiro(barbeiro_id: uuid.UUID, db: Session = Depends(get_db)):
 def get_me_barbeiro(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if not barbeiro:
-        raise HTTPException(status_code=404, detail="Barbeiro não encontrado para o usuário logado")
+        raise HTTPException(status_code=404, detail="Barbeiro não encontrado")
     return barbeiro
 
 @app.put("/me/barbeiro", response_model=schemas.BarbeiroResponse)
@@ -361,71 +408,68 @@ async def upload_and_resize_image(
 
 @app.post("/upload_foto")
 async def upload_foto(file: UploadFile = File(...), current_user: models.Usuario = Depends(get_current_user)):
-    try:
-        # ATENÇÃO AQUI: Acessando a variável global CLOUD_STORAGE_BUCKET_NAME_GLOBAL
-        # e verificando se ela tem um valor antes de usar.
-        if not CLOUD_STORAGE_BUCKET_NAME_GLOBAL:
-            raise HTTPException(status_code=500, detail="Nome do bucket do Cloud Storage não configurado.")
+  try:
+    # ATENÇÃO AQUI: Acessando a variável global CLOUD_STORAGE_BUCKET_NAME_GLOBAL
+    # e verificando se ela tem um valor antes de usar.
+    if not CLOUD_STORAGE_BUCKET_NAME_GLOBAL:
+      raise HTTPException(status_code=500, detail="Nome do bucket do Cloud Storage não configurado.")
 
-        file_content = await file.read()
-        # Usa o nome original do arquivo para base, mas sem a extensão para que a função auxiliar adicione
-        filename_base = f"{uuid.uuid4()}-{os.path.splitext(file.filename)[0]}" 
-        
-        # Chama a nova função auxiliar para fazer upload e redimensionar
-        uploaded_urls = await upload_and_resize_image(
-            file_content=file_content,
-            filename_base=filename_base,
-            bucket_name=CLOUD_STORAGE_BUCKET_NAME_GLOBAL, # <-- Usando a variável GLOBAL corrigida
-            content_type=file.content_type # Passa o content_type original do arquivo
-        )
+    file_content = await file.read()
+    filename_base = f"{uuid.uuid4()}-{os.path.splitext(file.filename)[0]}" 
+    
+    uploaded_urls = await upload_and_resize_image(
+      file_content=file_content,
+      filename_base=filename_base,
+      bucket_name=CLOUD_STORAGE_BUCKET_NAME_GLOBAL, # <-- Usando a variável GLOBAL corrigida
+      content_type=file.content_type # Passa o content_type original do arquivo
+    )
 
-        # Retorna todas as URLs geradas
-        return JSONResponse(content=uploaded_urls)
+    return JSONResponse(content=uploaded_urls)
 
-    except Exception as e:
-        print(f"ERRO CRÍTICO NO UPLOAD: {e}") 
-        raise HTTPException(status_code=500, detail=f"Ocorreu um erro interno no servidor: {e}")
+  except Exception as e:
+    print(f"ERRO CRÍTICO NO UPLOAD: {e}") 
+    raise HTTPException(status_code=500, detail=f"Ocorreu um erro interno no servidor: {e}")
 
 
 # --------- DISPONIBILIDADE E HORÁRIOS ---------
 
 @app.post("/me/horarios-trabalho", response_model=List[schemas.HorarioTrabalhoCreate])
 def definir_horarios(horarios: List[schemas.HorarioTrabalhoCreate], db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
-    barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
-    if not barbeiro:
-        raise HTTPException(status_code=403, detail="Apenas barbeiros podem definir horários.")
-    return crud.definir_horarios_trabalho(db, barbeiro.id, horarios)
+  barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
+  if not barbeiro:
+    raise HTTPException(status_code=403, detail="Apenas barbeiros podem definir horários.")
+  return crud.definir_horarios_trabalho(db, barbeiro.id, horarios)
 
 @app.post("/me/bloqueios", response_model=schemas.BloqueioResponse)
 def criar_bloqueio(bloqueio: schemas.BloqueioCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if not barbeiro:
-        raise HTTPException(status_code=403, detail="Apenas barbeiros podem criar bloqueios.")
+      raise HTTPException(status_code=403, detail="Apenas barbeiros podem criar bloqueios.")
     return crud.criar_bloqueio(db, barbeiro.id, bloqueio)
 
 @app.delete("/me/bloqueios/{bloqueio_id}", status_code=204)
 def deletar_bloqueio(bloqueio_id: uuid.UUID, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
-    barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
-    if not barbeiro:
-        raise HTTPException(status_code=403, detail="Acesso negado.")
-    if not crud.deletar_bloqueio(db, bloqueio_id, barbeiro.id):
-        raise HTTPException(status_code=404, detail="Bloqueio não encontrado.")
-    return
+  barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
+  if not barbeiro:
+    raise HTTPException(status_code=403, detail="Acesso negado.")
+  if not crud.deletar_bloqueio(db, bloqueio_id, barbeiro.id):
+    raise HTTPException(status_code=404, detail="Bloqueio não encontrado.")
+  return
 
 @app.get("/barbeiros/{barbeiro_id}/horarios-disponiveis", response_model=List[time])
 def get_horarios_disponiveis(barbeiro_id: uuid.UUID, dia: date, db: Session = Depends(get_db)):
-    return crud.calcular_horarios_disponiveis(db, barbeiro_id, dia)
+  return crud.calcular_horarios_disponiveis(db, barbeiro_id, dia)
 
 
 # --------- SERVIÇOS ---------
 
 @app.post("/me/servicos", response_model=schemas.ServicoResponse)
 def criar_servico(servico: schemas.ServicoCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
-    barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
-    if not barbeiro:
-        raise HTTPException(status_code=403, detail="Apenas barbeiros podem criar serviços.")
-    return crud.criar_servico(db, servico, barbeiro.id)
+  barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
+  if not barbeiro:
+    raise HTTPException(status_code=403, detail="Apenas barbeiros podem criar serviços.")
+  return crud.criar_servico(db, servico, barbeiro.id)
 
 @app.get("/barbeiros/{barbeiro_id}/servicos", response_model=List[schemas.ServicoResponse])
 def listar_servicos(barbeiro_id: uuid.UUID, db: Session = Depends(get_db)):
-    return crud.listar_servicos_por_barbeiro(db, barbeiro_id)
+  return crud.listar_servicos_por_barbeiro(db, barbeiro_id)

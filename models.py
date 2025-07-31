@@ -24,7 +24,7 @@ class Usuario(Base):
 
     agendamentos = relationship("Agendamento", back_populates="usuario")
     curtidas = relationship("Curtida", back_populates="usuario")
-    comentarios = relationship("Comentario", back_populates="usuario")
+    comentarios = relationship("Comentario", back_populates="usuario") # <--- Comentario adicionado aqui
     avaliacoes = relationship("Avaliacao", back_populates="usuario")
     barbeiro = relationship("Barbeiro", back_populates="usuario", uselist=False)
 
@@ -108,7 +108,7 @@ class Comentario(Base):
     texto = Column(String, nullable=False)
     data = Column(DateTime, nullable=False)
 
-    usuario = relationship("Usuario", back_populates="comentarios")
+    usuario = relationship("Usuario", back_populates="comentarios") # <--- ALTERAÇÃO AQUI: Adiciona o relacionamento com Usuario
     postagem = relationship("Postagem", back_populates="comentarios")
 
 

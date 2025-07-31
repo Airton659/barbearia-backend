@@ -51,21 +51,18 @@ class BarbeiroResponse(BaseModel):
     id: UUID
     nome: str
     especialidades: Optional[str] = Field(None, description="Especialidades do barbeiro", example="Corte masculino, barba")
-    # ALTERAÇÃO AQUI: renomear 'foto' para 'foto_original' e adicionar novos campos
     foto_original: Optional[str] = Field(None, description="URL da foto original do barbeiro", example="https://cdn.com/foto_original.jpg")
-    foto_medium: Optional[str] = Field(None, description="URL da foto média do barbeiro") # Novo campo
-    foto_thumbnail: Optional[str] = Field(None, description="URL da foto em miniatura do barbeiro") # Novo campo
+    foto_medium: Optional[str] = Field(None, description="URL da foto média do barbeiro")
+    foto_thumbnail: Optional[str] = Field(None, description="URL da foto em miniatura do barbeiro")
     ativo: bool
     servicos: List['ServicoResponse'] = [] 
 
     class Config:
         from_attributes = True
 
-# --- NOVA CLASSE ADICIONADA: DETALHES DO BARBEIRO PARA AGENDAMENTO ---
 class BarbeiroParaAgendamento(BaseModel):
     id: UUID
     nome: str
-    # ALTERAÇÃO AQUI: Usar a URL mais apropriada para a listagem (thumbnail ou medium)
     foto_thumbnail: Optional[str] = Field(None, description="URL da foto em miniatura do barbeiro", example="https://cdn.com/foto_thumb.jpg")
 
     class Config:
@@ -73,13 +70,9 @@ class BarbeiroParaAgendamento(BaseModel):
 
 class BarbeiroCreate(BaseModel):
     especialidades: Optional[str] = Field(None, max_length=200, description="Especialidades do barbeiro", example="Corte, Barba, Sobrancelha")
-    # Remover 'foto' aqui, pois ela virá do upload, não da criação inicial
     ativo: bool = Field(default=True, description="Define se o barbeiro está ativo")
 
 class BarbeiroUpdateFoto(BaseModel):
-    # Esta classe ainda pode ser usada, mas o upload_foto endpoint será o principal para gerar as URLs
-    # Esta classe agora aceitará um dicionário de URLs, ou será usada de forma mais limitada.
-    # Por enquanto, mantendo foto_url para compatibilidade, mas o endpoint de upload retornará mais.
     foto_url: str = Field(..., description="URL da foto original do barbeiro (para casos específicos de update ou se o frontend enviar apenas uma)")
 
 class BarbeiroUpdate(BaseModel):
@@ -87,7 +80,6 @@ class BarbeiroUpdate(BaseModel):
 
 class BarbeiroPromote(BaseModel):
     especialidades: str = Field(..., description="Especialidades iniciais do barbeiro")
-    # Remover 'foto' aqui, pois ela virá do upload, não da promoção
     
 
 # ---------- AGENDAMENTO ----------
@@ -114,8 +106,6 @@ class AgendamentoResponse(BaseModel):
 class PostagemCreate(BaseModel):
     titulo: str = Field(..., min_length=3, max_length=100, description="Título da postagem", example="Corte degradê com navalha")
     descricao: Optional[str] = Field(None, max_length=300, description="Descrição opcional", example="Esse corte foi feito em 40min com acabamento na navalha.")
-    # Remover 'foto_url' aqui, pois ela virá do processo de upload e será manipulada pelo backend
-    # O endpoint criar_postagem receberá as URLs diretamente do backend ou de um passo anterior
     publicada: bool = Field(default=True, description="Define se a postagem está publicada")
 
 class PostagemResponse(BaseModel):
@@ -123,15 +113,19 @@ class PostagemResponse(BaseModel):
     barbeiro_id: UUID
     titulo: str
     descricao: Optional[str]
-    # ALTERAÇÃO AQUI: renomear 'foto_url' para 'foto_url_original' e adicionar novos campos
     foto_url_original: str
-    foto_url_medium: Optional[str] # Novo campo
-    foto_url_thumbnail: Optional[str] # Novo campo
+    foto_url_medium: Optional[str]
+    foto_url_thumbnail: Optional[str]
     data_postagem: datetime
     publicada: bool
+    curtido_pelo_usuario: Optional[bool] = None # <-- ALTERAÇÃO AQUI: Novo campo para indicar se o usuário curtiu
 
     class Config:
         from_attributes = True
+
+class PostagemCreateRequest(BaseModel):
+    postagem: PostagemCreate
+    foto_urls: dict = Field(..., description="Dicionário com as URLs da imagem em diferentes tamanhos (original, medium, thumbnail)", example={"original": "url.original.jpg", "medium": "url.medium.jpg", "thumbnail": "url.thumb.jpg"})
 
 
 # ---------- CURTIDA ----------
@@ -158,6 +152,7 @@ class ComentarioResponse(BaseModel):
     postagem_id: UUID
     texto: str
     data: datetime
+    usuario: Optional[UsuarioParaAgendamento] = None
 
     class Config:
         from_attributes = True
@@ -235,7 +230,7 @@ class ServicoBase(BaseModel):
 class ServicoCreate(ServicoBase):
     pass
 
-class ServicoResponse(ServicoBase):
+class ServicoResponse(BaseModel):
     id: UUID
     barbeiro_id: UUID
 
