@@ -201,11 +201,11 @@ def listar_agendamentos_por_barbeiro(db: Session, barbeiro_id: uuid.UUID):
         .options(joinedload(models.Agendamento.usuario))\
         .filter(models.Agendamento.barbeiro_id == barbeiro_id).all()
 
-# --- NOVA FUNÇÃO ADICIONADA: CANCELAR AGENDAMENTO ---
+# --- FUNÇÃO ATUALIZADA: CANCELAR AGENDAMENTO (AGORA EXCLUI) ---
 def cancelar_agendamento(db: Session, agendamento_id: uuid.UUID, usuario_id: uuid.UUID) -> Optional[models.Agendamento]:
     """
-    Cancela um agendamento. Permite cancelamento apenas pelo usuário que agendou.
-    Retorna o agendamento cancelado ou None se não encontrado/não autorizado.
+    Cancela (agora exclui) um agendamento. Permite exclusão apenas pelo usuário que agendou.
+    Retorna o agendamento excluído ou None se não encontrado/não autorizado.
     """
     agendamento = db.query(models.Agendamento).filter(models.Agendamento.id == agendamento_id).first()
     
@@ -216,11 +216,10 @@ def cancelar_agendamento(db: Session, agendamento_id: uuid.UUID, usuario_id: uui
     if str(agendamento.usuario_id) != str(usuario_id):
         return None # Usuário não autorizado
         
-    # Altera o status para "cancelado"
-    agendamento.status = "cancelado"
+    # ALTERAÇÃO AQUI: Exclui o agendamento em vez de apenas mudar o status
+    db.delete(agendamento)
     db.commit()
-    db.refresh(agendamento)
-    return agendamento
+    return agendamento # Retorna o objeto excluído para confirmação
 
 
 # --------- POSTAGENS E INTERAÇÕES ---------
