@@ -567,3 +567,24 @@ def criar_servico(db: Session, servico: schemas.ServicoCreate, barbeiro_id: uuid
 
 def listar_servicos_por_barbeiro(db: Session, barbeiro_id: uuid.UUID):
     return db.query(models.Servico).filter(models.Servico.barbeiro_id == barbeiro_id).order_by(models.Servico.nome).all()
+
+def atualizar_servico(db: Session, servico_id: uuid.UUID, dados_update: schemas.ServicoUpdate, barbeiro_id: uuid.UUID):
+    servico = db.query(models.Servico).filter(models.Servico.id == servico_id, models.Servico.barbeiro_id == barbeiro_id).first()
+    if not servico:
+        return None
+    
+    update_data = dados_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(servico, key, value)
+    
+    db.commit()
+    db.refresh(servico)
+    return servico
+
+def deletar_servico(db: Session, servico_id: uuid.UUID, barbeiro_id: uuid.UUID):
+    servico = db.query(models.Servico).filter(models.Servico.id == servico_id, models.Servico.barbeiro_id == barbeiro_id).first()
+    if servico:
+        db.delete(servico)
+        db.commit()
+        return True
+    return False
