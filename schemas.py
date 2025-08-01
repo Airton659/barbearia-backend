@@ -242,10 +242,20 @@ class ServicoBase(BaseModel):
 class ServicoCreate(ServicoBase):
     pass
 
+class ServicoUpdate(BaseModel):
+    nome: Optional[str] = Field(None, max_length=100)
+    descricao: Optional[str] = Field(None, max_length=300)
+    preco: Optional[float] = Field(None, gt=0)
+    duracao_minutos: Optional[int] = Field(None, gt=0)
+
+
 class ServicoResponse(BaseModel):
     id: UUID
     barbeiro_id: UUID
-    nome: str # <-- ADDED THIS LINE
+    nome: str
+    descricao: Optional[str]
+    preco: float
+    duracao_minutos: int
 
     class Config:
         from_attributes = True
