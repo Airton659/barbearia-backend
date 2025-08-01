@@ -224,7 +224,6 @@ def cancelar_agendamento(db: Session, agendamento_id: uuid.UUID, usuario_id: uui
 
 # --------- POSTAGENS E INTERAÇÕES ---------
 
-# ALTERAÇÃO AQUI: Atualizar para receber todas as URLs de foto
 def criar_postagem(
     db: Session, 
     postagem: schemas.PostagemCreate, 
@@ -247,9 +246,26 @@ def criar_postagem(
     db.add(nova_postagem)
     db.commit()
     db.refresh(nova_postagem)
-    return nova_postagem
 
-# ALTERAÇÃO AQUI: Modificar listar_feed para incluir curtidas
+    # >>> ALTERAÇÃO AQUI: Manualmente construir o objeto de resposta
+    # Isso evita que o FastAPI tente serializar a relação 'curtidas' que é uma lista,
+    # em vez de um inteiro, causando o erro de validação.
+    return schemas.PostagemResponse(
+        id=nova_postagem.id,
+        barbeiro_id=nova_postagem.barbeiro_id,
+        titulo=nova_postagem.titulo,
+        descricao=nova_postagem.descricao,
+        foto_url_original=nova_postagem.foto_url_original,
+        foto_url_medium=nova_postagem.foto_url_medium,
+        foto_url_thumbnail=nova_postagem.foto_url_thumbnail,
+        data_postagem=nova_postagem.data_postagem,
+        publicada=nova_postagem.publicada,
+        curtidas=0,
+        curtido_pelo_usuario=False,
+        barbeiro=None
+    )
+
+
 def listar_feed(db: Session, limit: int = 10, offset: int = 0, usuario_id_logado: Optional[uuid.UUID] = None) -> List[schemas.PostagemResponse]:
     # Carregamos a relação 'barbeiro' e 'usuario' do barbeiro
     query = db.query(models.Postagem)\
@@ -288,6 +304,7 @@ def listar_feed(db: Session, limit: int = 10, offset: int = 0, usuario_id_logado
 
         # Consulta o número total de curtidas para esta postagem
         total_curtidas = db.query(func.count(models.Curtida.id)).filter(models.Curtida.postagem_id == postagem.id).scalar()
+        
         # Alteração: Garantir que o valor é sempre um inteiro
         post_response.curtidas = int(total_curtidas) if total_curtidas is not None else 0
 
