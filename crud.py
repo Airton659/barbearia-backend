@@ -288,7 +288,8 @@ def listar_feed(db: Session, limit: int = 10, offset: int = 0, usuario_id_logado
 
         # Consulta o número total de curtidas para esta postagem
         total_curtidas = db.query(func.count(models.Curtida.id)).filter(models.Curtida.postagem_id == postagem.id).scalar()
-        post_response.curtidas = total_curtidas # Preenche o campo curtidas com a contagem
+        # Alteração: Garantir que o valor é sempre um inteiro
+        post_response.curtidas = int(total_curtidas) if total_curtidas is not None else 0
 
         # Verifica se o usuário logado curtiu esta postagem
         if usuario_id_logado:
@@ -458,8 +459,7 @@ def obter_perfil_barbeiro(db: Session, barbeiro_id: uuid.UUID):
             foto_url_thumbnail=postagem.foto_url_thumbnail,
             data_postagem=postagem.data_postagem,
             publicada=postagem.publicada,
-            curtidas=total_curtidas, # Assign the calculated integer count
-            curtido_pelo_usuario=False # Default to False, can be adjusted if user context is available
+            # curtido_pelo_usuario e curtidas serão preenchidos abaixo
         )
         
         # Populate the 'barbeiro' object within the postagem response
