@@ -8,6 +8,8 @@ import uuid
 from datetime import datetime, timedelta, date, time
 from typing import Optional, List
 import secrets
+from sqlalchemy.exc import IntegrityError
+
 
 # --------- USUÁRIOS ---------
 
@@ -25,9 +27,27 @@ def criar_usuario(db: Session, usuario: schemas.UsuarioCreate):
     db.refresh(novo_usuario)
     return novo_usuario
 
+def criar_usuario_firebase(db: Session, nome: str, email: str, firebase_uid: str):
+    db_usuario = models.Usuario(
+        nome=nome,
+        email=email,
+        firebase_uid=firebase_uid,
+        tipo='cliente'
+    )
+    try:
+        db.add(db_usuario)
+        db.commit()
+        db.refresh(db_usuario)
+        return db_usuario
+    except IntegrityError:
+        db.rollback()
+        return None
 
 def buscar_usuario_por_email(db: Session, email: str):
     return db.query(models.Usuario).filter(models.Usuario.email == email).first()
+
+def buscar_usuario_por_firebase_uid(db: Session, firebase_uid: str):
+    return db.query(models.Usuario).filter(models.Usuario.firebase_uid == firebase_uid).first()
 
 # --- Funções para o fluxo de recuperação de senha ---
 
@@ -307,6 +327,7 @@ def listar_feed(db: Session, limit: int = 10, offset: int = 0, usuario_id_logado
         
         # Alteração: Garantir que o valor é sempre um inteiro
         post_response.curtidas = int(total_curtidas) if total_curtidas is not None else 0
+        
 
         # Verifica se o usuário logado curtiu esta postagem
         if usuario_id_logado:
@@ -512,7 +533,7 @@ def definir_horarios_trabalho(db: Session, barbeiro_id: uuid.UUID, horarios: Lis
     db.add_all(novos_horarios)
     db.commit()
     return novos_horarios
-
+    
 def listar_horarios_trabalho(db: Session, barbeiro_id: uuid.UUID):
     return db.query(models.HorarioTrabalho).filter(models.HorarioTrabalho.barbeiro_id == barbeiro_id).all()
 
