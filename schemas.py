@@ -44,6 +44,23 @@ class ResetarSenhaRequest(BaseModel):
     token: str = Field(..., description="Token de reset recebido")
     nova_senha: str = Field(..., min_length=6, max_length=100, description="Nova senha do usuário")
 
+# Novo schema para a resposta do perfil do usuário
+class UsuarioProfile(BaseModel):
+    id: UUID
+    nome: str
+    email: EmailStr
+    tipo: str
+    firebase_uid: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+# Novo schema para a criação/sincronização de usuário do Firebase
+class UsuarioSync(BaseModel):
+    nome: str
+    email: EmailStr
+    firebase_uid: str
+
 
 # ---------- BARBEIRO ----------
 

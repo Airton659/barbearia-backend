@@ -15,11 +15,15 @@ class Usuario(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     nome = Column(String, nullable=False)
     email = Column(String, unique=True, nullable=False)
-    senha_hash = Column(String, nullable=False)
+    # Alterado para nullable=True para usuários do Firebase
+    senha_hash = Column(String, nullable=True) 
     tipo = Column(String, default="cliente")  # cliente, barbeiro, admin
     
     reset_token = Column(String, unique=True, nullable=True)
     reset_token_expires = Column(DateTime, nullable=True)
+    
+    # Alteração: Adicionando a coluna firebase_uid
+    firebase_uid = Column(String, unique=True, nullable=True, index=True)
 
 
     agendamentos = relationship("Agendamento", back_populates="usuario")
@@ -29,7 +33,10 @@ class Usuario(Base):
     barbeiro = relationship("Barbeiro", back_populates="usuario", uselist=False)
 
     def verificar_senha(self, senha: str) -> bool:
-        return pwd_context.verify(senha, self.senha_hash)
+        # A verificação de senha só fará sentido para usuários antigos ou não-Firebase
+        if self.senha_hash:
+            return pwd_context.verify(senha, self.senha_hash)
+        return False
 
 
 class Barbeiro(Base):

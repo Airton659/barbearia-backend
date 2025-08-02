@@ -8,8 +8,10 @@ import models, schemas, crud
 import uuid
 import time
 import os
+import json
 from datetime import date, time, timedelta
-from auth import criar_token, get_current_user, get_current_admin_user
+# Alteração: Importar a nova dependência de autenticação do Firebase
+from auth import get_current_user_firebase, get_current_admin_user
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse
 import httpx
@@ -50,23 +52,7 @@ def root():
 
 
 # --------- LOGIN ---------
-
-@app.post("/login", response_model=schemas.TokenResponse)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    usuario = crud.buscar_usuario_por_email(db, form_data.username)
-    if not usuario or not usuario.verificar_senha(form_data.password):
-        raise HTTPException(status_code=401, detail="Credenciais inválidas")
-    
-    token_data = {"sub": str(usuario.id), "tipo": usuario.tipo}
-    
-    # ALTERAÇÃO AQUI: Adiciona barbeiro_id ao token_data se o usuário for um barbeiro
-    if usuario.tipo == "barbeiro":
-        barbeiro = crud.buscar_barbeiro_por_usuario_id(db, usuario.id)
-        if barbeiro: # Verifica se o objeto barbeiro realmente existe
-            token_data["barbeiro_id"] = str(barbeiro.id)
-
-    token = criar_token(token_data)
-    return {"access_token": token, "token_type": "bearer"}
+# Endpoint de login antigo foi removido, pois o app usará o Firebase para autenticação
 
 
 # --------- USUÁRIOS ---------
@@ -78,9 +64,35 @@ def criar_usuario(usuario: schemas.UsuarioCreate, db: Session = Depends(get_db))
         raise HTTPException(status_code=400, detail="Email já cadastrado")
     return crud.criar_usuario(db, usuario)
 
-@app.get("/me", response_model=schemas.UsuarioResponse)
-def get_me(current_user: models.Usuario = Depends(get_current_user)):
+# --- Novo endpoint para sincronização de perfil do Firebase ---
+@app.post("/users/sync-profile", response_model=schemas.UsuarioProfile)
+def sync_user_profile(
+    user_data: schemas.UsuarioSync,
+    db: Session = Depends(get_db)
+):
+    # Verifica se já existe um usuário com este firebase_uid
+    db_user = crud.buscar_usuario_por_firebase_uid(db, firebase_uid=user_data.firebase_uid)
+    if db_user:
+        # Se o usuário já existe, retorna os dados existentes
+        return db_user
+    
+    # Se não existe, cria um novo usuário no banco de dados local
+    db_user = crud.criar_usuario_firebase(
+        db,
+        nome=user_data.nome,
+        email=user_data.email,
+        firebase_uid=user_data.firebase_uid
+    )
+    return db_user
+
+
+# --- Novo endpoint para obter perfil do usuário logado ---
+@app.get("/me/profile", response_model=schemas.UsuarioProfile)
+def get_me_profile(current_user: models.Usuario = Depends(get_current_user_firebase)):
+    # A dependência get_current_user_firebase já garante que o usuário existe
+    # e está autenticado, então basta retornar o objeto
     return current_user
+
 
 # --- Endpoints para recuperação de senha ---
 
@@ -135,18 +147,18 @@ def listar_barbeiros(db: Session = Depends(get_db), especialidade: Optional[str]
 # --------- AGENDAMENTOS ---------
 
 @app.post("/agendamentos", response_model=schemas.AgendamentoResponse)
-def agendar(agendamento: schemas.AgendamentoCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+def agendar(agendamento: schemas.AgendamentoCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user_firebase)):
     return crud.criar_agendamento(db, agendamento, usuario_id=current_user.id)
 
 @app.get("/agendamentos", response_model=List[schemas.AgendamentoResponse])
-def listar_agendamentos(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+def listar_agendamentos(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user_firebase)):
     return crud.listar_agendamentos_por_usuario(db, current_user.id)
 
 @app.delete("/agendamentos/{agendamento_id}", status_code=status.HTTP_204_NO_CONTENT)
 def cancelar_agendamento_endpoint(
     agendamento_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: models.Usuario = Depends(get_current_user)
+    current_user: models.Usuario = Depends(get_current_user_firebase)
 ):
     """
     Permite ao usuário cancelar um agendamento.
@@ -165,7 +177,7 @@ def cancelar_agendamento_endpoint(
 async def criar_postagem(
     request_data: schemas.PostagemCreateRequest,
     db: Session = Depends(get_db), 
-    current_user: models.Usuario = Depends(get_current_user)
+    current_user: models.Usuario = Depends(get_current_user_firebase)
 ):
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if not barbeiro:
@@ -185,7 +197,7 @@ def listar_feed(
     db: Session = Depends(get_db), 
     limit: int = 10, 
     offset: int = 0,
-    current_user: Optional[models.Usuario] = Depends(get_current_user) # Torna o usuário atual opcional
+    current_user: Optional[models.Usuario] = Depends(get_current_user_firebase) # Torna o usuário atual opcional
 ):
     # A lógica para verificar a curtida será adicionada no crud.py
     return crud.listar_feed(db, limit=limit, offset=offset, usuario_id_logado=current_user.id if current_user else None)
@@ -195,7 +207,7 @@ def listar_feed(
 def deletar_postagem_endpoint(
     postagem_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: models.Usuario = Depends(get_current_user)
+    current_user: models.Usuario = Depends(get_current_user_firebase)
 ):
     """
     Permite ao barbeiro logado excluir uma postagem que ele mesmo criou.
@@ -215,14 +227,14 @@ def deletar_postagem_endpoint(
 # --------- CURTIDAS E COMENTÁRIOS ---------
 
 @app.post("/postagens/{postagem_id}/curtir")
-def curtir_postagem(postagem_id: uuid.UUID, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+def curtir_postagem(postagem_id: uuid.UUID, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user_firebase)):
     resultado = crud.toggle_curtida(db, current_user.id, postagem_id)
     if resultado is None and crud.buscar_postagem_por_id(db, postagem_id) is None:
         raise HTTPException(status_code=404, detail="Postagem não encontrada")
     return {"curtida": bool(resultado)}
 
 @app.post("/comentarios", response_model=schemas.ComentarioResponse)
-def comentar(comentario: schemas.ComentarioCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+def comentar(comentario: schemas.ComentarioCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user_firebase)):
     return crud.criar_comentario(db, comentario, usuario_id=current_user.id)
 
 @app.get("/comentarios/{postagem_id}", response_model=List[schemas.ComentarioResponse])
@@ -233,7 +245,7 @@ def listar_comentarios(postagem_id: uuid.UUID, db: Session = Depends(get_db)):
 def deletar_comentario_endpoint(
     comentario_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: models.Usuario = Depends(get_current_user)
+    current_user: models.Usuario = Depends(get_current_user_firebase)
 ):
     """
     Permite ao usuário logado excluir um comentário que ele mesmo fez.
@@ -249,7 +261,7 @@ def deletar_comentario_endpoint(
 # --------- AVALIAÇÕES E PERFIS ---------
 
 @app.post("/avaliacoes", response_model=schemas.AvaliacaoResponse)
-def avaliar(avaliacao: schemas.AvaliacaoCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+def avaliar(avaliacao: schemas.AvaliacaoCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user_firebase)):
     return crud.criar_avaliacao(db, avaliacao, usuario_id=current_user.id)
 
 @app.get("/avaliacoes/{barbeiro_id}", response_model=List[schemas.AvaliacaoResponse])
@@ -267,14 +279,14 @@ def perfil_barbeiro(barbeiro_id: uuid.UUID, db: Session = Depends(get_db)):
 # --------- DADOS E AGENDA DO BARBEIRO LOGADO ---------
 
 @app.get("/me/barbeiro", response_model=schemas.BarbeiroResponse)
-def get_me_barbeiro(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+def get_me_barbeiro(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user_firebase)):
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if not barbeiro:
         raise HTTPException(status_code=404, detail="Barbeiro não encontrado")
     return barbeiro
 
 @app.put("/me/barbeiro", response_model=schemas.BarbeiroResponse)
-def update_me_barbeiro(dados_update: schemas.BarbeiroUpdate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+def update_me_barbeiro(dados_update: schemas.BarbeiroUpdate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user_firebase)):
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if not barbeiro:
         raise HTTPException(status_code=404, detail="Barbeiro não encontrado")
@@ -284,7 +296,7 @@ def update_me_barbeiro(dados_update: schemas.BarbeiroUpdate, db: Session = Depen
 async def update_barbeiro_foto(
     file: UploadFile = File(...), # Recebe o arquivo diretamente como no /upload_foto
     db: Session = Depends(get_db), 
-    current_user: models.Usuario = Depends(get_current_user)
+    current_user: models.Usuario = Depends(get_current_user_firebase)
 ):
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if not barbeiro:
@@ -322,14 +334,14 @@ async def update_barbeiro_foto(
 
 
 @app.get("/me/agendamentos", response_model=List[schemas.AgendamentoResponse])
-def listar_agendamentos_do_barbeiro(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+def listar_agendamentos_do_barbeiro(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user_firebase)):
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if not barbeiro:
         raise HTTPException(status_code=404, detail="Barbeiro não encontrado")
     return crud.listar_agendamentos_por_barbeiro(db, barbeiro.id)
 
 @app.get("/me/horarios-trabalho", response_model=List[schemas.HorarioTrabalhoResponse])
-def get_me_horarios_trabalho(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+def get_me_horarios_trabalho(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user_firebase)):
     """
     Retorna os horários de trabalho definidos para o barbeiro autenticado.
     """
@@ -407,7 +419,7 @@ async def upload_and_resize_image(
     return urls
 
 @app.post("/upload_foto")
-async def upload_foto(file: UploadFile = File(...), current_user: models.Usuario = Depends(get_current_user)):
+async def upload_foto(file: UploadFile = File(...), current_user: models.Usuario = Depends(get_current_user_firebase)):
   try:
     # ATENÇÃO AQUI: Acessando a variável global CLOUD_STORAGE_BUCKET_NAME_GLOBAL
     # e verificando se ela tem um valor antes de usar.
@@ -434,21 +446,21 @@ async def upload_foto(file: UploadFile = File(...), current_user: models.Usuario
 # --------- DISPONIBILIDADE E HORÁRIOS ---------
 
 @app.post("/me/horarios-trabalho", response_model=List[schemas.HorarioTrabalhoCreate])
-def definir_horarios(horarios: List[schemas.HorarioTrabalhoCreate], db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+def definir_horarios(horarios: List[schemas.HorarioTrabalhoCreate], db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user_firebase)):
   barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
   if not barbeiro:
     raise HTTPException(status_code=403, detail="Apenas barbeiros podem definir horários.")
   return crud.definir_horarios_trabalho(db, barbeiro.id, horarios)
 
 @app.post("/me/bloqueios", response_model=schemas.BloqueioResponse)
-def criar_bloqueio(bloqueio: schemas.BloqueioCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+def criar_bloqueio(bloqueio: schemas.BloqueioCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user_firebase)):
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if not barbeiro:
       raise HTTPException(status_code=403, detail="Apenas barbeiros podem criar bloqueios.")
     return crud.criar_bloqueio(db, barbeiro.id, bloqueio)
 
 @app.delete("/me/bloqueios/{bloqueio_id}", status_code=204)
-def deletar_bloqueio(bloqueio_id: uuid.UUID, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+def deletar_bloqueio(bloqueio_id: uuid.UUID, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user_firebase)):
   barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
   if not barbeiro:
     raise HTTPException(status_code=403, detail="Acesso negado.")
@@ -464,14 +476,14 @@ def get_horarios_disponiveis(barbeiro_id: uuid.UUID, dia: date, db: Session = De
 # --------- SERVIÇOS ---------
 
 @app.post("/me/servicos", response_model=schemas.ServicoResponse)
-def criar_servico(servico: schemas.ServicoCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+def criar_servico(servico: schemas.ServicoCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user_firebase)):
   barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
   if not barbeiro:
     raise HTTPException(status_code=403, detail="Apenas barbeiros podem criar serviços.")
   return crud.criar_servico(db, servico, barbeiro.id)
 
 @app.get("/me/servicos", response_model=List[schemas.ServicoResponse])
-def listar_meus_servicos(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user)):
+def listar_meus_servicos(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user_firebase)):
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if not barbeiro:
         raise HTTPException(status_code=404, detail="Barbeiro não encontrado")
@@ -486,7 +498,7 @@ def atualizar_servico_endpoint(
     servico_id: uuid.UUID, 
     servico_update: schemas.ServicoUpdate, 
     db: Session = Depends(get_db), 
-    current_user: models.Usuario = Depends(get_current_user)
+    current_user: models.Usuario = Depends(get_current_user_firebase)
 ):
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if not barbeiro:
@@ -502,7 +514,7 @@ def atualizar_servico_endpoint(
 def deletar_servico_endpoint(
     servico_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: models.Usuario = Depends(get_current_user)
+    current_user: models.Usuario = Depends(get_current_user_firebase)
 ):
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if not barbeiro:

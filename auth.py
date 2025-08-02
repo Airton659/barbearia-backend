@@ -1,70 +1,76 @@
 from datetime import datetime, timedelta
 from typing import Optional
-from jose import JWTError, jwt
+import json
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 import crud, models, schemas
 import os
 from dotenv import load_dotenv
-# Alteração 1: Importar a função get_db do módulo de banco de dados
+import firebase_admin
+from firebase_admin import credentials, auth
 from database import get_db
+from google.cloud import secretmanager
 
 load_dotenv()
 
-# Configurações do token
-SECRET_KEY = os.getenv("SECRET_KEY", "chave_secreta_fallback")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
+# --- Configuração do Firebase Admin SDK via Secret Manager ---
+# Verifica se o SDK já foi inicializado para evitar erros
+if not firebase_admin._apps:
+    try:
+        # ID do seu projeto Google Cloud
+        project_id = "barbearia-backend-gc" 
+        # Nome do secret que foi criado
+        secret_id = "firebase-admin-credentials" 
+        version_id = "latest"
+
+        # Cria o cliente do Secret Manager
+        client = secretmanager.SecretManagerServiceClient()
+
+        # Monta o nome completo do recurso do secret
+        name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
+
+        # Acessa a versão do secret
+        response = client.access_secret_version(request={"name": name})
+
+        # Decodifica o payload (o conteúdo do secret) para uma string
+        payload = response.payload.data.decode("UTF-8")
+        
+        # Converte a string JSON para um dicionário
+        cred_json = json.loads(payload)
+
+        # Inicializa o Firebase com as credenciais do Secret Manager
+        cred = credentials.Certificate(cred_json)
+        firebase_admin.initialize_app(cred)
+        print("Firebase Admin SDK inicializado com sucesso via Secret Manager.")
+
+    except Exception as e:
+        print(f"ERRO CRÍTICO ao inicializar o Firebase via Secret Manager: {e}")
+        # Levantar a exceção para que o container não inicie se o Firebase falhar
+        raise e
+
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
-
-# ---------- Gerar token ----------
-def criar_token(dados: dict, expires_delta: Optional[timedelta] = None):
-    to_encode = dados.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-
-
-# ---------- Verificar token ----------
-def verificar_token(token: str):
+def get_current_user_firebase(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> models.Usuario:
+    """
+    Decodifica o ID Token do Firebase e busca o usuário correspondente no nosso banco de dados.
+    """
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        usuario_id: str = payload.get("sub")
-        if usuario_id is None:
-            raise HTTPException(status_code=401, detail="Token inválido")
-        return usuario_id
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Token inválido")
+        decoded_token = auth.verify_id_token(token)
+        firebase_uid = decoded_token['uid']
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Token inválido ou expirado: {e}")
 
-
-# ---------- Dependência ----------
-# Alteração 2: Corrigido para usar a dependência get_db centralizada
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> models.Usuario:
-    usuario_id = verificar_token(token)
-    # Tenta converter o usuario_id para UUID para fazer a busca correta
-    try:
-        from uuid import UUID
-        uid = UUID(usuario_id)
-    except ValueError:
-        raise HTTPException(status_code=401, detail="ID de usuário inválido no token")
-    
-    usuario = db.query(models.Usuario).filter(models.Usuario.id == uid).first()
+    usuario = crud.buscar_usuario_por_firebase_uid(db, firebase_uid=firebase_uid)
     if not usuario:
-        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Perfil de usuário não encontrado em nosso sistema.")
     return usuario
 
-# --- NOVA FUNÇÃO DE DEPENDÊNCIA ADICIONADA ---
 
-def get_current_admin_user(current_user: models.Usuario = Depends(get_current_user)) -> models.Usuario:
+def get_current_admin_user(current_user: models.Usuario = Depends(get_current_user_firebase)) -> models.Usuario:
     """
     Verifica se o usuário atual é um administrador.
-    Se não for, lança uma exceção HTTP 403 (Forbidden).
     """
     if current_user.tipo != "admin":
         raise HTTPException(
