@@ -349,6 +349,7 @@ def update_me_barbeiro(dados_update: schemas.BarbeiroUpdate, db: Session = Depen
     return crud.atualizar_perfil_barbeiro(db, barbeiro, dados_update)
 
 @app.put("/me/barbeiro/foto", response_model=schemas.BarbeiroResponse)
+@app.post("/me/barbeiro/foto", response_model=schemas.BarbeiroResponse)
 async def update_barbeiro_foto(
     file: UploadFile = File(...), # Recebe o arquivo diretamente como no /upload_foto
     db: Session = Depends(get_db), 
