@@ -106,6 +106,24 @@ def promover_usuario_para_barbeiro(db: Session, usuario_id: uuid.UUID, info_barb
     db.refresh(novo_barbeiro)
     return novo_barbeiro
 
+# NOVAS FUNÇÕES PARA FCM
+def adicionar_fcm_token(db: Session, usuario: models.Usuario, fcm_token: str):
+    """Adiciona um FCM token ao usuário, evitando duplicatas."""
+    if usuario.fcm_tokens is None:
+        usuario.fcm_tokens = []
+    if fcm_token not in usuario.fcm_tokens:
+        usuario.fcm_tokens.append(fcm_token)
+        db.commit()
+        db.refresh(usuario)
+    return usuario
+
+def remover_fcm_token(db: Session, usuario: models.Usuario, fcm_token: str):
+    """Remove um FCM token inválido do usuário."""
+    if usuario.fcm_tokens is not None and fcm_token in usuario.fcm_tokens:
+        usuario.fcm_tokens.remove(fcm_token)
+        db.commit()
+        db.refresh(usuario)
+    return usuario
 
 # --------- BARBEIROS ---------
 

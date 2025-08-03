@@ -51,6 +51,7 @@ class UsuarioProfile(BaseModel):
     email: EmailStr
     tipo: str
     firebase_uid: Optional[str] = None
+    fcm_tokens: List[str] = []
 
     class Config:
         from_attributes = True
@@ -60,6 +61,10 @@ class UsuarioSync(BaseModel):
     nome: str
     email: EmailStr
     firebase_uid: str
+
+# NOVO SCHEMA PARA O TOKEN FCM
+class FCMTokenUpdate(BaseModel):
+    fcm_token: str = Field(..., description="Token FCM do dispositivo a ser registrado")
 
 
 # ---------- BARBEIRO ----------

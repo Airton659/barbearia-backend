@@ -1,11 +1,12 @@
 from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Integer, Time, Float
 # Alteração 1: Importar a hybrid_property
 from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 import uuid
 from database import Base
 from passlib.context import CryptContext
+
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -25,6 +26,8 @@ class Usuario(Base):
     # Alteração: Adicionando a coluna firebase_uid
     firebase_uid = Column(String, unique=True, nullable=True, index=True)
 
+    # NOVO CAMPO PARA O FCM
+    fcm_tokens = Column(ARRAY(String), default=[])
 
     agendamentos = relationship("Agendamento", back_populates="usuario")
     curtidas = relationship("Curtida", back_populates="usuario")

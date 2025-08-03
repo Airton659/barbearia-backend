@@ -10,6 +10,7 @@ import time
 import os
 import json
 from datetime import date, time, timedelta
+import logging
 # Alteração: Importar a nova dependência de autenticação do Firebase
 from auth import get_current_user_firebase, get_current_admin_user
 from fastapi.security import OAuth2PasswordRequestForm
@@ -19,8 +20,13 @@ from database import get_db, engine
 from google.cloud import storage 
 from PIL import Image
 from io import BytesIO
+import firebase_admin.messaging
 
 app = FastAPI()
+
+# Adicionar um logger para ajudar no debug
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # AQUI: A variável CLOUD_STORAGE_BUCKET_NAME é definida globalmente
 # Vamos manter a definição global, mas garantir a verificação dentro das funções.
@@ -117,6 +123,16 @@ def resetar_senha(request: schemas.ResetarSenhaRequest, db: Session = Depends(ge
     crud.resetar_senha(db, usuario, nova_senha=request.nova_senha)
     return {"mensagem": "Senha atualizada com sucesso."}
 
+# NOVO ENDPOINT: Registrar o token FCM
+@app.post("/me/register-fcm-token", status_code=status.HTTP_200_OK)
+def register_fcm_token_endpoint(
+    request: schemas.FCMTokenUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.Usuario = Depends(get_current_user_firebase)
+):
+    crud.adicionar_fcm_token(db, current_user, request.fcm_token)
+    return {"message": "FCM token registrado com sucesso."}
+
 
 # --------- ADMIN ---------
 
@@ -147,8 +163,36 @@ def listar_barbeiros(db: Session = Depends(get_db), especialidade: Optional[str]
 # --------- AGENDAMENTOS ---------
 
 @app.post("/agendamentos", response_model=schemas.AgendamentoResponse)
-def agendar(agendamento: schemas.AgendamentoCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user_firebase)):
-    return crud.criar_agendamento(db, agendamento, usuario_id=current_user.id)
+async def agendar(
+    agendamento: schemas.AgendamentoCreate, 
+    db: Session = Depends(get_db), 
+    current_user: models.Usuario = Depends(get_current_user_firebase)
+):
+    novo_agendamento = crud.criar_agendamento(db, agendamento, usuario_id=current_user.id)
+    
+    # Lógica para enviar a notificação após o agendamento
+    barbeiro = crud.buscar_barbeiro_por_usuario_id(db, agendamento.barbeiro_id)
+    if barbeiro and barbeiro.usuario.fcm_tokens:
+        for token in barbeiro.usuario.fcm_tokens:
+            try:
+                message = firebase_admin.messaging.Message(
+                    notification=firebase_admin.messaging.Notification(
+                        title="Novo Agendamento!",
+                        body=f"Um novo agendamento foi marcado com você para {novo_agendamento.data_hora.strftime('%d/%m/%Y às %H:%M')}.",
+                    ),
+                    token=token,
+                )
+                response = firebase_admin.Messaging(message)
+                logger.info(f"Notificação enviada com sucesso para o token: {token}. Response: {response}")
+
+            except firebase_admin.messaging.FirebaseError as e:
+                logger.error(f"Erro ao enviar notificação para o token {token}: {e}")
+                # Verifica se o erro indica um token inválido
+                if e.code in ['invalid-argument', 'not-found', 'unregistered']:
+                    logger.warning(f"Removendo token inválido: {token}")
+                    crud.remover_fcm_token(db, barbeiro.usuario, token)
+    
+    return novo_agendamento
 
 @app.get("/agendamentos", response_model=List[schemas.AgendamentoResponse])
 def listar_agendamentos(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user_firebase)):
