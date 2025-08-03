@@ -27,6 +27,21 @@ def criar_usuario(db: Session, usuario: schemas.UsuarioCreate):
     db.refresh(novo_usuario)
     return novo_usuario
 
+def _obter_total_admins(db: Session) -> int:
+    """Função auxiliar para contar o número de usuários 'admin'."""
+    return db.query(models.Usuario).filter(models.Usuario.tipo == "admin").count()
+
+# Requisito 1: Lógica de Inicialização do Primeiro Administrador
+def _criar_perfil_barbeiro_para_admin(db: Session, usuario: models.Usuario):
+    """Função auxiliar para criar um perfil de barbeiro básico para o primeiro admin."""
+    # Cria o schema necessário para a função de criação de barbeiro
+    barbeiro_data = schemas.BarbeiroCreate(
+        especialidades="Admin",
+        ativo=True
+    )
+    # Chama a função de criação de barbeiro diretamente, sem alterar o tipo de usuário novamente
+    return criar_barbeiro(db=db, barbeiro=barbeiro_data, usuario_id=usuario.id)
+
 def criar_usuario_firebase(db: Session, nome: str, email: str, firebase_uid: str):
     db_usuario = models.Usuario(
         nome=nome,
@@ -38,6 +53,15 @@ def criar_usuario_firebase(db: Session, nome: str, email: str, firebase_uid: str
         db.add(db_usuario)
         db.commit()
         db.refresh(db_usuario)
+        
+        # Requisito 1: Lógica de Inicialização do Primeiro Administrador
+        total_admins = _obter_total_admins(db)
+        if total_admins == 0:
+            db_usuario.tipo = "admin"
+            db.commit()
+            db.refresh(db_usuario)
+            _criar_perfil_barbeiro_para_admin(db, db_usuario)
+
         return db_usuario
     except IntegrityError:
         db.rollback()
@@ -48,6 +72,9 @@ def buscar_usuario_por_email(db: Session, email: str):
 
 def buscar_usuario_por_firebase_uid(db: Session, firebase_uid: str):
     return db.query(models.Usuario).filter(models.Usuario.firebase_uid == firebase_uid).first()
+
+def buscar_usuario_por_id(db: Session, usuario_id: uuid.UUID):
+    return db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
 
 # --- Funções para o fluxo de recuperação de senha ---
 
@@ -124,6 +151,60 @@ def remover_fcm_token(db: Session, usuario: models.Usuario, fcm_token: str):
         db.commit()
         db.refresh(usuario)
     return usuario
+
+# Requisito 2: Lógica de gerenciamento de permissões
+def _criar_perfil_barbeiro(db: Session, usuario: models.Usuario):
+    """Cria um perfil de barbeiro com especialidades padrão, se ainda não existir."""
+    barbeiro_existente = buscar_barbeiro_por_usuario_id(db, usuario.id)
+    if not barbeiro_existente:
+        novo_barbeiro = models.Barbeiro(
+            id=uuid.uuid4(),
+            usuario_id=usuario.id,
+            especialidades="Especialidades padrão",
+            ativo=True
+        )
+        db.add(novo_barbeiro)
+        db.commit()
+        db.refresh(novo_barbeiro)
+        return novo_barbeiro
+    elif not barbeiro_existente.ativo:
+        barbeiro_existente.ativo = True
+        db.commit()
+        db.refresh(barbeiro_existente)
+    return barbeiro_existente
+
+def _desativar_perfil_barbeiro(db: Session, usuario: models.Usuario):
+    """Desativa o perfil de barbeiro de um usuário, se ele existir."""
+    barbeiro = buscar_barbeiro_por_usuario_id(db, usuario.id)
+    if barbeiro and barbeiro.ativo:
+        barbeiro.ativo = False
+        db.commit()
+        db.refresh(barbeiro)
+        return barbeiro
+    return None
+
+def atualizar_permissao_usuario(db: Session, usuario_alvo: models.Usuario, new_role: str) -> Optional[models.Usuario]:
+    """
+    Atualiza a permissão de um usuário e gerencia os efeitos colaterais
+    na tabela de barbeiros.
+    """
+    valid_roles = ["cliente", "barbeiro", "admin"]
+    if new_role not in valid_roles:
+        return None # Indica um papel inválido
+    
+    old_role = usuario_alvo.tipo
+    usuario_alvo.tipo = new_role
+    
+    if new_role in ["barbeiro", "admin"] and old_role not in ["barbeiro", "admin"]:
+        _criar_perfil_barbeiro(db, usuario_alvo)
+    
+    elif new_role == "cliente" and old_role in ["barbeiro", "admin"]:
+        _desativar_perfil_barbeiro(db, usuario_alvo)
+        
+    db.commit()
+    db.refresh(usuario_alvo)
+    return usuario_alvo
+
 
 # --------- BARBEIROS ---------
 

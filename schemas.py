@@ -65,6 +65,10 @@ class UsuarioSync(BaseModel):
 # NOVO SCHEMA PARA O TOKEN FCM
 class FCMTokenUpdate(BaseModel):
     fcm_token: str = Field(..., description="Token FCM do dispositivo a ser registrado")
+    
+# NOVO SCHEMA PARA ATUALIZAÇÃO DE PERMISSÃO DE USUÁRIO
+class UsuarioRoleUpdate(BaseModel):
+    new_role: str = Field(..., description="Nova permissão do usuário. Valores permitidos: 'cliente', 'barbeiro', 'admin'", example="barbeiro")
 
 
 # ---------- BARBEIRO ----------

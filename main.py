@@ -140,17 +140,29 @@ def register_fcm_token_endpoint(
 def admin_listar_usuarios(db: Session = Depends(get_db), admin: models.Usuario = Depends(get_current_admin_user)):
     return crud.listar_todos_usuarios(db)
 
-@app.put("/admin/usuarios/{usuario_id}/promover", response_model=schemas.BarbeiroResponse)
-def admin_promover_para_barbeiro(
-    usuario_id: uuid.UUID,
-    info_barbeiro: schemas.BarbeiroPromote, 
-    db: Session = Depends(get_db), 
+@app.patch("/admin/users/{user_id}/role", response_model=schemas.UsuarioResponse)
+def admin_atualizar_permissao_usuario(
+    user_id: uuid.UUID,
+    role_update: schemas.UsuarioRoleUpdate,
+    db: Session = Depends(get_db),
     admin: models.Usuario = Depends(get_current_admin_user)
 ):
-    barbeiro_criado = crud.promover_usuario_para_barbeiro(db, usuario_id, info_barbeiro)
-    if not barbeiro_criado:
+    usuario_alvo = crud.buscar_usuario_por_id(db, user_id)
+    if not usuario_alvo:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
-    return barbeiro_criado
+
+    if role_update.new_role not in ["cliente", "barbeiro", "admin"]:
+        raise HTTPException(status_code=400, detail="Permissão inválida. Use 'cliente', 'barbeiro' ou 'admin'.")
+
+    # Impede que um admin desative a si mesmo.
+    if usuario_alvo.id == admin.id and role_update.new_role != "admin":
+        raise HTTPException(status_code=403, detail="Você não pode remover sua própria permissão de administrador.")
+
+    usuario_atualizado = crud.atualizar_permissao_usuario(db, usuario_alvo, role_update.new_role)
+    if not usuario_atualizado:
+        raise HTTPException(status_code=500, detail="Ocorreu um erro ao atualizar a permissão do usuário.")
+    
+    return usuario_atualizado
 
 
 # --------- BARBEIROS ---------
