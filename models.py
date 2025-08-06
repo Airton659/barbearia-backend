@@ -6,6 +6,7 @@ from sqlalchemy.orm import relationship
 import uuid
 from database import Base
 from passlib.context import CryptContext
+from datetime import datetime
 
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -34,6 +35,7 @@ class Usuario(Base):
     comentarios = relationship("Comentario", back_populates="usuario") # <--- Comentario adicionado aqui
     avaliacoes = relationship("Avaliacao", back_populates="usuario")
     barbeiro = relationship("Barbeiro", back_populates="usuario", uselist=False)
+    notificacoes = relationship("Notificacao", back_populates="usuario", cascade="all, delete-orphan")
 
     def verificar_senha(self, senha: str) -> bool:
         # A verificação de senha só fará sentido para usuários antigos ou não-Firebase
@@ -167,3 +169,16 @@ class Servico(Base):
     duracao_minutos = Column(Integer, nullable=False)
 
     barbeiro = relationship("Barbeiro", back_populates="servicos")
+
+# --- NOVA TABELA PARA NOTIFICAÇÕES ---
+class Notificacao(Base):
+    __tablename__ = "notificacoes"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"))
+    mensagem = Column(String, nullable=False)
+    tipo = Column(String, nullable=True)
+    lida = Column(Boolean, default=False)
+    referencia_id = Column(UUID(as_uuid=True), nullable=True)
+    data_criacao = Column(DateTime, default=datetime.utcnow)
+
+    usuario = relationship("Usuario", back_populates="notificacoes")

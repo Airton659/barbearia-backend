@@ -285,3 +285,19 @@ class ServicoResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+# ---------- NOTIFICAÇÕES ----------
+
+class NotificacaoResponse(BaseModel):
+    id: UUID
+    mensagem: str
+    lida: bool
+    data_criacao: datetime
+    tipo: Optional[str] = None
+    referencia_id: Optional[UUID] = None
+
+    class Config:
+        from_attributes = True
+
+class NotificacaoContagemResponse(BaseModel):
+    count: int

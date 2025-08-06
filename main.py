@@ -22,6 +22,7 @@ from PIL import Image
 from io import BytesIO
 import firebase_admin.messaging
 
+
 app = FastAPI()
 
 # Adicionar um logger para ajudar no debug
@@ -180,11 +181,17 @@ async def agendar(
     db: Session = Depends(get_db), 
     current_user: models.Usuario = Depends(get_current_user_firebase)
 ):
+    # Este endpoint já tem a lógica do Firebase Cloud Messaging.
+    # A lógica para criar a notificação visual no banco de dados já está
+    # implementada na função `crud.criar_agendamento`, então ela será
+    # executada automaticamente quando esta função for chamada.
+    
     novo_agendamento = crud.criar_agendamento(db, agendamento, usuario_id=current_user.id)
     
-    # Lógica para enviar a notificação após o agendamento
+    # Lógica para enviar a notificação push após o agendamento
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, agendamento.barbeiro_id)
     if barbeiro and barbeiro.usuario.fcm_tokens:
+        # A notificação visual no banco de dados já foi criada no crud.py
         for token in barbeiro.usuario.fcm_tokens:
             try:
                 message = firebase_admin.messaging.Message(
@@ -206,25 +213,34 @@ async def agendar(
     
     return novo_agendamento
 
-@app.get("/agendamentos", response_model=List[schemas.AgendamentoResponse])
-def listar_agendamentos(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user_firebase)):
-    return crud.listar_agendamentos_por_usuario(db, current_user.id)
 
-@app.delete("/agendamentos/{agendamento_id}", status_code=status.HTTP_204_NO_CONTENT)
-def cancelar_agendamento_endpoint(
-    agendamento_id: uuid.UUID,
+# --------- NOTIFICAÇÕES ---------
+
+@app.get("/notificacoes/nao-lidas/contagem", response_model=schemas.NotificacaoContagemResponse)
+def contar_notificacoes_nao_lidas_endpoint(
     db: Session = Depends(get_db),
     current_user: models.Usuario = Depends(get_current_user_firebase)
 ):
-    """
-    Permite ao usuário cancelar um agendamento.
-    """
-    agendamento_cancelado = crud.cancelar_agendamento(db, agendamento_id, current_user.id)
-    
-    if agendamento_cancelado is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agendamento não encontrado ou você não tem permissão para cancelá-lo.")
-    
-    return {"message": "Agendamento cancelado com sucesso."}
+    count = crud.contar_notificacoes_nao_lidas(db, current_user.id)
+    return {"count": count}
+
+@app.get("/notificacoes", response_model=List[schemas.NotificacaoResponse])
+def listar_notificacoes_endpoint(
+    db: Session = Depends(get_db),
+    current_user: models.Usuario = Depends(get_current_user_firebase)
+):
+    return crud.listar_notificacoes(db, current_user.id)
+
+@app.post("/notificacoes/{id}/marcar-como-lida", status_code=status.HTTP_200_OK)
+def marcar_notificacao_como_lida_endpoint(
+    id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: models.Usuario = Depends(get_current_user_firebase)
+):
+    sucesso = crud.marcar_notificacao_como_lida(db, id, current_user.id)
+    if not sucesso:
+        raise HTTPException(status_code=404, detail="Notificação não encontrada ou não pertence ao usuário.")
+    return {"message": "Notificação marcada como lida."}
 
 
 # --------- FEED / POSTAGENS ---------

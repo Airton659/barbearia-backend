@@ -287,6 +287,14 @@ def criar_agendamento(db: Session, agendamento: schemas.AgendamentoCreate, usuar
     db.add(novo_agendamento)
     db.commit()
     db.refresh(novo_agendamento)
+
+    # Lógica da Fase 1: Criar uma notificação para o barbeiro sobre o novo agendamento
+    barbeiro_usuario = buscar_barbeiro_por_usuario_id(db, agendamento.barbeiro_id)
+    if barbeiro_usuario:
+        cliente_usuario = buscar_usuario_por_id(db, usuario_id)
+        mensagem = f"{cliente_usuario.nome} agendou um horário com você para {agendamento.data_hora.strftime('%d/%m/%Y às %H:%M')}."
+        criar_notificacao(db, barbeiro_usuario.usuario_id, mensagem, "NOVO_AGENDAMENTO", novo_agendamento.id)
+
     return novo_agendamento
 
 
