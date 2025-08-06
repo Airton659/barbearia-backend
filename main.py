@@ -214,7 +214,6 @@ async def agendar(
                     }
                 )
                 
-                # --- CORREÇÃO IMPORTANTE ---
                 # A função correta para enviar a mensagem é `send`
                 response = firebase_admin.Messaging(message)
                 logger.info(f"Notificação push enviada para o token: {token}. Response: {response}")
@@ -228,8 +227,6 @@ async def agendar(
                     crud.remover_fcm_token(db, barbeiro.usuario, token)
     
     return novo_agendamento
-
-# --- [ADICIONADOS - FALTANTES DO ORIGINAL] ---
 
 @app.get("/agendamentos", response_model=List[schemas.AgendamentoResponse])
 def listar_agendamentos(
@@ -258,7 +255,7 @@ def cancelar_agendamento_endpoint(
             detail="Agendamento não encontrado ou você não tem permissão para cancelá-lo."
         )
     
-    return {"message": "Agendamento cancelado com sucesso."}
+    return JSONResponse(content={"message": "Agendamento cancelado com sucesso."}, status_code=status.HTTP_200_OK)
 
 # --------- NOTIFICAÇÕES ---------
 
@@ -301,7 +298,7 @@ async def criar_postagem(
     if not barbeiro:
         raise HTTPException(status_code=403, detail="Apenas barbeiros podem criar postagens")
 
-    return crud.criar_postagem(
+    nova_postagem = crud.criar_postagem(
         db,
         request_data.postagem,
         barbeiro_id=barbeiro.id,
@@ -309,16 +306,17 @@ async def criar_postagem(
         foto_url_medium=request_data.foto_urls.get("medium"),
         foto_url_thumbnail=request_data.foto_urls.get("thumbnail")
     )
+    return nova_postagem
 
 @app.get("/feed", response_model=List[schemas.PostagemResponse])
 def listar_feed(
     db: Session = Depends(get_db),
     limit: int = 10,
     offset: int = 0,
-    current_user: Optional[models.Usuario] = Depends(get_current_user_firebase)  # Torna o usuário atual opcional
+    current_user: Optional[models.Usuario] = Depends(get_current_user_firebase)
 ):
-    # A lógica para verificar a curtida será adicionada no crud.py
-    return crud.listar_feed(db, limit=limit, offset=offset, usuario_id_logado=current_user.id if current_user else None)
+    usuario_id = current_user.id if current_user else None
+    return crud.listar_feed(db, limit=limit, offset=offset, usuario_id_logado=usuario_id)
 
 @app.delete("/postagens/{postagem_id}", status_code=status.HTTP_204_NO_CONTENT)
 def deletar_postagem_endpoint(
@@ -326,9 +324,6 @@ def deletar_postagem_endpoint(
     db: Session = Depends(get_db),
     current_user: models.Usuario = Depends(get_current_user_firebase)
 ):
-    """
-    Permite ao barbeiro logado excluir uma postagem que ele mesmo criou.
-    """
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if not barbeiro:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Apenas barbeiros podem deletar postagens.")
@@ -338,21 +333,77 @@ def deletar_postagem_endpoint(
     if postagem_deletada is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Postagem não encontrada ou você não tem permissão para deletá-la.")
 
-    return {"message": "Postagem deletada com sucesso."}
+    return JSONResponse(content={"message": "Postagem deletada com sucesso."}, status_code=status.HTTP_200_OK)
 
 
 # --------- CURTIDAS E COMENTÁRIOS ---------
 
-@app.post("/postagens/{postagem_id}/curtir")
-def curtir_postagem(postagem_id: uuid.UUID, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user_firebase)):
-    resultado = crud.toggle_curtida(db, current_user.id, postagem_id)
-    if resultado is None and crud.buscar_postagem_por_id(db, postagem_id) is None:
+@app.post("/postagens/{postagem_id}/curtir", status_code=status.HTTP_200_OK)
+async def curtir_postagem(
+    postagem_id: uuid.UUID, 
+    db: Session = Depends(get_db), 
+    current_user: models.Usuario = Depends(get_current_user_firebase)
+):
+    curtida_result = crud.toggle_curtida(db, current_user.id, postagem_id)
+    
+    postagem = crud.buscar_postagem_por_id(db, postagem_id)
+    if not postagem:
         raise HTTPException(status_code=404, detail="Postagem não encontrada")
-    return {"curtida": bool(resultado)}
+    
+    if curtida_result: # Apenas notifica se foi uma nova curtida
+        barbeiro_usuario = postagem.barbeiro.usuario
+        if barbeiro_usuario.id != current_user.id and barbeiro_usuario.fcm_tokens:
+            mensagem_body = f"{current_user.nome} curtiu sua postagem: \"{postagem.titulo}\"."
+            
+            for token in list(barbeiro_usuario.fcm_tokens):
+                try:
+                    message = firebase_admin.messaging.Message(
+                        notification=firebase_admin.messaging.Notification(
+                            title="Nova Curtida!",
+                            body=mensagem_body,
+                        ),
+                        token=token,
+                        data={"tipo": "NOVA_CURTIDA", "post_id": str(postagem.id)}
+                    )
+                    firebase_admin.Messaging(message)
+                except firebase_admin.messaging.FirebaseError as e:
+                    logger.error(f"Erro ao enviar notificação de curtida para {token}: {e}")
+                    crud.remover_fcm_token(db, barbeiro_usuario, token)
+
+    return {"curtida": bool(curtida_result)}
 
 @app.post("/comentarios", response_model=schemas.ComentarioResponse)
-def comentar(comentario: schemas.ComentarioCreate, db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user_firebase)):
-    return crud.criar_comentario(db, comentario, usuario_id=current_user.id)
+async def comentar(
+    comentario: schemas.ComentarioCreate, 
+    db: Session = Depends(get_db), 
+    current_user: models.Usuario = Depends(get_current_user_firebase)
+):
+    novo_comentario = crud.criar_comentario(db, comentario, usuario_id=current_user.id)
+    if not novo_comentario:
+        raise HTTPException(status_code=404, detail="Postagem não encontrada para comentar.")
+
+    postagem = crud.buscar_postagem_por_id(db, comentario.postagem_id)
+    barbeiro_usuario = postagem.barbeiro.usuario
+
+    if barbeiro_usuario.id != current_user.id and barbeiro_usuario.fcm_tokens:
+        mensagem_body = f"{current_user.nome} comentou: \"{comentario.texto[:50]}...\""
+        for token in list(barbeiro_usuario.fcm_tokens):
+            try:
+                message = firebase_admin.messaging.Message(
+                    notification=firebase_admin.messaging.Notification(
+                        title="Novo Comentário!",
+                        body=mensagem_body,
+                    ),
+                    token=token,
+                    data={"tipo": "NOVO_COMENTARIO", "post_id": str(postagem.id)}
+                )
+                firebase_admin.Messaging(message)
+            except firebase_admin.messaging.FirebaseError as e:
+                logger.error(f"Erro ao enviar notificação de comentário para {token}: {e}")
+                crud.remover_fcm_token(db, barbeiro_usuario, token)
+
+    return schemas.ComentarioResponse.model_validate(novo_comentario)
+
 
 @app.get("/comentarios/{postagem_id}", response_model=List[schemas.ComentarioResponse])
 def listar_comentarios(postagem_id: uuid.UUID, db: Session = Depends(get_db)):
@@ -364,15 +415,10 @@ def deletar_comentario_endpoint(
     db: Session = Depends(get_db),
     current_user: models.Usuario = Depends(get_current_user_firebase)
 ):
-    """
-    Permite ao usuário logado excluir um comentário que ele mesmo fez.
-    """
     comentario_deletado = crud.deletar_comentario(db, comentario_id, current_user.id)
-
     if comentario_deletado is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comentário não encontrado ou você não tem permissão para deletá-lo.")
-
-    return {"message": "Comentário deletado com sucesso."}
+    return JSONResponse(content={"message": "Comentário deletado com sucesso."}, status_code=status.HTTP_200_OK)
 
 
 # --------- AVALIAÇÕES E PERFIS ---------
@@ -412,7 +458,7 @@ def update_me_barbeiro(dados_update: schemas.BarbeiroUpdate, db: Session = Depen
 @app.put("/me/barbeiro/foto", response_model=schemas.BarbeiroResponse)
 @app.post("/me/barbeiro/foto", response_model=schemas.BarbeiroResponse)
 async def update_barbeiro_foto(
-    file: UploadFile = File(...),  # Recebe o arquivo diretamente como no /upload_foto
+    file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: models.Usuario = Depends(get_current_user_firebase)
 ):
@@ -420,24 +466,19 @@ async def update_barbeiro_foto(
     if not barbeiro:
         raise HTTPException(status_code=404, detail="Barbeiro não encontrado")
 
-    try:
-        # ATENÇÃO AQUI: Acessando a variável global CLOUD_STORAGE_BUCKET_NAME_GLOBAL
-        # e verificando se ela tem um valor antes de usar.
-        if not CLOUD_STORAGE_BUCKET_NAME_GLOBAL:
-            raise HTTPException(status_code=500, detail="Nome do bucket do Cloud Storage não configurado.")
+    if not CLOUD_STORAGE_BUCKET_NAME_GLOBAL:
+        raise HTTPException(status_code=500, detail="Nome do bucket do Cloud Storage não configurado.")
 
+    try:
         file_content = await file.read()
         filename_base = f"barbeiro_{barbeiro.id}-{os.path.splitext(file.filename)[0]}"
-
-        # Chama a nova função auxiliar para fazer upload e redimensionar, passando o bucket name
+        
         uploaded_urls = await upload_and_resize_image(
             file_content=file_content,
             filename_base=filename_base,
-            bucket_name=CLOUD_STORAGE_BUCKET_NAME_GLOBAL,  # <-- Usando a variável GLOBAL corrigida
-            content_type=file.content_type  # Passa o content_type original do arquivo
+            bucket_name=CLOUD_STORAGE_BUCKET_NAME_GLOBAL,
+            content_type=file.content_type
         )
-
-        # Atualiza o banco de dados com todas as URLs geradas
         return crud.atualizar_foto_barbeiro(
             db,
             barbeiro,
@@ -445,9 +486,8 @@ async def update_barbeiro_foto(
             foto_url_medium=uploaded_urls.get("medium"),
             foto_url_thumbnail=uploaded_urls.get("thumbnail")
         )
-
     except Exception as e:
-        print(f"ERRO CRÍTICO NO UPLOAD DE FOTO DE BARBEIRO: {e}")
+        logger.error(f"ERRO CRÍTICO NO UPLOAD DE FOTO DE BARBEIRO: {e}")
         raise HTTPException(status_code=500, detail=f"Ocorreu um erro interno no servidor ao atualizar a foto: {e}")
 
 
@@ -458,11 +498,53 @@ def listar_agendamentos_do_barbeiro(db: Session = Depends(get_db), current_user:
         raise HTTPException(status_code=404, detail="Barbeiro não encontrado")
     return crud.listar_agendamentos_por_barbeiro(db, barbeiro.id)
 
+@app.patch("/me/agendamentos/{agendamento_id}/cancelar", response_model=schemas.AgendamentoResponse)
+async def cancelar_agendamento_pelo_barbeiro_endpoint(
+    agendamento_id: uuid.UUID,
+    request_data: schemas.AgendamentoCancelamentoRequest,
+    db: Session = Depends(get_db),
+    current_user: models.Usuario = Depends(get_current_user_firebase)
+):
+    barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
+    if not barbeiro:
+        raise HTTPException(status_code=403, detail="Acesso negado. Apenas barbeiros podem cancelar agendamentos.")
+
+    agendamento_cancelado = crud.cancelar_agendamento_pelo_barbeiro(
+        db, 
+        agendamento_id=agendamento_id, 
+        barbeiro_id=barbeiro.id,
+        motivo=request_data.motivo
+    )
+
+    if not agendamento_cancelado:
+        raise HTTPException(status_code=404, detail="Agendamento não encontrado ou não pertence a você.")
+
+    # Envio da notificação push para o cliente
+    cliente = crud.buscar_usuario_por_id(db, agendamento_cancelado.usuario_id)
+    if cliente and cliente.fcm_tokens:
+        mensagem_body = f"Seu agendamento com {barbeiro.usuario.nome} foi cancelado."
+        if request_data.motivo:
+            mensagem_body += f" Motivo: {request_data.motivo}"
+        
+        for token in list(cliente.fcm_tokens):
+            try:
+                message = firebase_admin.messaging.Message(
+                    notification=firebase_admin.messaging.Notification(
+                        title="Agendamento Cancelado",
+                        body=mensagem_body,
+                    ),
+                    token=token,
+                    data={"tipo": "AGENDAMENTO_CANCELADO", "agendamento_id": str(agendamento_cancelado.id)}
+                )
+                firebase_admin.Messaging(message)
+            except firebase_admin.messaging.FirebaseError as e:
+                logger.error(f"Erro ao enviar notificação de cancelamento para {token}: {e}")
+                crud.remover_fcm_token(db, cliente, token)
+
+    return agendamento_cancelado
+
 @app.get("/me/horarios-trabalho", response_model=List[schemas.HorarioTrabalhoResponse])
 def get_me_horarios_trabalho(db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user_firebase)):
-    """
-    Retorna os horários de trabalho definidos para o barbeiro autenticado.
-    """
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if not barbeiro:
         raise HTTPException(status_code=403, detail="Apenas barbeiros podem consultar horários de trabalho.")
@@ -474,62 +556,44 @@ async def upload_and_resize_image(
     file_content: bytes,
     filename_base: str,
     bucket_name: str,
-    content_type: str  # Adicionar content_type para garantir formato correto
+    content_type: str
 ) -> dict:
-    """
-    Faz o upload da imagem original e de versões redimensionadas para o GCS.
-    Retorna um dicionário com as URLs de cada tamanho.
-    """
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
-
     urls = {}
-
-    # Gerar a extensão do arquivo a partir do content_type ou do filename_base, por segurança
-    # Assumindo que o content_type é 'image/jpeg' ou 'image/png'
     extension = ".jpeg"
     if "png" in content_type:
         extension = ".png"
     elif "gif" in content_type:
-        extension = ".gif"  # Adicionar suporte se necessário
+        extension = ".gif"
 
-    # Upload da imagem original
     original_blob_name = f"uploads/{filename_base}_original{extension}"
     original_blob = bucket.blob(original_blob_name)
     original_blob.upload_from_string(file_content, content_type=content_type)
     urls['original'] = f"https://storage.googleapis.com/{bucket_name}/{original_blob_name}"
 
-    # Abrir a imagem para redimensionamento
     image = Image.open(BytesIO(file_content))
-    # Converter para RGB se for PNG com RGBA, para evitar erros ao salvar como JPEG
     if image.mode == 'RGBA':
         image = image.convert('RGB')
 
-    # Redimensionamento e Upload de versão média
-    medium_size = (800, 800)  # Exemplo: 800px de largura máxima, altura proporcional
-    image_medium = image.copy()  # Copia para não alterar a original
-    image_medium.thumbnail(medium_size, Image.Resampling.LANCZOS)  # Melhor qualidade de redimensionamento
-
+    medium_size = (800, 800)
+    image_medium = image.copy()
+    image_medium.thumbnail(medium_size, Image.Resampling.LANCZOS)
     buffer_medium = BytesIO()
-    # Salvar como JPEG para otimização, mesmo que a original fosse PNG
     image_medium.save(buffer_medium, format="JPEG", quality=85)
     buffer_medium.seek(0)
-
-    medium_blob_name = f"uploads/{filename_base}_medium.jpeg"  # Sempre JPEG para versões otimizadas
+    medium_blob_name = f"uploads/{filename_base}_medium.jpeg"
     medium_blob = bucket.blob(medium_blob_name)
     medium_blob.upload_from_string(buffer_medium.getvalue(), content_type="image/jpeg")
     urls['medium'] = f"https://storage.googleapis.com/{bucket_name}/{medium_blob_name}"
 
-    # Redimensionamento e Upload de thumbnail
-    thumbnail_size = (200, 200)  # Exemplo: 200x200 para thumbnails
-    image_thumbnail = image.copy()  # Abrir a original novamente (ou a RGB convertida)
+    thumbnail_size = (200, 200)
+    image_thumbnail = image.copy()
     image_thumbnail.thumbnail(thumbnail_size, Image.Resampling.LANCZOS)
-
     buffer_thumbnail = BytesIO()
     image_thumbnail.save(buffer_thumbnail, format="JPEG", quality=85)
     buffer_thumbnail.seek(0)
-
-    thumbnail_blob_name = f"uploads/{filename_base}_thumbnail.jpeg"  # Sempre JPEG para versões otimizadas
+    thumbnail_blob_name = f"uploads/{filename_base}_thumbnail.jpeg"
     thumbnail_blob = bucket.blob(thumbnail_blob_name)
     thumbnail_blob.upload_from_string(buffer_thumbnail.getvalue(), content_type="image/jpeg")
     urls['thumbnail'] = f"https://storage.googleapis.com/{bucket_name}/{thumbnail_blob_name}"
@@ -538,32 +602,26 @@ async def upload_and_resize_image(
 
 @app.post("/upload_foto")
 async def upload_foto(file: UploadFile = File(...), current_user: models.Usuario = Depends(get_current_user_firebase)):
+    if not CLOUD_STORAGE_BUCKET_NAME_GLOBAL:
+        raise HTTPException(status_code=500, detail="Nome do bucket do Cloud Storage não configurado.")
     try:
-        # ATENÇÃO AQUI: Acessando a variável global CLOUD_STORAGE_BUCKET_NAME_GLOBAL
-        # e verificando se ela tem um valor antes de usar.
-        if not CLOUD_STORAGE_BUCKET_NAME_GLOBAL:
-            raise HTTPException(status_code=500, detail="Nome do bucket do Cloud Storage não configurado.")
-
         file_content = await file.read()
         filename_base = f"{uuid.uuid4()}-{os.path.splitext(file.filename)[0]}"
-
         uploaded_urls = await upload_and_resize_image(
             file_content=file_content,
             filename_base=filename_base,
-            bucket_name=CLOUD_STORAGE_BUCKET_NAME_GLOBAL,  # <-- Usando a variável GLOBAL corrigida
-            content_type=file.content_type  # Passa o content_type original do arquivo
+            bucket_name=CLOUD_STORAGE_BUCKET_NAME_GLOBAL,
+            content_type=file.content_type
         )
-
         return JSONResponse(content=uploaded_urls)
-
     except Exception as e:
-        print(f"ERRO CRÍTICO NO UPLOAD: {e}")
+        logger.error(f"ERRO CRÍTICO NO UPLOAD: {e}")
         raise HTTPException(status_code=500, detail=f"Ocorreu um erro interno no servidor: {e}")
 
 
 # --------- DISPONIBILIDADE E HORÁRIOS ---------
 
-@app.post("/me/horarios-trabalho", response_model=List[schemas.HorarioTrabalhoCreate])
+@app.post("/me/horarios-trabalho", response_model=List[schemas.HorarioTrabalhoResponse])
 def definir_horarios(horarios: List[schemas.HorarioTrabalhoCreate], db: Session = Depends(get_db), current_user: models.Usuario = Depends(get_current_user_firebase)):
     barbeiro = crud.buscar_barbeiro_por_usuario_id(db, current_user.id)
     if not barbeiro:

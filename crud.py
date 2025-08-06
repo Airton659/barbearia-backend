@@ -335,7 +335,6 @@ def listar_agendamentos_por_barbeiro(db: Session, barbeiro_id: uuid.UUID):
         .options(joinedload(models.Agendamento.usuario))\
         .filter(models.Agendamento.barbeiro_id == barbeiro_id).all()
 
-# --- FUNÇÃO ATUALIZADA: CANCELAR AGENDAMENTO (AGORA EXCLUI) ---
 def cancelar_agendamento(db: Session, agendamento_id: uuid.UUID, usuario_id: uuid.UUID) -> Optional[models.Agendamento]:
     """
     Cancela (agora exclui) um agendamento. Permite exclusão apenas pelo usuário que agendou.
@@ -346,15 +345,43 @@ def cancelar_agendamento(db: Session, agendamento_id: uuid.UUID, usuario_id: uui
     if not agendamento:
         return None # Agendamento não encontrado
     
-    # Verifica se o usuário logado é o dono do agendamento
     if str(agendamento.usuario_id) != str(usuario_id):
         return None # Usuário não autorizado
         
-    # ALTERAÇÃO AQUI: Exclui o agendamento em vez de apenas mudar o status
     db.delete(agendamento)
     db.commit()
-    return agendamento # Retorna o objeto excluído para confirmação
+    return agendamento
 
+def cancelar_agendamento_pelo_barbeiro(db: Session, agendamento_id: uuid.UUID, barbeiro_id: uuid.UUID, motivo: Optional[str] = None) -> Optional[models.Agendamento]:
+    """
+    Permite a um barbeiro cancelar um agendamento, atualizando o status
+    e criando uma notificação para o cliente.
+    """
+    agendamento = db.query(models.Agendamento).filter(
+        models.Agendamento.id == agendamento_id,
+        models.Agendamento.barbeiro_id == barbeiro_id
+    ).first()
+
+    if not agendamento:
+        return None
+
+    agendamento.status = "cancelado_pelo_barbeiro"
+    
+    mensagem = f"Seu agendamento para {agendamento.data_hora.strftime('%d/%m/%Y às %H:%M')} foi cancelado."
+    if motivo:
+        mensagem += f" Motivo: {motivo}"
+
+    criar_notificacao(
+        db,
+        usuario_id=agendamento.usuario_id,
+        mensagem=mensagem,
+        tipo="AGENDAMENTO_CANCELADO",
+        referencia_id=agendamento.id
+    )
+    
+    db.commit()
+    db.refresh(agendamento)
+    return agendamento
 
 # --------- POSTAGENS E INTERAÇÕES ---------
 
@@ -371,9 +398,9 @@ def criar_postagem(
         barbeiro_id=barbeiro_id,
         titulo=postagem.titulo,
         descricao=postagem.descricao,
-        foto_url_original=foto_url_original, # Usar a URL original
-        foto_url_medium=foto_url_medium, # Novo campo
-        foto_url_thumbnail=foto_url_thumbnail, # Novo campo
+        foto_url_original=foto_url_original,
+        foto_url_medium=foto_url_medium,
+        foto_url_thumbnail=foto_url_thumbnail,
         publicada=postagem.publicada,
         data_postagem=datetime.utcnow()
     )
@@ -381,27 +408,10 @@ def criar_postagem(
     db.commit()
     db.refresh(nova_postagem)
 
-    # >>> ALTERAÇÃO AQUI: Manualmente construir o objeto de resposta
-    # Isso evita que o FastAPI tente serializar a relação 'curtidas' que é uma lista,
-    # em vez de um inteiro, causando o erro de validação.
-    return schemas.PostagemResponse(
-        id=nova_postagem.id,
-        barbeiro_id=nova_postagem.barbeiro_id,
-        titulo=nova_postagem.titulo,
-        descricao=nova_postagem.descricao,
-        foto_url_original=nova_postagem.foto_url_original,
-        foto_url_medium=nova_postagem.foto_url_medium,
-        foto_url_thumbnail=nova_postagem.foto_url_thumbnail,
-        data_postagem=nova_postagem.data_postagem,
-        publicada=nova_postagem.publicada,
-        curtidas=0,
-        curtido_pelo_usuario=False,
-        barbeiro=None
-    )
+    return schemas.PostagemResponse.model_validate(nova_postagem)
 
 
 def listar_feed(db: Session, limit: int = 10, offset: int = 0, usuario_id_logado: Optional[uuid.UUID] = None) -> List[schemas.PostagemResponse]:
-    # Carregamos a relação 'barbeiro' e 'usuario' do barbeiro
     query = db.query(models.Postagem)\
         .options(joinedload(models.Postagem.barbeiro).joinedload(models.Barbeiro.usuario))\
         .filter(models.Postagem.publicada == True)\
@@ -413,37 +423,11 @@ def listar_feed(db: Session, limit: int = 10, offset: int = 0, usuario_id_logado
     
     postagens_response = []
     for postagem in postagens_db:
-        # ATENÇÃO AQUI: Passamos APENAS os atributos escalares para model_validate
-        # para evitar o conflito com a relação 'curtidas' do SQLAlchemy.
-        post_response = schemas.PostagemResponse(
-            id=postagem.id,
-            barbeiro_id=postagem.barbeiro_id,
-            titulo=postagem.titulo,
-            descricao=postagem.descricao,
-            foto_url_original=postagem.foto_url_original,
-            foto_url_medium=postagem.foto_url_medium,
-            foto_url_thumbnail=postagem.foto_url_thumbnail,
-            data_postagem=postagem.data_postagem,
-            publicada=postagem.publicada,
-            # curtido_pelo_usuario e curtidas serão preenchidos abaixo
-        )
+        post_response = schemas.PostagemResponse.model_validate(postagem)
         
-        # Preenche o objeto barbeiro na resposta da postagem
-        if postagem.barbeiro:
-            post_response.barbeiro = schemas.BarbeiroParaPostagem(
-                id=postagem.barbeiro.id,
-                nome=postagem.barbeiro.usuario.nome,
-                foto_thumbnail=postagem.barbeiro.foto_thumbnail
-            )
-
-        # Consulta o número total de curtidas para esta postagem
         total_curtidas = db.query(func.count(models.Curtida.id)).filter(models.Curtida.postagem_id == postagem.id).scalar()
-        
-        # Alteração: Garantir que o valor é sempre um inteiro
         post_response.curtidas = int(total_curtidas) if total_curtidas is not None else 0
-        
 
-        # Verifica se o usuário logado curtiu esta postagem
         if usuario_id_logado:
             curtida_existente = db.query(models.Curtida).filter(
                 and_(
@@ -453,7 +437,7 @@ def listar_feed(db: Session, limit: int = 10, offset: int = 0, usuario_id_logado
             ).first()
             post_response.curtido_pelo_usuario = bool(curtida_existente)
         else:
-            post_response.curtido_pelo_usuario = False # Se não houver usuário logado, não está curtido
+            post_response.curtido_pelo_usuario = False
             
         postagens_response.append(post_response)
         
@@ -461,88 +445,109 @@ def listar_feed(db: Session, limit: int = 10, offset: int = 0, usuario_id_logado
 
 
 def buscar_postagem_por_id(db: Session, postagem_id: uuid.UUID):
-    return db.query(models.Postagem).filter(models.Postagem.id == postagem_id).first()
+    return db.query(models.Postagem).options(joinedload(models.Postagem.barbeiro).joinedload(models.Barbeiro.usuario)).filter(models.Postagem.id == postagem_id).first()
 
 def toggle_curtida(db: Session, usuario_id: uuid.UUID, postagem_id: uuid.UUID):
     postagem = buscar_postagem_por_id(db, postagem_id)
-    if not postagem: return None
-    curtida = db.query(models.Curtida).filter(and_(models.Curtida.usuario_id == usuario_id, models.Curtida.postagem_id == postagem_id)).first()
-    if curtida:
-        db.delete(curtida)
+    if not postagem:
+        return None
+
+    curtida_existente = db.query(models.Curtida).filter(
+        and_(
+            models.Curtida.usuario_id == usuario_id,
+            models.Curtida.postagem_id == postagem_id
+        )
+    ).first()
+
+    if curtida_existente:
+        db.delete(curtida_existente)
         db.commit()
         return None
     else:
-        nova = models.Curtida(id=uuid.uuid4(), usuario_id=usuario_id, postagem_id=postagem_id, data=datetime.utcnow())
-        db.add(nova)
+        nova_curtida = models.Curtida(
+            id=uuid.uuid4(),
+            usuario_id=usuario_id,
+            postagem_id=postagem_id,
+            data=datetime.utcnow()
+        )
+        db.add(nova_curtida)
+
+        barbeiro_usuario = postagem.barbeiro.usuario
+        cliente_usuario = buscar_usuario_por_id(db, usuario_id)
+
+        if barbeiro_usuario and cliente_usuario and barbeiro_usuario.id != cliente_usuario.id:
+            mensagem = f"{cliente_usuario.nome} curtiu sua postagem: \"{postagem.titulo}\"."
+            criar_notificacao(
+                db,
+                usuario_id=barbeiro_usuario.id,
+                mensagem=mensagem,
+                tipo="NOVA_CURTIDA",
+                referencia_id=postagem.id
+            )
+
         db.commit()
-        db.refresh(nova)
-        return nova
+        db.refresh(nova_curtida)
+        return nova_curtida
 
 def criar_comentario(db: Session, comentario: schemas.ComentarioCreate, usuario_id: uuid.UUID):
-    novo_comentario = models.Comentario(id=uuid.uuid4(), usuario_id=usuario_id, postagem_id=comentario.postagem_id, texto=comentario.texto, data=datetime.utcnow())
+    postagem = buscar_postagem_por_id(db, comentario.postagem_id)
+    if not postagem:
+        return None
+
+    novo_comentario = models.Comentario(
+        id=uuid.uuid4(),
+        usuario_id=usuario_id,
+        postagem_id=comentario.postagem_id,
+        texto=comentario.texto,
+        data=datetime.utcnow()
+    )
     db.add(novo_comentario)
+
+    barbeiro_usuario = postagem.barbeiro.usuario
+    cliente_usuario = buscar_usuario_por_id(db, usuario_id)
+
+    if barbeiro_usuario and cliente_usuario and barbeiro_usuario.id != cliente_usuario.id:
+        mensagem = f"{cliente_usuario.nome} comentou na sua postagem: \"{comentario.texto[:30]}...\""
+        criar_notificacao(
+            db,
+            usuario_id=barbeiro_usuario.id,
+            mensagem=mensagem,
+            tipo="NOVO_COMENTARIO",
+            referencia_id=postagem.id
+        )
+        
     db.commit()
     db.refresh(novo_comentario)
     return novo_comentario
 
 def listar_comentarios(db: Session, postagem_id: uuid.UUID):
-    # ALTERAÇÃO AQUI: Carrega os comentários e o usuário associado em uma única consulta
     comentarios_db = db.query(models.Comentario)\
         .options(joinedload(models.Comentario.usuario))\
         .filter(models.Comentario.postagem_id == postagem_id)\
         .order_by(models.Comentario.data.desc())\
         .all()
     
-    # Mapeia para o schema de resposta, preenchendo os detalhes do usuário
-    comentarios_response = []
-    for comentario in comentarios_db:
-        com_response = schemas.ComentarioResponse.model_validate(comentario)
-        if comentario.usuario:
-            com_response.usuario = schemas.UsuarioParaAgendamento(
-                id=comentario.usuario.id,
-                nome=comentario.usuario.nome
-            )
-        comentarios_response.append(com_response)
-        
-    return comentarios_response
+    return [schemas.ComentarioResponse.model_validate(c) for c in comentarios_db]
 
-# NOVA FUNÇÃO: Deletar comentário
 def deletar_comentario(db: Session, comentario_id: uuid.UUID, usuario_id: uuid.UUID) -> Optional[models.Comentario]:
-    """
-    Deleta um comentário. Apenas o usuário que o criou pode deletá-lo.
-    Retorna o comentário deletado ou None se não encontrado/não autorizado.
-    """
     comentario = db.query(models.Comentario).filter(models.Comentario.id == comentario_id).first()
     
-    if not comentario:
-        return None # Comentário não encontrado
-    
-    # Verifica se o usuário logado é o dono do comentário
-    if str(comentario.usuario_id) != str(usuario_id):
-        return None # Usuário não autorizado
+    if not comentario or str(comentario.usuario_id) != str(usuario_id):
+        return None
         
     db.delete(comentario)
     db.commit()
-    return comentario # Retorna o objeto deletado para confirmação
+    return comentario
 
-# NOVA FUNÇÃO: Deletar Postagem
 def deletar_postagem(db: Session, postagem_id: uuid.UUID, barbeiro_id: uuid.UUID) -> Optional[models.Postagem]:
-    """
-    Deleta uma postagem. Apenas o barbeiro que a criou pode deletá-la.
-    Retorna a postagem deletada ou None se não encontrada/não autorizado.
-    """
     postagem = db.query(models.Postagem).filter(models.Postagem.id == postagem_id).first()
     
-    if not postagem:
-        return None # Postagem não encontrada
-    
-    # Verifica se o barbeiro logado é o autor da postagem
-    if str(postagem.barbeiro_id) != str(barbeiro_id):
-        return None # Barbeiro não autorizado
+    if not postagem or str(postagem.barbeiro_id) != str(barbeiro_id):
+        return None
         
     db.delete(postagem)
     db.commit()
-    return postagem # Retorna o objeto deletado para confirmação
+    return postagem
 
 
 def criar_avaliacao(db: Session, avaliacao: schemas.AvaliacaoCreate, usuario_id: uuid.UUID):
@@ -553,83 +558,26 @@ def criar_avaliacao(db: Session, avaliacao: schemas.AvaliacaoCreate, usuario_id:
     return nova
 
 def listar_avaliacoes_barbeiro(db: Session, barbeiro_id: uuid.UUID):
-    # Fetch evaluations, eager loading the 'usuario' relationship
     avaliacoes_db = db.query(models.Avaliacao)\
         .options(joinedload(models.Avaliacao.usuario))\
         .filter(models.Avaliacao.barbeiro_id == barbeiro_id)\
         .order_by(models.Avaliacao.data.desc())\
         .all()
     
-    # Map to the response schema, explicitly including user data
-    avaliacoes_response = []
-    for avaliacao in avaliacoes_db:
-        # Create an instance of AvaliacaoResponse and populate fields, including nested user
-        avaliacao_response = schemas.AvaliacaoResponse(
-            id=avaliacao.id,
-            usuario_id=avaliacao.usuario_id,
-            barbeiro_id=avaliacao.barbeiro_id,
-            nota=avaliacao.nota,
-            comentario=avaliacao.comentario,
-            data=avaliacao.data
-        )
-        
-        # Ensure the 'usuario' object is populated if the relationship exists
-        if avaliacao.usuario:
-            avaliacao_response.usuario = schemas.UsuarioParaAgendamento(
-                id=avaliacao.usuario.id,
-                nome=avaliacao.usuario.nome
-            )
-        avaliacoes_response.append(avaliacao_response)
-        
-    return avaliacoes_response
+    return [schemas.AvaliacaoResponse.model_validate(a) for a in avaliacoes_db]
 
 def obter_perfil_barbeiro(db: Session, barbeiro_id: uuid.UUID):
     barbeiro = db.query(models.Barbeiro).filter(models.Barbeiro.id == barbeiro_id).first()
     if not barbeiro: return {}
-    avaliacoes = listar_avaliacoes_barbeiro(db, barbeiro_id)
     
-    # MODIFICATION START (from previous turn, keeping it here for completeness)
-    # Fetch postagens and eager load the 'barbeiro' and 'usuario' relationships for proper display
-    postagens_db = db.query(models.Postagem)\
-        .options(joinedload(models.Postagem.barbeiro).joinedload(models.Barbeiro.usuario))\
-        .filter(models.Postagem.barbeiro_id == barbeiro_id)\
-        .all()
-
-    processed_postagens = []
-    for postagem in postagens_db:
-        # Calculate the total number of curtidas for this postagem
-        total_curtidas = db.query(func.count(models.Curtida.id)).filter(models.Curtida.postagem_id == postagem.id).scalar()
-
-        # Manually construct PostagemResponse to ensure 'curtidas' is an integer
-        post_response = schemas.PostagemResponse(
-            id=postagem.id,
-            barbeiro_id=postagem.barbeiro_id,
-            titulo=postagem.titulo,
-            descricao=postagem.descricao,
-            foto_url_original=postagem.foto_url_original,
-            foto_url_medium=postagem.foto_url_medium,
-            foto_url_thumbnail=postagem.foto_url_thumbnail,
-            data_postagem=postagem.data_postagem,
-            publicada=postagem.publicada,
-            # curtido_pelo_usuario e curtidas serão preenchidos abaixo
-        )
-        
-        # Populate the 'barbeiro' object within the postagem response
-        if postagem.barbeiro:
-            post_response.barbeiro = schemas.BarbeiroParaPostagem(
-                id=postagem.barbeiro.id,
-                nome=postagem.barbeiro.usuario.nome,
-                foto_thumbnail=postagem.barbeiro.foto_thumbnail
-            )
-        processed_postagens.append(post_response)
-    # MODIFICATION END
-
+    avaliacoes = listar_avaliacoes_barbeiro(db, barbeiro_id)
+    postagens = listar_feed(db, limit=100, offset=0, usuario_id_logado=barbeiro.usuario_id) # Simples, mas funcional
     servicos = listar_servicos_por_barbeiro(db, barbeiro_id)
     
     return {
-        "barbeiro": schemas.BarbeiroResponse.model_validate(barbeiro), # Usar o schema para incluir as URLs
-        "avaliacoes": avaliacoes, # Now using the modified 'avaliacoes' list
-        "postagens": processed_postagens, # Use the list of processed PostagemResponse objects
+        "barbeiro": schemas.BarbeiroResponse.model_validate(barbeiro),
+        "avaliacoes": avaliacoes,
+        "postagens": postagens,
         "servicos": [schemas.ServicoResponse.model_validate(s) for s in servicos]
     }
 

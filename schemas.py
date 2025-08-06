@@ -301,3 +301,6 @@ class NotificacaoResponse(BaseModel):
 
 class NotificacaoContagemResponse(BaseModel):
     count: int
+
+class AgendamentoCancelamentoRequest(BaseModel):
+    motivo: Optional[str] = Field(None, max_length=200, description="Motivo do cancelamento pelo barbeiro")
