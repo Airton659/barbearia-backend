@@ -282,18 +282,25 @@ def criar_agendamento(db: Session, agendamento: schemas.AgendamentoCreate, usuar
         id=uuid.uuid4(),
         usuario_id=usuario_id,
         barbeiro_id=agendamento.barbeiro_id,
-        data_hora=agendamento.data_hora
+        data_hora=agendamento.data_hora,
+        status="pendente" # Adicionado para clareza
     )
     db.add(novo_agendamento)
     db.commit()
     db.refresh(novo_agendamento)
 
-    # Lógica da Fase 1: Criar uma notificação para o barbeiro sobre o novo agendamento
-    barbeiro_usuario = buscar_barbeiro_por_usuario_id(db, agendamento.barbeiro_id)
-    if barbeiro_usuario:
+    # --- LÓGICA DE NOTIFICAÇÃO CORRIGIDA ---
+    # 1. Busca o barbeiro pelo seu ID para obter o usuario_id associado
+    barbeiro = db.query(models.Barbeiro).filter(models.Barbeiro.id == agendamento.barbeiro_id).first()
+    
+    if barbeiro:
+        # 2. Busca o nome do cliente que agendou
         cliente_usuario = buscar_usuario_por_id(db, usuario_id)
-        mensagem = f"{cliente_usuario.nome} agendou um horário com você para {agendamento.data_hora.strftime('%d/%m/%Y às %H:%M')}."
-        criar_notificacao(db, barbeiro_usuario.usuario_id, mensagem, "NOVO_AGENDAMENTO", novo_agendamento.id)
+        
+        if cliente_usuario:
+            # 3. Cria a mensagem e salva a notificação no banco para o histórico do barbeiro
+            mensagem = f"{cliente_usuario.nome} agendou um horário com você para {agendamento.data_hora.strftime('%d/%m/%Y às %H:%M')}."
+            criar_notificacao(db, barbeiro.usuario_id, mensagem, "NOVO_AGENDAMENTO", novo_agendamento.id)
 
     return novo_agendamento
 
@@ -730,6 +737,46 @@ def deletar_servico(db: Session, servico_id: uuid.UUID, barbeiro_id: uuid.UUID):
     servico = db.query(models.Servico).filter(models.Servico.id == servico_id, models.Servico.barbeiro_id == barbeiro_id).first()
     if servico:
         db.delete(servico)
+        db.commit()
+        return True
+    return False
+
+# --------- NOTIFICAÇÕES ---------
+
+def criar_notificacao(db: Session, usuario_id: uuid.UUID, mensagem: str, tipo: str, referencia_id: Optional[uuid.UUID] = None):
+    nova_notificacao = models.Notificacao(
+        id=uuid.uuid4(),
+        usuario_id=usuario_id,
+        mensagem=mensagem,
+        tipo=tipo,
+        referencia_id=referencia_id,
+        data_criacao=datetime.utcnow()
+    )
+    db.add(nova_notificacao)
+    db.commit()
+    db.refresh(nova_notificacao)
+    return nova_notificacao
+
+def contar_notificacoes_nao_lidas(db: Session, usuario_id: uuid.UUID) -> int:
+    return db.query(models.Notificacao).filter(
+        models.Notificacao.usuario_id == usuario_id,
+        models.Notificacao.lida == False
+    ).count()
+
+def listar_notificacoes(db: Session, usuario_id: uuid.UUID) -> List[models.Notificacao]:
+    return db.query(models.Notificacao).filter(
+        models.Notificacao.usuario_id == usuario_id
+    ).order_by(models.Notificacao.data_criacao.desc()).all()
+
+
+def marcar_notificacao_como_lida(db: Session, notificacao_id: uuid.UUID, usuario_id: uuid.UUID) -> bool:
+    notificacao = db.query(models.Notificacao).filter(
+        models.Notificacao.id == notificacao_id,
+        models.Notificacao.usuario_id == usuario_id
+    ).first()
+    
+    if notificacao:
+        notificacao.lida = True
         db.commit()
         return True
     return False

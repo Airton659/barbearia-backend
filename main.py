@@ -180,34 +180,51 @@ async def agendar(
     db: Session = Depends(get_db),
     current_user: models.Usuario = Depends(get_current_user_firebase)
 ):
-    # Este endpoint já tem a lógica do Firebase Cloud Messaging.
-    # A lógica para criar a notificação visual no banco de dados já está
-    # implementada na função `crud.criar_agendamento`, então ela será
-    # executada automaticamente quando esta função for chamada.
-    
+    # 1. Cria o agendamento e a notificação no banco de dados (a lógica já está no crud.py)
     novo_agendamento = crud.criar_agendamento(db, agendamento, usuario_id=current_user.id)
     
-    # Lógica para enviar a notificação push após o agendamento
-    barbeiro = crud.buscar_barbeiro_por_usuario_id(db, agendamento.barbeiro_id)
-    if barbeiro and barbeiro.usuario.fcm_tokens:
-        # A notificação visual no banco de dados já foi criada no crud.py
-        for token in barbeiro.usuario.fcm_tokens:
+    # 2. Inicia o envio da notificação push em tempo real para o barbeiro
+    
+    # Busca o barbeiro pelo ID do agendamento, carregando o relacionamento com o usuário
+    # para acessar os tokens FCM.
+    barbeiro = db.query(models.Barbeiro).options(joinedload(models.Barbeiro.usuario)).filter(models.Barbeiro.id == agendamento.barbeiro_id).first()
+    
+    cliente_nome = current_user.nome if current_user else "Um cliente"
+
+    # Verifica se o barbeiro foi encontrado e se ele possui tokens FCM registrados
+    if barbeiro and barbeiro.usuario and barbeiro.usuario.fcm_tokens:
+        mensagem_body = f"{cliente_nome} agendou um horário com você para {novo_agendamento.data_hora.strftime('%d/%m/%Y às %H:%M')}."
+        
+        # Clona a lista de tokens para iterar com segurança, caso a original seja modificada
+        tokens_a_enviar = list(barbeiro.usuario.fcm_tokens)
+        
+        for token in tokens_a_enviar:
             try:
+                # Monta a mensagem para o Firebase
                 message = firebase_admin.messaging.Message(
                     notification=firebase_admin.messaging.Notification(
                         title="Novo Agendamento!",
-                        body=f"Um novo agendamento foi marcado com você para {novo_agendamento.data_hora.strftime('%d/%m/%Y às %H:%M')}.",
+                        body=mensagem_body,
                     ),
                     token=token,
+                    # Adiciona dados extras no payload para o app usar (ex: para navegação)
+                    data={
+                        "tipo": "NOVO_AGENDAMENTO",
+                        "agendamento_id": str(novo_agendamento.id)
+                    }
                 )
+                
+                # --- CORREÇÃO IMPORTANTE ---
+                # A função correta para enviar a mensagem é `send`
                 response = firebase_admin.Messaging(message)
-                logger.info(f"Notificação enviada com sucesso para o token: {token}. Response: {response}")
+                logger.info(f"Notificação push enviada para o token: {token}. Response: {response}")
 
             except firebase_admin.messaging.FirebaseError as e:
                 logger.error(f"Erro ao enviar notificação para o token {token}: {e}")
-                # Verifica se o erro indica um token inválido
-                if e.code in ['invalid-argument', 'not-found', 'unregistered']:
-                    logger.warning(f"Removendo token inválido: {token}")
+                # Se o token for inválido, o Firebase retorna um erro.
+                # Aqui, removemos o token inválido do banco para evitar futuras tentativas.
+                if e.code in ['invalid-argument', 'unregistered', 'sender-id-mismatch']:
+                    logger.warning(f"Removendo token FCM inválido do usuário {barbeiro.usuario.id}: {token}")
                     crud.remover_fcm_token(db, barbeiro.usuario, token)
     
     return novo_agendamento
