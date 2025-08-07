@@ -180,48 +180,33 @@ async def agendar(
     db: Session = Depends(get_db),
     current_user: models.Usuario = Depends(get_current_user_firebase)
 ):
-    # 1. Cria o agendamento e a notificação no banco de dados (a lógica já está no crud.py)
     novo_agendamento = crud.criar_agendamento(db, agendamento, usuario_id=current_user.id)
     
-    # 2. Inicia o envio da notificação push em tempo real para o barbeiro
-    
-    # Busca o barbeiro pelo ID do agendamento, carregando o relacionamento com o usuário
-    # para acessar os tokens FCM.
     barbeiro = db.query(models.Barbeiro).options(joinedload(models.Barbeiro.usuario)).filter(models.Barbeiro.id == agendamento.barbeiro_id).first()
     
-    cliente_nome = current_user.nome if current_user else "Um cliente"
-
-    # Verifica se o barbeiro foi encontrado e se ele possui tokens FCM registrados
     if barbeiro and barbeiro.usuario and barbeiro.usuario.fcm_tokens:
+        cliente_nome = current_user.nome if current_user else "Um cliente"
         mensagem_body = f"{cliente_nome} agendou um horário com você para {novo_agendamento.data_hora.strftime('%d/%m/%Y às %H:%M')}."
         
-        # Clona a lista de tokens para iterar com segurança, caso a original seja modificada
         tokens_a_enviar = list(barbeiro.usuario.fcm_tokens)
         
         for token in tokens_a_enviar:
             try:
-                # Monta a mensagem para o Firebase
                 message = firebase_admin.messaging.Message(
-                    notification=firebase_admin.messaging.Notification(
-                        title="Novo Agendamento!",
-                        body=mensagem_body,
-                    ),
                     token=token,
-                    # Adiciona dados extras no payload para o app usar (ex: para navegação)
                     data={
+                        "title": "Novo Agendamento!",
+                        "body": mensagem_body,
                         "tipo": "NOVO_AGENDAMENTO",
                         "agendamento_id": str(novo_agendamento.id)
                     }
                 )
                 
-                # A função correta para enviar a mensagem é `send`
                 response = firebase_admin.Messaging(message)
                 logger.info(f"Notificação push enviada para o token: {token}. Response: {response}")
 
             except firebase_admin.messaging.FirebaseError as e:
                 logger.error(f"Erro ao enviar notificação para o token {token}: {e}")
-                # Se o token for inválido, o Firebase retorna um erro.
-                # Aqui, removemos o token inválido do banco para evitar futuras tentativas.
                 if e.code in ['invalid-argument', 'unregistered', 'sender-id-mismatch']:
                     logger.warning(f"Removendo token FCM inválido do usuário {barbeiro.usuario.id}: {token}")
                     crud.remover_fcm_token(db, barbeiro.usuario, token)
@@ -350,7 +335,7 @@ async def curtir_postagem(
     if not postagem:
         raise HTTPException(status_code=404, detail="Postagem não encontrada")
     
-    if curtida_result: # Apenas notifica se foi uma nova curtida
+    if curtida_result: 
         barbeiro_usuario = postagem.barbeiro.usuario
         if barbeiro_usuario.id != current_user.id and barbeiro_usuario.fcm_tokens:
             mensagem_body = f"{current_user.nome} curtiu sua postagem: \"{postagem.titulo}\"."
@@ -358,12 +343,13 @@ async def curtir_postagem(
             for token in list(barbeiro_usuario.fcm_tokens):
                 try:
                     message = firebase_admin.messaging.Message(
-                        notification=firebase_admin.messaging.Notification(
-                            title="Nova Curtida!",
-                            body=mensagem_body,
-                        ),
                         token=token,
-                        data={"tipo": "NOVA_CURTIDA", "post_id": str(postagem.id)}
+                        data={
+                            "title": "Nova Curtida!",
+                            "body": mensagem_body,
+                            "tipo": "NOVA_CURTIDA", 
+                            "post_id": str(postagem.id)
+                        }
                     )
                     firebase_admin.Messaging(message)
                 except firebase_admin.messaging.FirebaseError as e:
@@ -390,12 +376,13 @@ async def comentar(
         for token in list(barbeiro_usuario.fcm_tokens):
             try:
                 message = firebase_admin.messaging.Message(
-                    notification=firebase_admin.messaging.Notification(
-                        title="Novo Comentário!",
-                        body=mensagem_body,
-                    ),
                     token=token,
-                    data={"tipo": "NOVO_COMENTARIO", "post_id": str(postagem.id)}
+                    data={
+                        "title": "Novo Comentário!",
+                        "body": mensagem_body,
+                        "tipo": "NOVO_COMENTARIO", 
+                        "post_id": str(postagem.id)
+                    }
                 )
                 firebase_admin.Messaging(message)
             except firebase_admin.messaging.FirebaseError as e:
@@ -519,7 +506,6 @@ async def cancelar_agendamento_pelo_barbeiro_endpoint(
     if not agendamento_cancelado:
         raise HTTPException(status_code=404, detail="Agendamento não encontrado ou não pertence a você.")
 
-    # Envio da notificação push para o cliente
     cliente = crud.buscar_usuario_por_id(db, agendamento_cancelado.usuario_id)
     if cliente and cliente.fcm_tokens:
         mensagem_body = f"Seu agendamento com {barbeiro.usuario.nome} foi cancelado."
@@ -529,12 +515,13 @@ async def cancelar_agendamento_pelo_barbeiro_endpoint(
         for token in list(cliente.fcm_tokens):
             try:
                 message = firebase_admin.messaging.Message(
-                    notification=firebase_admin.messaging.Notification(
-                        title="Agendamento Cancelado",
-                        body=mensagem_body,
-                    ),
                     token=token,
-                    data={"tipo": "AGENDAMENTO_CANCELADO", "agendamento_id": str(agendamento_cancelado.id)}
+                    data={
+                        "title": "Agendamento Cancelado",
+                        "body": mensagem_body,
+                        "tipo": "AGENDAMENTO_CANCELADO", 
+                        "agendamento_id": str(agendamento_cancelado.id)
+                    }
                 )
                 firebase_admin.Messaging(message)
             except firebase_admin.messaging.FirebaseError as e:
