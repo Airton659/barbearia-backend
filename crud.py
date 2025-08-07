@@ -408,10 +408,25 @@ def criar_postagem(
     db.commit()
     db.refresh(nova_postagem)
 
-    return schemas.PostagemResponse.model_validate(nova_postagem)
+    # Corrigido para construir a resposta manualmente e evitar erro de validação
+    return schemas.PostagemResponse(
+        id=nova_postagem.id,
+        barbeiro_id=nova_postagem.barbeiro_id,
+        titulo=nova_postagem.titulo,
+        descricao=nova_postagem.descricao,
+        foto_url_original=nova_postagem.foto_url_original,
+        foto_url_medium=nova_postagem.foto_url_medium,
+        foto_url_thumbnail=nova_postagem.foto_url_thumbnail,
+        data_postagem=nova_postagem.data_postagem,
+        publicada=nova_postagem.publicada,
+        curtidas=0,
+        curtido_pelo_usuario=False,
+        barbeiro=schemas.BarbeiroParaPostagem.model_validate(nova_postagem.barbeiro) if nova_postagem.barbeiro else None
+    )
 
 
 def listar_feed(db: Session, limit: int = 10, offset: int = 0, usuario_id_logado: Optional[uuid.UUID] = None) -> List[schemas.PostagemResponse]:
+    # Esta é a função corrigida
     query = db.query(models.Postagem)\
         .options(joinedload(models.Postagem.barbeiro).joinedload(models.Barbeiro.usuario))\
         .filter(models.Postagem.publicada == True)\
@@ -423,22 +438,36 @@ def listar_feed(db: Session, limit: int = 10, offset: int = 0, usuario_id_logado
     
     postagens_response = []
     for postagem in postagens_db:
-        post_response = schemas.PostagemResponse.model_validate(postagem)
-        
+        # Calcula o total de curtidas
         total_curtidas = db.query(func.count(models.Curtida.id)).filter(models.Curtida.postagem_id == postagem.id).scalar()
-        post_response.curtidas = int(total_curtidas) if total_curtidas is not None else 0
-
+        
+        # Verifica se o usuário logado curtiu o post
+        curtido_pelo_usuario = False
         if usuario_id_logado:
             curtida_existente = db.query(models.Curtida).filter(
-                and_(
-                    models.Curtida.usuario_id == usuario_id_logado,
-                    models.Curtida.postagem_id == postagem.id
-                )
+                models.Curtida.usuario_id == usuario_id_logado,
+                models.Curtida.postagem_id == postagem.id
             ).first()
-            post_response.curtido_pelo_usuario = bool(curtida_existente)
-        else:
-            post_response.curtido_pelo_usuario = False
-            
+            curtido_pelo_usuario = bool(curtida_existente)
+        
+        # Constrói o dicionário de dados para a validação do Pydantic
+        post_data = {
+            "id": postagem.id,
+            "barbeiro_id": postagem.barbeiro_id,
+            "titulo": postagem.titulo,
+            "descricao": postagem.descricao,
+            "foto_url_original": postagem.foto_url_original,
+            "foto_url_medium": postagem.foto_url_medium,
+            "foto_url_thumbnail": postagem.foto_url_thumbnail,
+            "data_postagem": postagem.data_postagem,
+            "publicada": postagem.publicada,
+            "curtidas": int(total_curtidas) if total_curtidas is not None else 0,
+            "curtido_pelo_usuario": curtido_pelo_usuario,
+            "barbeiro": postagem.barbeiro
+        }
+        
+        # Valida os dados para criar o objeto de resposta
+        post_response = schemas.PostagemResponse.model_validate(post_data)
         postagens_response.append(post_response)
         
     return postagens_response
