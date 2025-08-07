@@ -1,0 +1,43 @@
+steps:
+  # 1. Constrói a imagem Docker
+  # Este passo executa o "docker build"
+- name: 'gcr.io/cloud-builders/docker'
+  args:
+    - 'build'
+    - '--no-cache'
+    - '-t'
+    - 'southamerica-east1-docker.pkg.dev/barbearia-backend-gc/barbearia-repo/barbearia-app:latest'
+    - '.'
+
+  # 2. Envia a imagem para o Artifact Registry
+  # Este passo executa o "docker push"
+- name: 'gcr.io/cloud-builders/docker'
+  args:
+    - 'push'
+    - 'southamerica-east1-docker.pkg.dev/barbearia-backend-gc/barbearia-repo/barbearia-app:latest'
+
+  # 3. Faz o deploy da nova imagem no Google Cloud Run
+  # Este passo executa o "gcloud run deploy" com todas as suas configurações
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  entrypoint: 'gcloud'
+  args:
+    - 'run'
+    - 'deploy'
+    - 'barbearia-backend-service'
+    - '--image'
+    - 'southamerica-east1-docker.pkg.dev/barbearia-backend-gc/barbearia-repo/barbearia-app:latest'
+    - '--platform'
+    - 'managed'
+    - '--region'
+    - 'southamerica-east1'
+    - '--allow-unauthenticated'
+    - '--set-secrets'
+    - 'FIREBASE_ADMIN_CREDENTIALS=firebase-admin-credentials:latest'
+    - '--set-env-vars'
+    - 'DATABASE_URL=postgresql+pg8000://app_user:Delete12*@/barbearia_db?unix_sock=/cloudsql/barbearia-backend-gc:southamerica-east1:barbearia-db/.s.PGSQL.5432,CLOUD_STORAGE_BUCKET_NAME=barbearia-app-fotos'
+    - '--add-cloudsql-instances'
+    - 'barbearia-backend-gc:southamerica-east1:barbearia-db'
+
+# Define a imagem que foi construída para que possa ser usada em outros passos ou registros
+images:
+  - 'southamerica-east1-docker.pkg.dev/barbearia-backend-gc/barbearia-repo/barbearia-app:latest'
