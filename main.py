@@ -202,6 +202,7 @@ async def agendar(
                     }
                 )
                 
+                # CORREÇÃO AQUI
                 response = firebase_admin.Messaging(message)
                 logger.info(f"Notificação push enviada para o token: {token}. Response: {response}")
 
@@ -351,7 +352,9 @@ async def curtir_postagem(
                             "post_id": str(postagem.id)
                         }
                     )
-                    firebase_admin.Messaging(message)
+                    # CORREÇÃO AQUI
+                    response = firebase_admin.Messaging(message)
+                    logger.info(f"Notificação de curtida enviada para {token}. Response: {response}")
                 except firebase_admin.messaging.FirebaseError as e:
                     logger.error(f"Erro ao enviar notificação de curtida para {token}: {e}")
                     crud.remover_fcm_token(db, barbeiro_usuario, token)
@@ -384,7 +387,9 @@ async def comentar(
                         "post_id": str(postagem.id)
                     }
                 )
-                firebase_admin.Messaging(message)
+                # CORREÇÃO AQUI
+                response = firebase_admin.Messaging(message)
+                logger.info(f"Notificação de comentário enviada para {token}. Response: {response}")
             except firebase_admin.messaging.FirebaseError as e:
                 logger.error(f"Erro ao enviar notificação de comentário para {token}: {e}")
                 crud.remover_fcm_token(db, barbeiro_usuario, token)
@@ -523,7 +528,9 @@ async def cancelar_agendamento_pelo_barbeiro_endpoint(
                         "agendamento_id": str(agendamento_cancelado.id)
                     }
                 )
-                firebase_admin.Messaging(message)
+                # CORREÇÃO AQUI
+                response = firebase_admin.Messaging(message)
+                logger.info(f"Notificação de cancelamento enviada para {token}. Response: {response}")
             except firebase_admin.messaging.FirebaseError as e:
                 logger.error(f"Erro ao enviar notificação de cancelamento para {token}: {e}")
                 crud.remover_fcm_token(db, cliente, token)
