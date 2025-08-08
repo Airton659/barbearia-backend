@@ -41,3 +41,7 @@ steps:
 # Define a imagem que foi construída para que possa ser usada em outros passos ou registros
 images:
   - 'southamerica-east1-docker.pkg.dev/barbearia-backend-gc/barbearia-repo/barbearia-app:latest'
+
+# Adicione esta seção para corrigir o erro de log
+options:
+  logging: CLOUD_LOGGING_ONLY
