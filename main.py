@@ -9,7 +9,7 @@ import uuid
 import time
 import os
 import json
-from datetime import date, time, timedelta
+from datetime import date, time, timedelta, datetime
 import logging
 # Alteração: Importar a nova dependência de autenticação do Firebase
 from auth import get_current_user_firebase, get_current_admin_user
@@ -644,7 +644,6 @@ def get_horarios_disponiveis(barbeiro_id: uuid.UUID, dia: date, db: Session = De
 
 
 # --------- ENDPOINT DE TESTE PARA NOTIFICAÇÕES FCM ---------
-
 class FCMTestRequest(BaseModel):
     token: str
 
@@ -690,8 +689,6 @@ async def test_fcm_notification(request: FCMTestRequest):
         )
 
 # ----------------------------------------------------------------
-
-# ... (resto do seu código, como a seção de SERVIÇOS) ...
 
 
 # --------- SERVIÇOS ---------
