@@ -1,5 +1,5 @@
 # barbearia-backend/main.py
-
+from pydantic import BaseModel
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, status
 from sqlalchemy.orm import Session, joinedload  # Adicionado joinedload para buscar barbeiro
 from sqlalchemy.exc import OperationalError
@@ -641,6 +641,57 @@ def deletar_bloqueio(bloqueio_id: uuid.UUID, db: Session = Depends(get_db), curr
 @app.get("/barbeiros/{barbeiro_id}/horarios-disponiveis", response_model=List[time])
 def get_horarios_disponiveis(barbeiro_id: uuid.UUID, dia: date, db: Session = Depends(get_db)):
     return crud.calcular_horarios_disponiveis(db, barbeiro_id, dia)
+
+
+# --------- ENDPOINT DE TESTE PARA NOTIFICAÇÕES FCM ---------
+
+class FCMTestRequest(BaseModel):
+    token: str
+
+@app.post("/test-fcm")
+async def test_fcm_notification(request: FCMTestRequest):
+    """
+    Endpoint temporário para depurar o envio de notificações FCM.
+    Envia uma mensagem data-only para um token específico e loga a resposta da API do Google.
+    """
+    logger.info(f"Iniciando teste de notificação para o token: {request.token}")
+
+    message = firebase_admin.messaging.Message(
+        token=request.token,
+        data={
+            "title": "Teste do Backend",
+            "body": "Esta é uma mensagem de teste enviada diretamente pelo servidor.",
+            "tipo": "TESTE_BACKEND",
+            "timestamp": str(datetime.utcnow())
+        }
+    )
+
+    try:
+        # Tenta enviar a mensagem
+        response = firebase_admin.Messaging(message)
+        
+        # Se funcionar, a API do Google retorna um ID de mensagem. VAMOS LOGAR ISSO.
+        success_log = f"SUCESSO! Notificação enviada. Resposta da API do Google: {response}"
+        print(success_log)
+        logger.info(success_log)
+        
+        return {"status": "sucesso", "response_from_google": response}
+
+    except Exception as e:
+        # Se falhar, a API do Google retorna um erro. VAMOS LOGAR O ERRO.
+        error_log = f"ERRO! Falha ao enviar notificação. Detalhes da exceção: {e}"
+        print(error_log)
+        logger.error(error_log)
+        
+        # Retorna o erro como resposta para facilitar a depuração
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+# ----------------------------------------------------------------
+
+# ... (resto do seu código, como a seção de SERVIÇOS) ...
 
 
 # --------- SERVIÇOS ---------
