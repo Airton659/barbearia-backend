@@ -666,10 +666,10 @@ async def test_fcm_notification(request: FCMTestRequest):
     )
 
     try:
-        # Tenta enviar a mensagem
+        # Tenta enviar a mensagem com a chamada CORRETA
         response = firebase_admin.Messaging(message)
         
-        # Se funcionar, a API do Google retorna um ID de mensagem. VAMOS LOGAR ISSO.
+        # Se funcionar, a API do Google retorna um ID de mensagem.
         success_log = f"SUCESSO! Notificação enviada. Resposta da API do Google: {response}"
         print(success_log)
         logger.info(success_log)
@@ -677,12 +677,11 @@ async def test_fcm_notification(request: FCMTestRequest):
         return {"status": "sucesso", "response_from_google": response}
 
     except Exception as e:
-        # Se falhar, a API do Google retorna um erro. VAMOS LOGAR O ERRO.
+        # Se falhar, a API do Google retorna um erro.
         error_log = f"ERRO! Falha ao enviar notificação. Detalhes da exceção: {e}"
         print(error_log)
         logger.error(error_log)
         
-        # Retorna o erro como resposta para facilitar a depuração
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
