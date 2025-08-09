@@ -17,7 +17,7 @@ steps:
     - 'southamerica-east1-docker.pkg.dev/barbearia-backend-gc/barbearia-repo/barbearia-app:latest'
 
   # 3. Faz o deploy da nova imagem no Google Cloud Run
-  # Este passo executa o "gcloud run deploy" com as suas configurações
+  # Este passo executa o "gcloud run deploy" com todas as suas configurações
 - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
   entrypoint: 'gcloud'
   args:
@@ -39,3 +39,7 @@ steps:
 # Define a imagem que foi construída para que possa ser usada em outros passos ou registros
 images:
   - 'southamerica-east1-docker.pkg.dev/barbearia-backend-gc/barbearia-repo/barbearia-app:latest'
+
+# Adiciona a configuração de logging para resolver o erro do build
+options:
+  logging: CLOUD_LOGGING_ONLY
