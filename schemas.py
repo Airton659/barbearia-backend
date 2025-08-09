@@ -209,5 +209,5 @@ class NotificacaoResponse(BaseModel):
 class NotificacaoContagemResponse(BaseModel):
     count: int
 
-# Adiciona a resolução de referências para o Pydantic
-ProfissionalResponse.update_forward_refs(ServicoResponse=ServicoResponse)
+# CORREÇÃO: Usa o método model_rebuild() do Pydantic V2 para resolver as referências
+ProfissionalResponse.model_rebuild()
