@@ -1,78 +1,56 @@
-from datetime import datetime, timedelta
-from typing import Optional
-import json
+# auth.py (Versão para Firestore)
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.orm import Session
-import crud, models, schemas
-import os
-from dotenv import load_dotenv
-import firebase_admin
-from firebase_admin import credentials, auth
+from firebase_admin import auth
+import schemas
+import crud
 from database import get_db
-from google.cloud import secretmanager
 
-load_dotenv()
+# O OAuth2PasswordBearer ainda pode ser útil para a documentação interativa (botão "Authorize")
+# mas a lógica de validação de token agora é 100% via Firebase ID Token.
+# A tokenUrl "login" não existe mais como um endpoint de usuário/senha.
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-# --- Configuração do Firebase Admin SDK via Secret Manager ---
-# Verifica se o SDK já foi inicializado para evitar erros
-if not firebase_admin._apps:
-    try:
-        # ID do seu projeto Google Cloud
-        project_id = "barbearia-backend-gc" 
-        # Nome do secret que foi criado
-        secret_id = "firebase-admin-credentials" 
-        version_id = "latest"
-
-        # Cria o cliente do Secret Manager
-        client = secretmanager.SecretManagerServiceClient()
-
-        # Monta o nome completo do recurso do secret
-        name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
-
-        # Acessa a versão do secret
-        response = client.access_secret_version(request={"name": name})
-
-        # Decodifica o payload (o conteúdo do secret) para uma string
-        payload = response.payload.data.decode("UTF-8")
-        
-        # Converte a string JSON para um dicionário
-        cred_json = json.loads(payload)
-
-        # Inicializa o Firebase com as credenciais do Secret Manager
-        cred = credentials.Certificate(cred_json)
-        firebase_admin.initialize_app(cred)
-        print("Firebase Admin SDK inicializado com sucesso via Secret Manager.")
-
-    except Exception as e:
-        print(f"ERRO CRÍTICO ao inicializar o Firebase via Secret Manager: {e}")
-        # Levantar a exceção para que o container não inicie se o Firebase falhar
-        raise e
-
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
-
-def get_current_user_firebase(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> models.Usuario:
+def get_current_user_firebase(token: str = Depends(oauth2_scheme), db = Depends(get_db)) -> schemas.UsuarioProfile:
     """
-    Decodifica o ID Token do Firebase e busca o usuário correspondente no nosso banco de dados.
+    Decodifica o ID Token do Firebase, busca o usuário correspondente no Firestore
+    e retorna seu perfil como um schema Pydantic.
     """
     try:
         decoded_token = auth.verify_id_token(token)
         firebase_uid = decoded_token['uid']
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Token inválido ou expirado: {e}")
+        # Log do erro pode ser útil aqui para depuração
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Token inválido ou expirado: {e}"
+        )
 
-    usuario = crud.buscar_usuario_por_firebase_uid(db, firebase_uid=firebase_uid)
-    if not usuario:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Perfil de usuário não encontrado em nosso sistema.")
-    return usuario
+    # A função crud.buscar_usuario_por_firebase_uid será reescrita para usar o cliente 'db' do Firestore
+    usuario_doc = crud.buscar_usuario_por_firebase_uid(db, firebase_uid=firebase_uid)
+    
+    if not usuario_doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Perfil de usuário não encontrado em nosso sistema."
+        )
+    
+    # Converte o dicionário/documento do Firestore para o nosso modelo Pydantic
+    return schemas.UsuarioProfile(**usuario_doc)
 
 
-def get_current_admin_user(current_user: models.Usuario = Depends(get_current_user_firebase)) -> models.Usuario:
+def get_current_admin_user(current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase)) -> schemas.UsuarioProfile:
     """
-    Verifica se o usuário atual é um administrador.
+    Verifica se o usuário atual (já validado e carregado do Firestore)
+    tem uma role de 'admin' em algum dos negócios.
+    
+    NOTA: A lógica de "admin" pode precisar ser refinada no modelo multi-tenant.
+    Por exemplo, ser admin de um negócio específico. Por enquanto, mantemos a verificação genérica.
     """
-    if current_user.tipo != "admin":
+    # A verificação de "tipo" pode ser ajustada para o novo modelo de "roles"
+    # Ex: if "admin" in current_user.roles.values():
+    if "admin" not in current_user.roles.values():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Acesso negado: esta operação requer privilégios de administrador."
