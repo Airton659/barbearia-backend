@@ -9,6 +9,11 @@ from datetime import datetime, timedelta, date, time
 from typing import Optional, List
 import secrets
 from sqlalchemy.exc import IntegrityError
+import logging
+from firebase_admin import messaging
+
+# Setup do logger para este módulo
+logger = logging.getLogger(__name__)
 
 
 # --------- USUÁRIOS ---------
@@ -338,15 +343,55 @@ def listar_agendamentos_por_barbeiro(db: Session, barbeiro_id: uuid.UUID):
 def cancelar_agendamento(db: Session, agendamento_id: uuid.UUID, usuario_id: uuid.UUID) -> Optional[models.Agendamento]:
     """
     Cancela (agora exclui) um agendamento. Permite exclusão apenas pelo usuário que agendou.
+    NOVO: Envia uma notificação para o barbeiro sobre o cancelamento.
     Retorna o agendamento excluído ou None se não encontrado/não autorizado.
     """
-    agendamento = db.query(models.Agendamento).filter(models.Agendamento.id == agendamento_id).first()
-    
+    # Carrega o agendamento e os dados do barbeiro e cliente de uma só vez
+    agendamento = db.query(models.Agendamento)\
+        .options(
+            joinedload(models.Agendamento.barbeiro).joinedload(models.Barbeiro.usuario),
+            joinedload(models.Agendamento.usuario)
+        )\
+        .filter(models.Agendamento.id == agendamento_id).first()
+
     if not agendamento:
-        return None # Agendamento não encontrado
-    
+        return None  # Agendamento não encontrado
+
     if str(agendamento.usuario_id) != str(usuario_id):
-        return None # Usuário não autorizado
+        return None  # Usuário não autorizado
+
+    # --- LÓGICA DE NOTIFICAÇÃO ADICIONADA ---
+    barbeiro_usuario = agendamento.barbeiro.usuario
+    cliente_usuario = agendamento.usuario
+
+    if barbeiro_usuario and cliente_usuario and barbeiro_usuario.fcm_tokens:
+        data_formatada = agendamento.data_hora.strftime('%d/%m')
+        hora_formatada = agendamento.data_hora.strftime('%H:%M')
+        mensagem_body = f"O cliente {cliente_usuario.nome} cancelou o horário das {hora_formatada} do dia {data_formatada}."
+
+        message = messaging.Message(
+            data={
+                "title": "Agendamento Cancelado",
+                "body": mensagem_body,
+                "tipo": "AGENDAMENTO_CANCELADO_CLIENTE"
+            }
+        )
+
+        tokens_a_remover = []
+        for token in list(barbeiro_usuario.fcm_tokens):
+            message.token = token
+            try:
+                Messaging(message)
+                logger.info(f"Notificação de cancelamento enviada para o token do barbeiro: {token}")
+            except Exception as e:
+                logger.error(f"Erro ao enviar notificação de cancelamento para o token {token}: {e}")
+                if hasattr(e, 'code') and e.code in ['invalid-argument', 'unregistered', 'sender-id-mismatch']:
+                    tokens_a_remover.append(token)
+        
+        if tokens_a_remover:
+            for token in tokens_a_remover:
+                remover_fcm_token(db, barbeiro_usuario, token)
+    # --- FIM DA LÓGICA DE NOTIFICAÇÃO ---
         
     db.delete(agendamento)
     db.commit()
