@@ -19,6 +19,7 @@ class NegocioCreate(NegocioBase):
 class NegocioResponse(NegocioBase):
     id: str = Field(..., description="ID único do negócio no Firestore.")
     owner_uid: str = Field(..., description="Firebase UID do usuário dono do negócio.")
+    codigo_convite: str = Field(..., description="Código de convite para o admin do negócio se registrar.")
 
 # =================================================================================
 # SCHEMAS DE USUÁRIOS (Clientes e Administradores)
