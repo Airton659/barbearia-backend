@@ -39,12 +39,12 @@ class UsuarioProfile(UsuarioBase):
     roles: dict[str, str] = Field({}, description="Dicionário de negocio_id para role (ex: {'negocio_A': 'admin', 'negocio_B': 'cliente'}).")
     fcm_tokens: List[str] = []
 
-# Schema usado pelo endpoint de sync, agora com o código de convite e negocio_id
+# Schema usado pelo endpoint de sync, agora com o negocio_id opcional
 class UsuarioSync(BaseModel):
     nome: str
     email: EmailStr
     firebase_uid: str
-    negocio_id: str = Field(..., description="ID do negócio ao qual o usuário está se cadastrando.")
+    negocio_id: Optional[str] = Field(None, description="ID do negócio ao qual o usuário (cliente) está se cadastrando.")
     codigo_convite: Optional[str] = Field(None, description="Código de convite para se tornar admin de um negócio.")
 
 # Schema para registrar o token de notificação

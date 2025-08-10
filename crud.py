@@ -1,4 +1,4 @@
-# barbearia-backend/crud.py (Versão com Lógica de Convite e Cliente)
+# barbearia-backend/crud.py (Versão Final com Onboarding Completo)
 
 import schemas
 from datetime import datetime
@@ -37,9 +37,8 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
     """
     user_existente = buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
     if user_existente:
-        # Se o usuário já existe, verifica se ele já tem um papel no negócio atual
-        # Se não tiver, adiciona como cliente.
-        if user_data.negocio_id not in user_existente.get("roles", {}):
+        # Se o usuário já existe, mas está se registrando em um novo negócio como cliente
+        if user_data.negocio_id and user_data.negocio_id not in user_existente.get("roles", {}):
             doc_ref = db.collection('usuarios').document(user_existente['id'])
             doc_ref.update({
                 f'roles.{user_data.negocio_id}': 'cliente'
@@ -56,12 +55,13 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
     }
 
     # --- LÓGICA DO SUPER-ADMIN ---
-    if not db.collection('usuarios').limit(1).get():
+    is_super_admin_flow = not user_data.codigo_convite and not user_data.negocio_id
+    if is_super_admin_flow and not db.collection('usuarios').limit(1).get():
         logger.info(f"Primeiro usuário da plataforma detectado. Atribuindo role de super_admin para {user_data.email}.")
         user_dict["roles"]["platform"] = "super_admin"
 
     # --- LÓGICA DO CÓDIGO DE CONVITE (ADMIN DE NEGÓCIO) ---
-    if user_data.codigo_convite:
+    elif user_data.codigo_convite:
         logger.info(f"Usuário {user_data.email} tentando se registrar com o código de convite: {user_data.codigo_convite}")
         negocio_query = db.collection('negocios').where('codigo_convite', '==', user_data.codigo_convite).limit(1)
         negocios = list(negocio_query.stream())
@@ -85,11 +85,9 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
             logger.warning(f"Código de convite '{user_data.codigo_convite}' inválido ou não encontrado.")
             
     # --- LÓGICA DE REGISTRO COMO CLIENTE (PADRÃO) ---
-    else:
-        # Se não usou um código de convite, e não é o super-admin, ele se torna cliente do negócio do app
-        if "platform" not in user_dict["roles"]:
-            user_dict["roles"][user_data.negocio_id] = "cliente"
-            logger.info(f"Usuário {user_data.email} registrado como cliente do negócio {user_data.negocio_id}.")
+    elif user_data.negocio_id:
+        user_dict["roles"][user_data.negocio_id] = "cliente"
+        logger.info(f"Usuário {user_data.email} registrado como cliente do negócio {user_data.negocio_id}.")
 
     doc_ref = db.collection('usuarios').document()
     doc_ref.set(user_dict)
@@ -129,8 +127,8 @@ def admin_criar_negocio(db: firestore.client, negocio_data: schemas.NegocioCreat
     """Cria um novo negócio e gera um código de convite único."""
     negocio_dict = negocio_data.dict()
     negocio_dict["owner_uid"] = owner_uid
-    negocio_dict["codigo_convite"] = secrets.token_hex(4).upper() # Gera um código de 8 caracteres
-    negocio_dict["admin_uid"] = None # O admin do negócio será preenchido quando o convite for usado
+    negocio_dict["codigo_convite"] = secrets.token_hex(4).upper()
+    negocio_dict["admin_uid"] = None
     
     doc_ref = db.collection('negocios').document()
     doc_ref.set(negocio_dict)
