@@ -1,11 +1,11 @@
-# barbearia-backend/crud.py (Versão Final com Onboarding Completo)
+# barbearia-backend/crud.py (Versão Definitiva com Onboarding Robusto)
 
 import schemas
 from datetime import datetime
 from typing import Optional, List, Dict
 from firebase_admin import firestore, messaging
 import logging
-import secrets # Adicionado para gerar códigos de convite
+import secrets
 
 # Setup do logger para este módulo
 logger = logging.getLogger(__name__)
@@ -30,41 +30,12 @@ def buscar_usuario_por_firebase_uid(db: firestore.client, firebase_uid: str) -> 
 
 def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioSync) -> Dict:
     """
-    Cria um novo usuário no Firestore se ele não existir, ou retorna o existente.
-    Implementa a lógica de "primeiro usuário se torna super_admin",
-    a lógica de código de convite para se tornar admin de um negócio,
-    e o registro padrão como cliente de um negócio.
+    Cria ou atualiza um usuário no Firestore.
+    Esta função é a única fonte da verdade para a lógica de onboarding.
     """
-    user_existente = buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
-    if user_existente:
-        # Se o usuário já existe, mas está se registrando em um novo negócio como cliente
-        if user_data.negocio_id and user_data.negocio_id not in user_existente.get("roles", {}):
-            doc_ref = db.collection('usuarios').document(user_existente['id'])
-            doc_ref.update({
-                f'roles.{user_data.negocio_id}': 'cliente'
-            })
-            user_existente["roles"][user_data.negocio_id] = "cliente"
-        return user_existente
-
-    user_dict = {
-        "nome": user_data.nome,
-        "email": user_data.email,
-        "firebase_uid": user_data.firebase_uid,
-        "roles": {},
-        "fcm_tokens": []
-    }
-
-    # --- LÓGICA DE ATRIBUIÇÃO DE PAPÉIS (CORRIGIDA COM IF/ELIF/ELSE) ---
-    is_super_admin_flow = not user_data.codigo_convite and not user_data.negocio_id
-    
-    # Cenário 1: Super-Admin
-    if is_super_admin_flow and not db.collection('usuarios').limit(1).get():
-        logger.info(f"Primeiro usuário da plataforma detectado. Atribuindo role de super_admin para {user_data.email}.")
-        user_dict["roles"]["platform"] = "super_admin"
-
-    # Cenário 2: Admin de Negócio (com código de convite)
-    elif user_data.codigo_convite:
-        logger.info(f"Usuário {user_data.email} tentando se registrar com o código de convite: {user_data.codigo_convite}")
+    # --- FLUXO 1: CÓDIGO DE CONVITE (PRIORIDADE MÁXIMA) ---
+    if user_data.codigo_convite:
+        logger.info(f"Processando cadastro com código de convite: {user_data.codigo_convite}")
         negocio_query = db.collection('negocios').where('codigo_convite', '==', user_data.codigo_convite).limit(1)
         negocios = list(negocio_query.stream())
         
@@ -72,31 +43,65 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
             negocio_doc = negocios[0]
             negocio_data = negocio_doc.to_dict()
             
+            # Verifica se o convite é válido e não foi utilizado
             if negocio_data.get('admin_uid') is None:
                 negocio_id = negocio_doc.id
-                logger.info(f"Código de convite válido para o negócio '{negocio_data['nome']}' ({negocio_id}). Atribuindo {user_data.email} como admin.")
+                user_existente = buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
+
+                # Se o usuário já existe (ex: como cliente), ATUALIZA seu papel.
+                if user_existente:
+                    user_ref = db.collection('usuarios').document(user_existente['id'])
+                    user_ref.update({f'roles.{negocio_id}': 'admin'})
+                    logger.info(f"Usuário existente {user_data.email} PROMOVIDO a admin do negócio {negocio_id}.")
+                # Se o usuário não existe, CRIA com o papel de admin.
+                else:
+                    user_dict = {
+                        "nome": user_data.nome, "email": user_data.email, "firebase_uid": user_data.firebase_uid,
+                        "roles": {negocio_id: "admin"}, "fcm_tokens": []
+                    }
+                    # Adiciona e já pega a referência para obter o ID
+                    time_created, doc_ref = db.collection('usuarios').add(user_dict)
+                    logger.info(f"Novo usuário {user_data.email} criado como admin do negócio {negocio_id}.")
+
+                # Marca o convite como utilizado
+                negocio_doc.reference.update({'admin_uid': user_data.firebase_uid})
                 
-                user_dict["roles"][negocio_id] = "admin"
-                
-                db.collection('negocios').document(negocio_id).update({
-                    'admin_uid': user_data.firebase_uid
-                })
-            else:
-                logger.warning(f"Código de convite para o negócio '{negocio_data['nome']}' já foi utilizado.")
-        else:
-            logger.warning(f"Código de convite '{user_data.codigo_convite}' inválido ou não encontrado.")
+                # Retorna os dados atualizados do usuário
+                return buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
             
-    # Cenário 3: Cliente (padrão, com negocio_id)
+            else:
+                logger.warning(f"Código de convite para '{negocio_data['nome']}' já foi utilizado.")
+        else:
+            logger.warning(f"Código de convite '{user_data.codigo_convite}' é inválido.")
+
+    # --- FLUXO 2: USUÁRIO EXISTENTE (SEM CÓDIGO DE CONVITE) ---
+    user_existente = buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
+    if user_existente:
+        if user_data.negocio_id and user_data.negocio_id not in user_existente.get("roles", {}):
+            doc_ref = db.collection('usuarios').document(user_existente['id'])
+            doc_ref.update({f'roles.{user_data.negocio_id}': 'cliente'})
+            user_existente["roles"][user_data.negocio_id] = "cliente"
+        return user_existente
+
+    # --- FLUXO 3: NOVO USUÁRIO (SEM CÓDIGO DE CONVITE) ---
+    user_dict = {
+        "nome": user_data.nome, "email": user_data.email, "firebase_uid": user_data.firebase_uid,
+        "roles": {}, "fcm_tokens": []
+    }
+    
+    is_super_admin_flow = not user_data.negocio_id
+    if is_super_admin_flow and not db.collection('usuarios').limit(1).get():
+        user_dict["roles"]["platform"] = "super_admin"
+        logger.info(f"Novo usuário {user_data.email} criado como Super Admin.")
     elif user_data.negocio_id:
         user_dict["roles"][user_data.negocio_id] = "cliente"
-        logger.info(f"Usuário {user_data.email} registrado como cliente do negócio {user_data.negocio_id}.")
-    # --- FIM DA LÓGICA DE ATRIBUIÇÃO ---
-
-    doc_ref = db.collection('usuarios').document()
-    doc_ref.set(user_dict)
+        logger.info(f"Novo usuário {user_data.email} criado como cliente do negócio {user_data.negocio_id}.")
+    
+    time_created, doc_ref = db.collection('usuarios').add(user_dict)
     
     user_dict['id'] = doc_ref.id
     return user_dict
+
 
 def adicionar_fcm_token(db: firestore.client, firebase_uid: str, fcm_token: str):
     """Adiciona um FCM token a um usuário, evitando duplicatas."""
@@ -133,8 +138,7 @@ def admin_criar_negocio(db: firestore.client, negocio_data: schemas.NegocioCreat
     negocio_dict["codigo_convite"] = secrets.token_hex(4).upper()
     negocio_dict["admin_uid"] = None
     
-    doc_ref = db.collection('negocios').document()
-    doc_ref.set(negocio_dict)
+    time_created, doc_ref = db.collection('negocios').add(negocio_dict)
     
     negocio_dict['id'] = doc_ref.id
     return negocio_dict
@@ -159,8 +163,7 @@ def admin_listar_negocios(db: firestore.client) -> List[Dict]:
 def criar_profissional(db: firestore.client, profissional_data: schemas.ProfissionalCreate) -> Dict:
     """Cria um novo profissional no Firestore."""
     prof_dict = profissional_data.dict()
-    doc_ref = db.collection('profissionais').document()
-    doc_ref.set(prof_dict)
+    time_created, doc_ref = db.collection('profissionais').add(prof_dict)
     prof_dict['id'] = doc_ref.id
     return prof_dict
 
@@ -202,8 +205,7 @@ def buscar_profissional_por_id(db: firestore.client, profissional_id: str) -> Op
 def criar_servico(db: firestore.client, servico_data: schemas.ServicoCreate) -> Dict:
     """Cria um novo serviço para um profissional."""
     servico_dict = servico_data.dict()
-    doc_ref = db.collection('servicos').document()
-    doc_ref.set(servico_dict)
+    time_created, doc_ref = db.collection('servicos').add(servico_dict)
     servico_dict['id'] = doc_ref.id
     return servico_dict
 
@@ -251,8 +253,7 @@ def criar_agendamento(db: firestore.client, agendamento_data: schemas.Agendament
         "servico_duracao_minutos": servico['duracao_minutos']
     }
 
-    doc_ref = db.collection('agendamentos').document()
-    doc_ref.set(agendamento_dict)
+    time_created, doc_ref = db.collection('agendamentos').add(agendamento_dict)
     
     agendamento_dict['id'] = doc_ref.id
     return agendamento_dict
