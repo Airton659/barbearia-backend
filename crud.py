@@ -54,13 +54,15 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
         "fcm_tokens": []
     }
 
-    # --- LÓGICA DO SUPER-ADMIN ---
+    # --- LÓGICA DE ATRIBUIÇÃO DE PAPÉIS (CORRIGIDA COM IF/ELIF/ELSE) ---
     is_super_admin_flow = not user_data.codigo_convite and not user_data.negocio_id
+    
+    # Cenário 1: Super-Admin
     if is_super_admin_flow and not db.collection('usuarios').limit(1).get():
         logger.info(f"Primeiro usuário da plataforma detectado. Atribuindo role de super_admin para {user_data.email}.")
         user_dict["roles"]["platform"] = "super_admin"
 
-    # --- LÓGICA DO CÓDIGO DE CONVITE (ADMIN DE NEGÓCIO) ---
+    # Cenário 2: Admin de Negócio (com código de convite)
     elif user_data.codigo_convite:
         logger.info(f"Usuário {user_data.email} tentando se registrar com o código de convite: {user_data.codigo_convite}")
         negocio_query = db.collection('negocios').where('codigo_convite', '==', user_data.codigo_convite).limit(1)
@@ -84,10 +86,11 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
         else:
             logger.warning(f"Código de convite '{user_data.codigo_convite}' inválido ou não encontrado.")
             
-    # --- LÓGICA DE REGISTRO COMO CLIENTE (PADRÃO) ---
+    # Cenário 3: Cliente (padrão, com negocio_id)
     elif user_data.negocio_id:
         user_dict["roles"][user_data.negocio_id] = "cliente"
         logger.info(f"Usuário {user_data.email} registrado como cliente do negócio {user_data.negocio_id}.")
+    # --- FIM DA LÓGICA DE ATRIBUIÇÃO ---
 
     doc_ref = db.collection('usuarios').document()
     doc_ref.set(user_dict)
