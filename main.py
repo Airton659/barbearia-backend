@@ -1,11 +1,11 @@
-# barbearia-backend/main.py (Versão Final para Firestore Multi-Tenant)
+# barbearia-backend/main.py (Versão Final com Endpoints de Admin)
 
 from fastapi import FastAPI, Depends, HTTPException, status, Header
 from typing import List, Optional
 import schemas, crud
 import logging
 from database import initialize_firebase_app, get_db
-from auth import get_current_user_firebase
+from auth import get_current_user_firebase, get_super_admin_user # <-- Importa o novo porteiro
 from firebase_admin import firestore
 
 # --- Configuração da Aplicação ---
@@ -29,6 +29,30 @@ def startup_event():
 @app.get("/")
 def root():
     return {"mensagem": "API de Agendamento Multi-Tenant funcionando", "versao": "2.0.0"}
+
+# =================================================================================
+# ENDPOINTS DE ADMINISTRAÇÃO DA PLATAFORMA (SUPER-ADMIN)
+# =================================================================================
+
+@app.post("/admin/negocios", response_model=schemas.NegocioResponse, tags=["Admin - Negócios"])
+def admin_criar_negocio(
+    negocio_data: schemas.NegocioCreate,
+    admin: schemas.UsuarioProfile = Depends(get_super_admin_user), # <-- Protegido pelo novo porteiro
+    db: firestore.client = Depends(get_db)
+):
+    """
+    (Super-Admin) Cria um novo negócio na plataforma e retorna os dados,
+    incluindo o código de convite para o dono do negócio.
+    """
+    return crud.admin_criar_negocio(db, negocio_data, admin.firebase_uid)
+
+@app.get("/admin/negocios", response_model=List[schemas.NegocioResponse], tags=["Admin - Negócios"])
+def admin_listar_negocios(
+    admin: schemas.UsuarioProfile = Depends(get_super_admin_user), # <-- Protegido pelo novo porteiro
+    db: firestore.client = Depends(get_db)
+):
+    """(Super-Admin) Lista todos os negócios cadastrados na plataforma."""
+    return crud.admin_listar_negocios(db)
 
 # =================================================================================
 # ENDPOINTS DE USUÁRIOS E AUTENTICAÇÃO

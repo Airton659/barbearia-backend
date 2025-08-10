@@ -1,4 +1,4 @@
-# auth.py (Versão para Firestore)
+# auth.py (Versão para Firestore com Super-Admin)
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -54,5 +54,17 @@ def get_current_admin_user(current_user: schemas.UsuarioProfile = Depends(get_cu
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Acesso negado: esta operação requer privilégios de administrador."
+        )
+    return current_user
+
+# --- NOVA FUNÇÃO DE SEGURANÇA PARA O SUPER-ADMIN ---
+def get_super_admin_user(current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase)) -> schemas.UsuarioProfile:
+    """
+    Verifica se o usuário atual tem a permissão de super_admin da plataforma.
+    """
+    if current_user.roles.get("platform") != "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado: esta operação requer privilégios de Super Administrador."
         )
     return current_user

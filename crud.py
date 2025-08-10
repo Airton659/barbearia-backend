@@ -1,10 +1,11 @@
-# barbearia-backend/crud.py (Versão para Firestore Multi-Tenant)
+# barbearia-backend/crud.py (Versão com Lógica de Convite e Cliente)
 
 import schemas
 from datetime import datetime
 from typing import Optional, List, Dict
 from firebase_admin import firestore, messaging
 import logging
+import secrets # Adicionado para gerar códigos de convite
 
 # Setup do logger para este módulo
 logger = logging.getLogger(__name__)
@@ -20,7 +21,7 @@ def buscar_usuario_por_firebase_uid(db: firestore.client, firebase_uid: str) -> 
         docs = list(query.stream())
         if docs:
             user_doc = docs[0].to_dict()
-            user_doc['id'] = docs[0].id  # Adiciona o ID do documento ao dicionário
+            user_doc['id'] = docs[0].id
             return user_doc
         return None
     except Exception as e:
@@ -30,23 +31,66 @@ def buscar_usuario_por_firebase_uid(db: firestore.client, firebase_uid: str) -> 
 def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioSync) -> Dict:
     """
     Cria um novo usuário no Firestore se ele não existir, ou retorna o existente.
-    Esta função é chamada pelo endpoint de sync do Firebase Auth.
+    Implementa a lógica de "primeiro usuário se torna super_admin",
+    a lógica de código de convite para se tornar admin de um negócio,
+    e o registro padrão como cliente de um negócio.
     """
-    # Verifica se o usuário já existe
     user_existente = buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
     if user_existente:
+        # Se o usuário já existe, verifica se ele já tem um papel no negócio atual
+        # Se não tiver, adiciona como cliente.
+        if user_data.negocio_id not in user_existente.get("roles", {}):
+            doc_ref = db.collection('usuarios').document(user_existente['id'])
+            doc_ref.update({
+                f'roles.{user_data.negocio_id}': 'cliente'
+            })
+            user_existente["roles"][user_data.negocio_id] = "cliente"
         return user_existente
 
-    # Se não existe, cria um novo documento de usuário
     user_dict = {
         "nome": user_data.nome,
         "email": user_data.email,
         "firebase_uid": user_data.firebase_uid,
-        "roles": {},  # Inicialmente sem roles
+        "roles": {},
         "fcm_tokens": []
     }
-    
-    # Adiciona o novo usuário à coleção 'usuarios'
+
+    # --- LÓGICA DO SUPER-ADMIN ---
+    if not db.collection('usuarios').limit(1).get():
+        logger.info(f"Primeiro usuário da plataforma detectado. Atribuindo role de super_admin para {user_data.email}.")
+        user_dict["roles"]["platform"] = "super_admin"
+
+    # --- LÓGICA DO CÓDIGO DE CONVITE (ADMIN DE NEGÓCIO) ---
+    if user_data.codigo_convite:
+        logger.info(f"Usuário {user_data.email} tentando se registrar com o código de convite: {user_data.codigo_convite}")
+        negocio_query = db.collection('negocios').where('codigo_convite', '==', user_data.codigo_convite).limit(1)
+        negocios = list(negocio_query.stream())
+        
+        if negocios:
+            negocio_doc = negocios[0]
+            negocio_data = negocio_doc.to_dict()
+            
+            if negocio_data.get('admin_uid') is None:
+                negocio_id = negocio_doc.id
+                logger.info(f"Código de convite válido para o negócio '{negocio_data['nome']}' ({negocio_id}). Atribuindo {user_data.email} como admin.")
+                
+                user_dict["roles"][negocio_id] = "admin"
+                
+                db.collection('negocios').document(negocio_id).update({
+                    'admin_uid': user_data.firebase_uid
+                })
+            else:
+                logger.warning(f"Código de convite para o negócio '{negocio_data['nome']}' já foi utilizado.")
+        else:
+            logger.warning(f"Código de convite '{user_data.codigo_convite}' inválido ou não encontrado.")
+            
+    # --- LÓGICA DE REGISTRO COMO CLIENTE (PADRÃO) ---
+    else:
+        # Se não usou um código de convite, e não é o super-admin, ele se torna cliente do negócio do app
+        if "platform" not in user_dict["roles"]:
+            user_dict["roles"][user_data.negocio_id] = "cliente"
+            logger.info(f"Usuário {user_data.email} registrado como cliente do negócio {user_data.negocio_id}.")
+
     doc_ref = db.collection('usuarios').document()
     doc_ref.set(user_dict)
     
@@ -59,7 +103,6 @@ def adicionar_fcm_token(db: firestore.client, firebase_uid: str, fcm_token: str)
         user_doc = buscar_usuario_por_firebase_uid(db, firebase_uid)
         if user_doc:
             doc_ref = db.collection('usuarios').document(user_doc['id'])
-            # Usa a transformação de união de array do Firestore para adicionar o token de forma atômica
             doc_ref.update({
                 'fcm_tokens': firestore.ArrayUnion([fcm_token])
             })
@@ -72,16 +115,44 @@ def remover_fcm_token(db: firestore.client, firebase_uid: str, fcm_token: str):
         user_doc = buscar_usuario_por_firebase_uid(db, firebase_uid)
         if user_doc:
             doc_ref = db.collection('usuarios').document(user_doc['id'])
-            # Usa a transformação de remoção de array do Firestore
             doc_ref.update({
                 'fcm_tokens': firestore.ArrayRemove([fcm_token])
             })
     except Exception as e:
         logger.error(f"Erro ao remover FCM token para o UID {firebase_uid}: {e}")
 
+# =================================================================================
+# FUNÇÕES DE ADMINISTRAÇÃO (PARA O SUPER-ADMIN)
+# =================================================================================
+
+def admin_criar_negocio(db: firestore.client, negocio_data: schemas.NegocioCreate, owner_uid: str) -> Dict:
+    """Cria um novo negócio e gera um código de convite único."""
+    negocio_dict = negocio_data.dict()
+    negocio_dict["owner_uid"] = owner_uid
+    negocio_dict["codigo_convite"] = secrets.token_hex(4).upper() # Gera um código de 8 caracteres
+    negocio_dict["admin_uid"] = None # O admin do negócio será preenchido quando o convite for usado
+    
+    doc_ref = db.collection('negocios').document()
+    doc_ref.set(negocio_dict)
+    
+    negocio_dict['id'] = doc_ref.id
+    return negocio_dict
+
+def admin_listar_negocios(db: firestore.client) -> List[Dict]:
+    """Lista todos os negócios cadastrados na plataforma."""
+    negocios = []
+    try:
+        for doc in db.collection('negocios').stream():
+            negocio_data = doc.to_dict()
+            negocio_data['id'] = doc.id
+            negocios.append(negocio_data)
+        return negocios
+    except Exception as e:
+        logger.error(f"Erro ao listar negócios: {e}")
+        return []
 
 # =================================================================================
-# FUNÇÕES DE PROFISSIONAIS (ANTIGOS BARBEIROS)
+# FUNÇÕES DE PROFISSIONAIS
 # =================================================================================
 
 def criar_profissional(db: firestore.client, profissional_data: schemas.ProfissionalCreate) -> Dict:
@@ -156,7 +227,6 @@ def listar_servicos_por_profissional(db: firestore.client, profissional_id: str)
 def criar_agendamento(db: firestore.client, agendamento_data: schemas.AgendamentoCreate, cliente: schemas.UsuarioProfile) -> Dict:
     """Cria um novo agendamento, desnormalizando os dados necessários."""
     
-    # 1. Buscar dados para desnormalização
     profissional = buscar_profissional_por_id(db, agendamento_data.profissional_id)
     servico_doc = db.collection('servicos').document(agendamento_data.servico_id).get()
 
@@ -165,29 +235,21 @@ def criar_agendamento(db: firestore.client, agendamento_data: schemas.Agendament
 
     servico = servico_doc.to_dict()
 
-    # 2. Montar o documento completo do agendamento
     agendamento_dict = {
         "negocio_id": agendamento_data.negocio_id,
         "data_hora": agendamento_data.data_hora,
         "status": "pendente",
-        
-        # Dados do Cliente
         "cliente_id": cliente.id,
         "cliente_nome": cliente.nome,
-        
-        # Dados do Profissional
         "profissional_id": profissional['id'],
         "profissional_nome": profissional['nome'],
         "profissional_foto_thumbnail": profissional.get('fotos', {}).get('thumbnail'),
-
-        # Dados do Serviço
         "servico_id": agendamento_data.servico_id,
         "servico_nome": servico['nome'],
         "servico_preco": servico['preco'],
         "servico_duracao_minutos": servico['duracao_minutos']
     }
 
-    # 3. Salvar no Firestore
     doc_ref = db.collection('agendamentos').document()
     doc_ref.set(agendamento_dict)
     
@@ -204,14 +266,13 @@ def cancelar_agendamento(db: firestore.client, agendamento_id: str, cliente_id: 
     agendamento_doc = agendamento_ref.get()
 
     if not agendamento_doc.exists:
-        return None # Agendamento não encontrado
+        return None
     
     agendamento = agendamento_doc.to_dict()
     
     if agendamento.get('cliente_id') != cliente_id:
-        return None # Usuário não autorizado
+        return None
         
-    # --- LÓGICA DE NOTIFICAÇÃO ---
     profissional = buscar_profissional_por_id(db, agendamento['profissional_id'])
     if profissional:
         prof_user = buscar_usuario_por_firebase_uid(db, profissional['usuario_uid'])
@@ -236,15 +297,8 @@ def cancelar_agendamento(db: firestore.client, agendamento_id: str, cliente_id: 
                 except Exception as e:
                     logger.error(f"Erro ao enviar notificação de cancelamento para o token {token}: {e}")
 
-    # Deleta o documento do Firestore
     agendamento_ref.delete()
     return agendamento
-
-# =================================================================================
-# NOTA: As demais funções (Postagens, Comentários, Avaliações, etc.)
-# seguiriam o mesmo padrão de reescrita. O código abaixo serve como um
-# esqueleto e pode ser preenchido conforme a necessidade de cada endpoint.
-# =================================================================================
 
 def listar_agendamentos_por_cliente(db: firestore.client, negocio_id: str, cliente_id: str) -> List[Dict]:
     """Lista os agendamentos de um cliente em um negócio específico."""
