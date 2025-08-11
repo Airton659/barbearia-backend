@@ -44,7 +44,7 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
             negocio_data = negocio_doc.to_dict()
             
             # Verifica se o convite é válido e não foi utilizado
-            if negocio_data.get('admin_uid') is None:
+            if negocio_data.get('admin_uid') is None or negocio_data.get('admin_uid') == user_data.firebase_uid:
                 negocio_id = negocio_doc.id
                 user_existente = buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
 
@@ -59,8 +59,7 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
                         "nome": user_data.nome, "email": user_data.email, "firebase_uid": user_data.firebase_uid,
                         "roles": {negocio_id: "admin"}, "fcm_tokens": []
                     }
-                    # Adiciona e já pega a referência para obter o ID
-                    time_created, doc_ref = db.collection('usuarios').add(user_dict)
+                    db.collection('usuarios').document().set(user_dict)
                     logger.info(f"Novo usuário {user_data.email} criado como admin do negócio {negocio_id}.")
 
                 # Marca o convite como utilizado
@@ -70,7 +69,7 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
                 return buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
             
             else:
-                logger.warning(f"Código de convite para '{negocio_data['nome']}' já foi utilizado.")
+                logger.warning(f"Código de convite para '{negocio_data['nome']}' já foi utilizado por outro admin.")
         else:
             logger.warning(f"Código de convite '{user_data.codigo_convite}' é inválido.")
 
@@ -97,7 +96,9 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
         user_dict["roles"][user_data.negocio_id] = "cliente"
         logger.info(f"Novo usuário {user_data.email} criado como cliente do negócio {user_data.negocio_id}.")
     
-    time_created, doc_ref = db.collection('usuarios').add(user_dict)
+    # Usar .document().set() para consistência
+    doc_ref = db.collection('usuarios').document()
+    doc_ref.set(user_dict)
     
     user_dict['id'] = doc_ref.id
     return user_dict
@@ -138,7 +139,8 @@ def admin_criar_negocio(db: firestore.client, negocio_data: schemas.NegocioCreat
     negocio_dict["codigo_convite"] = secrets.token_hex(4).upper()
     negocio_dict["admin_uid"] = None
     
-    time_created, doc_ref = db.collection('negocios').add(negocio_dict)
+    doc_ref = db.collection('negocios').document()
+    doc_ref.set(negocio_dict)
     
     negocio_dict['id'] = doc_ref.id
     return negocio_dict
@@ -163,7 +165,8 @@ def admin_listar_negocios(db: firestore.client) -> List[Dict]:
 def criar_profissional(db: firestore.client, profissional_data: schemas.ProfissionalCreate) -> Dict:
     """Cria um novo profissional no Firestore."""
     prof_dict = profissional_data.dict()
-    time_created, doc_ref = db.collection('profissionais').add(prof_dict)
+    doc_ref = db.collection('profissionais').document()
+    doc_ref.set(prof_dict)
     prof_dict['id'] = doc_ref.id
     return prof_dict
 
@@ -205,7 +208,8 @@ def buscar_profissional_por_id(db: firestore.client, profissional_id: str) -> Op
 def criar_servico(db: firestore.client, servico_data: schemas.ServicoCreate) -> Dict:
     """Cria um novo serviço para um profissional."""
     servico_dict = servico_data.dict()
-    time_created, doc_ref = db.collection('servicos').add(servico_dict)
+    doc_ref = db.collection('servicos').document()
+    doc_ref.set(servico_dict)
     servico_dict['id'] = doc_ref.id
     return servico_dict
 
@@ -253,7 +257,8 @@ def criar_agendamento(db: firestore.client, agendamento_data: schemas.Agendament
         "servico_duracao_minutos": servico['duracao_minutos']
     }
 
-    time_created, doc_ref = db.collection('agendamentos').add(agendamento_dict)
+    doc_ref = db.collection('agendamentos').document()
+    doc_ref.set(agendamento_dict)
     
     agendamento_dict['id'] = doc_ref.id
     return agendamento_dict
