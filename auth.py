@@ -33,6 +33,20 @@ def get_current_user_firebase(token: str = Depends(oauth2_scheme), db = Depends(
             detail="Perfil de usuário não encontrado em nosso sistema."
         )
     
+    usuario_doc['profissional_id'] = None # Garante que o campo sempre exista
+
+    # Se o usuário tiver roles, verifica se alguma é de profissional ou admin
+    if usuario_doc.get('roles'):
+        for negocio_id, role in usuario_doc['roles'].items():
+            if role in ['admin', 'profissional']:
+                # Busca o perfil profissional vinculado ao UID do usuário e ao negócio
+                perfil_profissional = crud.buscar_profissional_por_uid(db, negocio_id, firebase_uid)
+                if perfil_profissional:
+                    usuario_doc['profissional_id'] = perfil_profissional.get('id')
+                    # Interrompe o loop assim que encontrar o primeiro perfil
+                    # para evitar sobreposições desnecessárias.
+                    break
+    
     return schemas.UsuarioProfile(**usuario_doc)
 
 

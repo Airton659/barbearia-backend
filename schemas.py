@@ -39,6 +39,7 @@ class UsuarioProfile(UsuarioBase):
     # Um usuário pode ser membro de múltiplos negócios (ex: admin de um, cliente de outro)
     roles: dict[str, str] = Field({}, description="Dicionário de negocio_id para role (ex: {'negocio_A': 'admin', 'negocio_B': 'cliente'}).")
     fcm_tokens: List[str] = []
+    profissional_id: Optional[str] = Field(None, description="ID do perfil profissional, se o usuário for um profissional ou admin.")
 
 # Schema usado pelo endpoint de sync, agora com o negocio_id opcional
 class UsuarioSync(BaseModel):
