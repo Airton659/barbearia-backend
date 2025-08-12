@@ -368,7 +368,12 @@ def definir_horarios_trabalho(db: firestore.client, profissional_id: str, horari
     batch.commit()
         
     for horario in horarios:
-        horarios_ref.document(str(horario.dia_semana)).set(horario.dict())
+        horario_to_save = {
+            "dia_semana": horario.dia_semana,
+            "hora_inicio": horario.hora_inicio.isoformat(),
+            "hora_fim": horario.hora_fim.isoformat()
+        }
+        horarios_ref.document(str(horario.dia_semana)).set(horario_to_save)
     
     return listar_horarios_trabalho(db, profissional_id)
 
