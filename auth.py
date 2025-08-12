@@ -1,11 +1,12 @@
 # auth.py (Versão para Firestore com Super-Admin)
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import OAuth2PasswordBearer
 from firebase_admin import auth
 import schemas
 import crud
 from database import get_db
+from typing import Optional
 
 # O OAuth2PasswordBearer ainda pode ser útil para a documentação interativa (botão "Authorize")
 # mas a lógica de validação de token agora é 100% via Firebase ID Token.
@@ -40,22 +41,28 @@ def get_current_user_firebase(token: str = Depends(oauth2_scheme), db = Depends(
     return schemas.UsuarioProfile(**usuario_doc)
 
 
-def get_current_admin_user(current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase)) -> schemas.UsuarioProfile:
+def get_current_admin_user(
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    negocio_id: Optional[str] = Header(None, description="ID do Negócio para o qual a permissão de admin é necessária")
+) -> schemas.UsuarioProfile:
     """
-    Verifica se o usuário atual (já validado e carregado do Firestore)
-    tem uma role de 'admin' em algum dos negócios.
-    
-    NOTA: A lógica de "admin" pode precisar ser refinada no modelo multi-tenant.
-    Por exemplo, ser admin de um negócio específico. Por enquanto, mantemos a verificação genérica.
+    Verifica se o usuário atual é o administrador do negócio especificado no header.
+    Esta função é a dependência de segurança para endpoints de gerenciamento de negócio.
     """
-    # A verificação de "tipo" pode ser ajustada para o novo modelo de "roles"
-    # Ex: if "admin" in current_user.roles.values():
-    if "admin" not in current_user.roles.values():
+    if not negocio_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="O header 'negocio-id' é obrigatório para esta operação."
+        )
+
+    # Verifica se o usuário tem a role 'admin' para o negocio_id específico
+    if current_user.roles.get(negocio_id) != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Acesso negado: esta operação requer privilégios de administrador."
+            detail="Acesso negado: você não é o administrador deste negócio."
         )
     return current_user
+
 
 # --- NOVA FUNÇÃO DE SEGURANÇA PARA O SUPER-ADMIN ---
 def get_super_admin_user(current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase)) -> schemas.UsuarioProfile:
@@ -66,5 +73,29 @@ def get_super_admin_user(current_user: schemas.UsuarioProfile = Depends(get_curr
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Acesso negado: esta operação requer privilégios de Super Administrador."
+        )
+    return current_user
+
+# --- FUNÇÃO QUE ESTAVA FALTANDO ---
+def get_current_profissional_user(
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    negocio_id: Optional[str] = Header(None, description="ID do Negócio no qual o profissional está atuando")
+) -> schemas.UsuarioProfile:
+    """
+    Verifica se o usuário atual é um profissional do negócio especificado no header.
+    Esta função é a dependência de segurança para endpoints de autogestão do profissional.
+    """
+    if not negocio_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="O header 'negocio-id' é obrigatório para esta operação."
+        )
+
+    # Verifica se o usuário tem a role 'profissional' OU 'admin' (pois um admin também é um profissional)
+    user_role_for_negocio = current_user.roles.get(negocio_id)
+    if user_role_for_negocio not in ["profissional", "admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado: você não é um profissional deste negócio."
         )
     return current_user
