@@ -1,6 +1,6 @@
-# barbearia-backend/main.py (Versão com Exclusão de Posts e Comentários)
+# barbearia-backend/main.py (Versão com Avaliações)
 
-from fastapi import FastAPI, Depends, HTTPException, status, Header, Path, Query
+from fastapi import FastAPI, Depends, HTTPException, status, Header, Path, Query, UploadFile, File
 from typing import List, Optional
 import schemas, crud
 import logging
