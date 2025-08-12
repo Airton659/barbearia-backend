@@ -1,11 +1,11 @@
-# barbearia-backend/crud.py (Versão Definitiva com Onboarding Robusto)
+# barbearia-backend/crud.py (Versão com Ferramentas de Autogestão do Profissional)
 
 import schemas
-from datetime import datetime
+from datetime import datetime, date, time, timedelta
 from typing import Optional, List, Dict
 from firebase_admin import firestore, messaging
 import logging
-import secrets
+import secrets 
 
 # Setup do logger para este módulo
 logger = logging.getLogger(__name__)
@@ -43,17 +43,14 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
             negocio_doc = negocios[0]
             negocio_data = negocio_doc.to_dict()
             
-            # Verifica se o convite é válido e não foi utilizado
             if negocio_data.get('admin_uid') is None or negocio_data.get('admin_uid') == user_data.firebase_uid:
                 negocio_id = negocio_doc.id
                 user_existente = buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
 
-                # Se o usuário já existe (ex: como cliente), ATUALIZA seu papel.
                 if user_existente:
                     user_ref = db.collection('usuarios').document(user_existente['id'])
                     user_ref.update({f'roles.{negocio_id}': 'admin'})
                     logger.info(f"Usuário existente {user_data.email} PROMOVIDO a admin do negócio {negocio_id}.")
-                # Se o usuário não existe, CRIA com o papel de admin.
                 else:
                     user_dict = {
                         "nome": user_data.nome, "email": user_data.email, "firebase_uid": user_data.firebase_uid,
@@ -62,10 +59,8 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
                     db.collection('usuarios').document().set(user_dict)
                     logger.info(f"Novo usuário {user_data.email} criado como admin do negócio {negocio_id}.")
 
-                # Marca o convite como utilizado
                 negocio_doc.reference.update({'admin_uid': user_data.firebase_uid})
                 
-                # Retorna os dados atualizados do usuário
                 return buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
             
             else:
@@ -96,7 +91,6 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
         user_dict["roles"][user_data.negocio_id] = "cliente"
         logger.info(f"Novo usuário {user_data.email} criado como cliente do negócio {user_data.negocio_id}.")
     
-    # Usar .document().set() para consistência
     doc_ref = db.collection('usuarios').document()
     doc_ref.set(user_dict)
     
@@ -129,7 +123,7 @@ def remover_fcm_token(db: firestore.client, firebase_uid: str, fcm_token: str):
         logger.error(f"Erro ao remover FCM token para o UID {firebase_uid}: {e}")
 
 # =================================================================================
-# FUNÇÕES DE ADMINISTRAÇÃO (PARA O SUPER-ADMIN)
+# FUNÇÕES DE ADMINISTRAÇÃO DA PLATAFORMA (SUPER-ADMIN)
 # =================================================================================
 
 def admin_criar_negocio(db: firestore.client, negocio_data: schemas.NegocioCreate, owner_uid: str) -> Dict:
@@ -159,8 +153,101 @@ def admin_listar_negocios(db: firestore.client) -> List[Dict]:
         return []
 
 # =================================================================================
-# FUNÇÕES DE PROFISSIONAIS
+# FUNÇÕES DE ADMINISTRAÇÃO DO NEGÓCIO (ADMIN DE NEGÓCIO)
 # =================================================================================
+
+def admin_listar_clientes_por_negocio(db: firestore.client, negocio_id: str) -> List[Dict]:
+    """Lista todos os usuários com o papel de 'cliente' para um negócio específico."""
+    clientes = []
+    try:
+        # No Firestore, para consultar um campo dentro de um mapa (roles), usamos a notação de ponto.
+        query = db.collection('usuarios').where(f'roles.{negocio_id}', '==', 'cliente')
+        for doc in query.stream():
+            cliente_data = doc.to_dict()
+            cliente_data['id'] = doc.id
+            clientes.append(cliente_data)
+        return clientes
+    except Exception as e:
+        logger.error(f"Erro ao listar clientes para o negocio_id {negocio_id}: {e}")
+        return []
+
+def admin_promover_cliente_para_profissional(db: firestore.client, negocio_id: str, cliente_uid: str) -> Optional[Dict]:
+    """
+    Promove um usuário de 'cliente' para 'profissional' e cria seu perfil profissional.
+    """
+    try:
+        user_doc = buscar_usuario_por_firebase_uid(db, cliente_uid)
+        if not user_doc:
+            logger.warning(f"Tentativa de promover usuário inexistente com UID: {cliente_uid}")
+            return None
+
+        if user_doc.get("roles", {}).get(negocio_id) == 'cliente':
+            # 1. Atualiza a permissão do usuário
+            user_ref = db.collection('usuarios').document(user_doc['id'])
+            user_ref.update({
+                f'roles.{negocio_id}': 'profissional'
+            })
+            
+            # 2. Cria o perfil profissional básico
+            novo_profissional_data = schemas.ProfissionalCreate(
+                negocio_id=negocio_id,
+                usuario_uid=cliente_uid,
+                nome=user_doc.get('nome', 'Profissional sem nome'),
+                especialidades="A definir",
+                ativo=True,
+                fotos={}
+            )
+            criar_profissional(db, novo_profissional_data)
+            
+            logger.info(f"Usuário {user_doc['email']} promovido para profissional no negócio {negocio_id}.")
+            
+            # Retorna os dados atualizados do usuário
+            return buscar_usuario_por_firebase_uid(db, cliente_uid)
+        else:
+            logger.warning(f"Usuário {user_doc.get('email')} não é um cliente deste negócio e não pode ser promovido.")
+            return None
+    except Exception as e:
+        logger.error(f"Erro ao promover cliente {cliente_uid} para profissional: {e}")
+        return None
+
+# =================================================================================
+# FUNÇÕES DE PROFISSIONAIS E AUTOGESTÃO
+# =================================================================================
+
+def buscar_profissional_por_uid(db: firestore.client, negocio_id: str, firebase_uid: str) -> Optional[Dict]:
+    """Busca um perfil de profissional com base no firebase_uid do usuário e no negocio_id."""
+    try:
+        query = db.collection('profissionais')\
+            .where('negocio_id', '==', negocio_id)\
+            .where('usuario_uid', '==', firebase_uid)\
+            .limit(1)
+        
+        docs = list(query.stream())
+        if docs:
+            prof_data = docs[0].to_dict()
+            prof_data['id'] = docs[0].id
+            return prof_data
+        return None
+    except Exception as e:
+        logger.error(f"Erro ao buscar profissional por UID {firebase_uid} no negócio {negocio_id}: {e}")
+        return None
+
+def atualizar_perfil_profissional(db: firestore.client, profissional_id: str, update_data: schemas.ProfissionalUpdate) -> Optional[Dict]:
+    """Atualiza os dados de um perfil profissional."""
+    try:
+        prof_ref = db.collection('profissionais').document(profissional_id)
+        update_dict = update_data.model_dump(exclude_unset=True)
+        
+        if not update_dict:
+            return buscar_profissional_por_id(db, profissional_id)
+
+        prof_ref.update(update_dict)
+        logger.info(f"Perfil do profissional {profissional_id} atualizado.")
+        
+        return buscar_profissional_por_id(db, profissional_id)
+    except Exception as e:
+        logger.error(f"Erro ao atualizar perfil do profissional {profissional_id}: {e}")
+        return None
 
 def criar_profissional(db: firestore.client, profissional_data: schemas.ProfissionalCreate) -> Dict:
     """Cria um novo profissional no Firestore."""
@@ -174,9 +261,7 @@ def listar_profissionais_por_negocio(db: firestore.client, negocio_id: str) -> L
     """Lista todos os profissionais ativos de um negócio específico."""
     profissionais = []
     try:
-        query = db.collection('profissionais')\
-            .where('negocio_id', '==', negocio_id)\
-            .where('ativo', '==', True)
+        query = db.collection('profissionais').where('negocio_id', '==', negocio_id).where('ativo', '==', True)
         
         for doc in query.stream():
             prof_data = doc.to_dict()
@@ -226,6 +311,149 @@ def listar_servicos_por_profissional(db: firestore.client, profissional_id: str)
     except Exception as e:
         logger.error(f"Erro ao listar serviços para o profissional_id {profissional_id}: {e}")
         return []
+
+def atualizar_servico(db: firestore.client, servico_id: str, profissional_id: str, update_data: schemas.ServicoUpdate) -> Optional[Dict]:
+    """Atualiza um serviço, garantindo que ele pertence ao profissional correto."""
+    try:
+        servico_ref = db.collection('servicos').document(servico_id)
+        servico_doc = servico_ref.get()
+        
+        if not servico_doc.exists or servico_doc.to_dict().get('profissional_id') != profissional_id:
+            logger.warning(f"Tentativa de atualização do serviço {servico_id} por profissional não autorizado ({profissional_id}).")
+            return None
+            
+        update_dict = update_data.model_dump(exclude_unset=True)
+        if not update_dict:
+            return servico_doc.to_dict()
+
+        servico_ref.update(update_dict)
+        logger.info(f"Serviço {servico_id} atualizado pelo profissional {profissional_id}.")
+        
+        updated_doc = servico_ref.get().to_dict()
+        updated_doc['id'] = servico_id
+        return updated_doc
+    except Exception as e:
+        logger.error(f"Erro ao atualizar serviço {servico_id}: {e}")
+        return None
+
+def deletar_servico(db: firestore.client, servico_id: str, profissional_id: str) -> bool:
+    """Deleta um serviço, garantindo que ele pertence ao profissional correto."""
+    try:
+        servico_ref = db.collection('servicos').document(servico_id)
+        servico_doc = servico_ref.get()
+
+        if not servico_doc.exists or servico_doc.to_dict().get('profissional_id') != profissional_id:
+            logger.warning(f"Tentativa de exclusão do serviço {servico_id} por profissional não autorizado ({profissional_id}).")
+            return False
+            
+        servico_ref.delete()
+        logger.info(f"Serviço {servico_id} deletado pelo profissional {profissional_id}.")
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao deletar serviço {servico_id}: {e}")
+        return False
+
+# =================================================================================
+# FUNÇÕES DE DISPONIBILIDADE (HORÁRIOS, BLOQUEIOS E CÁLCULO)
+# =================================================================================
+
+def definir_horarios_trabalho(db: firestore.client, profissional_id: str, horarios: List[schemas.HorarioTrabalho]):
+    """Define os horários de trabalho para um profissional, substituindo os existentes."""
+    prof_ref = db.collection('profissionais').document(profissional_id)
+    horarios_ref = prof_ref.collection('horarios_trabalho')
+    
+    batch = db.batch()
+    for doc in horarios_ref.stream():
+        batch.delete(doc.reference)
+    batch.commit()
+        
+    for horario in horarios:
+        horarios_ref.document(str(horario.dia_semana)).set(horario.dict())
+    
+    return listar_horarios_trabalho(db, profissional_id)
+
+def listar_horarios_trabalho(db: firestore.client, profissional_id: str) -> List[Dict]:
+    """Lista os horários de trabalho de um profissional."""
+    horarios = []
+    horarios_ref = db.collection('profissionais').document(profissional_id).collection('horarios_trabalho')
+    for doc in horarios_ref.stream():
+        horario_data = doc.to_dict()
+        horario_data['id'] = doc.id
+        horarios.append(horario_data)
+    return horarios
+
+def criar_bloqueio(db: firestore.client, profissional_id: str, bloqueio_data: schemas.Bloqueio) -> Dict:
+    """Cria um novo bloqueio na agenda de um profissional."""
+    bloqueio_dict = bloqueio_data.dict()
+    bloqueios_ref = db.collection('profissionais').document(profissional_id).collection('bloqueios')
+    time_created, doc_ref = bloqueios_ref.add(bloqueio_dict)
+    bloqueio_dict['id'] = doc_ref.id
+    return bloqueio_dict
+
+def deletar_bloqueio(db: firestore.client, profissional_id: str, bloqueio_id: str) -> bool:
+    """Deleta um bloqueio da agenda de um profissional."""
+    try:
+        bloqueio_ref = db.collection('profissionais').document(profissional_id).collection('bloqueios').document(bloqueio_id)
+        if bloqueio_ref.get().exists:
+            bloqueio_ref.delete()
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"Erro ao deletar bloqueio {bloqueio_id}: {e}")
+        return False
+        
+def calcular_horarios_disponiveis(db: firestore.client, profissional_id: str, dia: date, duracao_servico_min: int = 60) -> List[time]:
+    """Calcula os horários disponíveis para um profissional em um dia específico."""
+    dia_semana = dia.weekday()
+    
+    horario_trabalho_ref = db.collection('profissionais').document(profissional_id).collection('horarios_trabalho').document(str(dia_semana))
+    horario_trabalho_doc = horario_trabalho_ref.get()
+
+    if not horario_trabalho_doc.exists:
+        return [] 
+
+    horario_trabalho = horario_trabalho_doc.to_dict()
+    
+    slots_disponiveis = []
+    hora_inicio_str = horario_trabalho['hora_inicio']
+    hora_fim_str = horario_trabalho['hora_fim']
+
+    hora_inicio = datetime.combine(dia, time.fromisoformat(hora_inicio_str))
+    hora_fim = datetime.combine(dia, time.fromisoformat(hora_fim_str))
+    
+    hora_atual = hora_inicio
+    while hora_atual < hora_fim:
+        slots_disponiveis.append(hora_atual)
+        hora_atual += timedelta(minutes=duracao_servico_min)
+
+    agendamentos_no_dia_query = db.collection('agendamentos')\
+        .where('profissional_id', '==', profissional_id)\
+        .where('data_hora', '>=', datetime.combine(dia, time.min))\
+        .where('data_hora', '<=', datetime.combine(dia, time.max))
+        
+    horarios_ocupados = {ag.to_dict()['data_hora'].replace(tzinfo=None) for ag in agendamentos_no_dia_query.stream()}
+    
+    bloqueios_no_dia_query = db.collection('profissionais').document(profissional_id).collection('bloqueios')\
+        .where('inicio', '<=', datetime.combine(dia, time.max))\
+        .where('fim', '>=', datetime.combine(dia, time.min))
+    
+    bloqueios = [b.to_dict() for b in bloqueios_no_dia_query.stream()]
+
+    horarios_finais = []
+    for slot in slots_disponiveis:
+        if slot in horarios_ocupados:
+            continue
+        
+        em_bloqueio = False
+        for bloqueio in bloqueios:
+            if bloqueio['inicio'].replace(tzinfo=None) <= slot < bloqueio['fim'].replace(tzinfo=None):
+                em_bloqueio = True
+                break
+        
+        if not em_bloqueio:
+            horarios_finais.append(slot.time())
+            
+    return horarios_finais
 
 # =================================================================================
 # FUNÇÕES DE AGENDAMENTOS
@@ -307,13 +535,54 @@ def cancelar_agendamento(db: firestore.client, agendamento_id: str, cliente_id: 
     agendamento_ref.delete()
     return agendamento
 
+def cancelar_agendamento_pelo_profissional(db: firestore.client, agendamento_id: str, profissional_id: str) -> Optional[Dict]:
+    """
+    Permite a um profissional cancelar um agendamento, atualizando o status
+    e notificando o cliente.
+    """
+    agendamento_ref = db.collection('agendamentos').document(agendamento_id)
+    agendamento_doc = agendamento_ref.get()
+
+    if not agendamento_doc.exists:
+        return None
+    
+    agendamento = agendamento_doc.to_dict()
+
+    if agendamento.get('profissional_id') != profissional_id:
+        return None # Profissional não autorizado
+
+    agendamento_ref.update({"status": "cancelado_pelo_profissional"})
+    agendamento["status"] = "cancelado_pelo_profissional"
+    
+    cliente_doc = db.collection('usuarios').document(agendamento['cliente_id']).get()
+    if cliente_doc.exists:
+        cliente_data = cliente_doc.to_dict()
+        if cliente_data.get('fcm_tokens'):
+            data_formatada = agendamento['data_hora'].strftime('%d/%m/%Y às %H:%M')
+            mensagem_body = f"Seu agendamento com {agendamento['profissional_nome']} para {data_formatada} foi cancelado."
+
+            message = messaging.Message(
+                data={
+                    "title": "Agendamento Cancelado",
+                    "body": mensagem_body,
+                    "tipo": "AGENDAMENTO_CANCELADO"
+                }
+            )
+            for token in cliente_data['fcm_tokens']:
+                message.token = token
+                try:
+                    Messaging(message)
+                    logger.info(f"Notificação de cancelamento (pelo profissional) enviada para o cliente: {token}")
+                except Exception as e:
+                    logger.error(f"Erro ao enviar notificação para o cliente {agendamento['cliente_id']}: {e}")
+
+    return agendamento
+
+
 def listar_agendamentos_por_cliente(db: firestore.client, negocio_id: str, cliente_id: str) -> List[Dict]:
     """Lista os agendamentos de um cliente em um negócio específico."""
     agendamentos = []
-    query = db.collection('agendamentos')\
-        .where('negocio_id', '==', negocio_id)\
-        .where('cliente_id', '==', cliente_id)\
-        .order_by('data_hora', direction=firestore.Query.DESCENDING)
+    query = db.collection('agendamentos').where('negocio_id', '==', negocio_id).where('cliente_id', '==', cliente_id).order_by('data_hora', direction=firestore.Query.DESCENDING)
     
     for doc in query.stream():
         ag_data = doc.to_dict()
@@ -325,10 +594,7 @@ def listar_agendamentos_por_cliente(db: firestore.client, negocio_id: str, clien
 def listar_agendamentos_por_profissional(db: firestore.client, negocio_id: str, profissional_id: str) -> List[Dict]:
     """Lista os agendamentos de um profissional em um negócio específico."""
     agendamentos = []
-    query = db.collection('agendamentos')\
-        .where('negocio_id', '==', negocio_id)\
-        .where('profissional_id', '==', profissional_id)\
-        .order_by('data_hora', direction=firestore.Query.DESCENDING)
+    query = db.collection('agendamentos').where('negocio_id', '==', negocio_id).where('profissional_id', '==', profissional_id).order_by('data_hora', direction=firestore.Query.DESCENDING)
     
     for doc in query.stream():
         ag_data = doc.to_dict()
@@ -336,3 +602,202 @@ def listar_agendamentos_por_profissional(db: firestore.client, negocio_id: str, 
         agendamentos.append(ag_data)
         
     return agendamentos
+
+# =================================================================================
+# FUNÇÕES DE FEED E INTERAÇÕES
+# =================================================================================
+
+def criar_postagem(db: firestore.client, postagem_data: schemas.PostagemCreate, profissional: Dict) -> Dict:
+    """Cria uma nova postagem, desnormalizando os dados do profissional."""
+    post_dict = postagem_data.dict()
+    post_dict['data_postagem'] = datetime.utcnow()
+    post_dict['profissional_nome'] = profissional.get('nome')
+    post_dict['profissional_foto_thumbnail'] = profissional.get('fotos', {}).get('thumbnail')
+    post_dict['total_curtidas'] = 0
+    post_dict['total_comentarios'] = 0
+    
+    doc_ref = db.collection('postagens').document()
+    doc_ref.set(post_dict)
+    post_dict['id'] = doc_ref.id
+    return post_dict
+
+def listar_feed_por_negocio(db: firestore.client, negocio_id: str) -> List[Dict]:
+    """Lista o feed de postagens de um negócio específico."""
+    postagens = []
+    query = db.collection('postagens')\
+        .where('negocio_id', '==', negocio_id)\
+        .order_by('data_postagem', direction=firestore.Query.DESCENDING)
+        
+    for doc in query.stream():
+        post_data = doc.to_dict()
+        post_data['id'] = doc.id
+        postagens.append(post_data)
+    return postagens
+
+def toggle_curtida(db: firestore.client, postagem_id: str, user_id: str) -> bool:
+    """Adiciona ou remove uma curtida de uma postagem."""
+    post_ref = db.collection('postagens').document(postagem_id)
+    curtida_ref = post_ref.collection('curtidas').document(user_id)
+    
+    curtida_doc = curtida_ref.get()
+    
+    @firestore.transactional
+    def update_in_transaction(transaction, post_reference, curtida_reference, curtida_existe):
+        if curtida_existe:
+            transaction.delete(curtida_reference)
+            transaction.update(post_reference, {
+                'total_curtidas': firestore.Increment(-1)
+            })
+            return False # Descurtiu
+        else:
+            transaction.set(curtida_reference, {'data': datetime.utcnow()})
+            transaction.update(post_reference, {
+                'total_curtidas': firestore.Increment(1)
+            })
+            return True # Curtiu
+
+    transaction = db.transaction()
+    return update_in_transaction(transaction, post_ref, curtida_ref, curtida_doc.exists)
+
+def criar_comentario(db: firestore.client, comentario_data: schemas.ComentarioCreate, usuario: schemas.UsuarioProfile) -> Dict:
+    """Cria um novo comentário e atualiza o contador na postagem."""
+    post_ref = db.collection('postagens').document(comentario_data.postagem_id)
+
+    comentario_dict = comentario_data.dict()
+    comentario_dict['data'] = datetime.utcnow()
+    comentario_dict['cliente_id'] = usuario.id
+    comentario_dict['cliente_nome'] = usuario.nome
+    
+    doc_ref = post_ref.collection('comentarios').document()
+    doc_ref.set(comentario_dict)
+    
+    post_ref.update({'total_comentarios': firestore.Increment(1)})
+    
+    comentario_dict['id'] = doc_ref.id
+    return comentario_dict
+
+def listar_comentarios(db: firestore.client, postagem_id: str) -> List[Dict]:
+    """Lista todos os comentários de uma postagem."""
+    comentarios = []
+    query = db.collection('postagens').document(postagem_id).collection('comentarios')\
+        .order_by('data', direction=firestore.Query.ASCENDING)
+    
+    for doc in query.stream():
+        comentario_data = doc.to_dict()
+        comentario_data['id'] = doc.id
+        comentarios.append(comentario_data)
+    return comentarios
+
+def deletar_postagem(db: firestore.client, postagem_id: str, profissional_id: str) -> bool:
+    """Deleta uma postagem, garantindo que ela pertence ao profissional correto."""
+    try:
+        post_ref = db.collection('postagens').document(postagem_id)
+        post_doc = post_ref.get()
+        if not post_doc.exists or post_doc.to_dict().get('profissional_id') != profissional_id:
+            logger.warning(f"Tentativa de exclusão da postagem {postagem_id} por profissional não autorizado ({profissional_id}).")
+            return False
+        
+        # O ideal seria deletar também subcoleções como curtidas e comentários,
+        # mas isso requer uma lógica mais complexa (ex: Cloud Function).
+        # Por enquanto, deletamos apenas o post principal.
+        post_ref.delete()
+        logger.info(f"Postagem {postagem_id} deletada pelo profissional {profissional_id}.")
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao deletar postagem {postagem_id}: {e}")
+        return False
+
+def deletar_comentario(db: firestore.client, postagem_id: str, comentario_id: str, user_id: str) -> bool:
+    """Deleta um comentário, garantindo que ele pertence ao usuário correto."""
+    try:
+        comentario_ref = db.collection('postagens').document(postagem_id).collection('comentarios').document(comentario_id)
+        comentario_doc = comentario_ref.get()
+
+        if not comentario_doc.exists or comentario_doc.to_dict().get('cliente_id') != user_id:
+            logger.warning(f"Tentativa de exclusão do comentário {comentario_id} por usuário não autorizado ({user_id}).")
+            return False
+        
+        comentario_ref.delete()
+        
+        # Atualiza o contador de comentários na postagem principal
+        db.collection('postagens').document(postagem_id).update({
+            'total_comentarios': firestore.Increment(-1)
+        })
+        
+        logger.info(f"Comentário {comentario_id} deletado pelo usuário {user_id}.")
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao deletar comentário {comentario_id}: {e}")
+        return False
+        
+# =================================================================================
+# FUNÇÕES DE AVALIAÇÕES
+# =================================================================================
+
+def criar_avaliacao(db: firestore.client, avaliacao_data: schemas.AvaliacaoCreate, usuario: schemas.UsuarioProfile) -> Dict:
+    """Cria uma nova avaliação para um profissional, desnormalizando os dados do cliente."""
+    avaliacao_dict = avaliacao_data.dict()
+    avaliacao_dict['data'] = datetime.utcnow()
+    avaliacao_dict['cliente_id'] = usuario.id
+    avaliacao_dict['cliente_nome'] = usuario.nome
+
+    doc_ref = db.collection('avaliacoes').document()
+    doc_ref.set(avaliacao_dict)
+    avaliacao_dict['id'] = doc_ref.id
+    
+    # Opcional: recalcular a nota média do profissional aqui usando uma transação
+    
+    return avaliacao_dict
+
+def listar_avaliacoes_por_profissional(db: firestore.client, profissional_id: str) -> List[Dict]:
+    """Lista todas as avaliações de um profissional específico."""
+    avaliacoes = []
+    query = db.collection('avaliacoes')\
+        .where('profissional_id', '==', profissional_id)\
+        .order_by('data', direction=firestore.Query.DESCENDING)
+        
+    for doc in query.stream():
+        avaliacao_data = doc.to_dict()
+        avaliacao_data['id'] = doc.id
+        avaliacoes.append(avaliacao_data)
+    return avaliacoes
+
+# =================================================================================
+# FUNÇÕES DE NOTIFICAÇÕES
+# =================================================================================
+
+def listar_notificacoes(db: firestore.client, usuario_id: str) -> List[Dict]:
+    """Lista o histórico de notificações de um usuário."""
+    notificacoes = []
+    # No Firestore, as notificações podem ser uma subcoleção dentro do documento do usuário
+    query = db.collection('usuarios').document(usuario_id).collection('notificacoes')\
+        .order_by('data_criacao', direction=firestore.Query.DESCENDING)
+    
+    for doc in query.stream():
+        notificacao_data = doc.to_dict()
+        notificacao_data['id'] = doc.id
+        notificacoes.append(notificacao_data)
+    return notificacoes
+
+def contar_notificacoes_nao_lidas(db: firestore.client, usuario_id: str) -> int:
+    """Conta o número de notificações não lidas de um usuário."""
+    query = db.collection('usuarios').document(usuario_id).collection('notificacoes')\
+        .where('lida', '==', False)
+    
+    # .get() em uma query retorna um snapshot da coleção, podemos contar os documentos
+    docs = query.get()
+    return len(docs)
+
+def marcar_notificacao_como_lida(db: firestore.client, usuario_id: str, notificacao_id: str) -> bool:
+    """Marca uma notificação específica de um usuário como lida."""
+    try:
+        notificacao_ref = db.collection('usuarios').document(usuario_id).collection('notificacoes').document(notificacao_id)
+        
+        # .get() em um documento para verificar se ele existe
+        if notificacao_ref.get().exists:
+            notificacao_ref.update({'lida': True})
+            return True
+        return False # Notificação não encontrada
+    except Exception as e:
+        logger.error(f"Erro ao marcar notificação {notificacao_id} como lida: {e}")
+        return False
