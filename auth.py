@@ -1,6 +1,6 @@
-# auth.py (Versão para Firestore com Super-Admin)
+# auth.py (Versão Corrigida)
 
-from fastapi import Depends, HTTPException, status, Header
+from fastapi import Depends, HTTPException, status, Header, Path
 from fastapi.security import OAuth2PasswordBearer
 from firebase_admin import auth
 import schemas
@@ -9,8 +9,6 @@ from database import get_db
 from typing import Optional
 
 # O OAuth2PasswordBearer ainda pode ser útil para a documentação interativa (botão "Authorize")
-# mas a lógica de validação de token agora é 100% via Firebase ID Token.
-# A tokenUrl "login" não existe mais como um endpoint de usuário/senha.
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 def get_current_user_firebase(token: str = Depends(oauth2_scheme), db = Depends(get_db)) -> schemas.UsuarioProfile:
@@ -22,13 +20,11 @@ def get_current_user_firebase(token: str = Depends(oauth2_scheme), db = Depends(
         decoded_token = auth.verify_id_token(token)
         firebase_uid = decoded_token['uid']
     except Exception as e:
-        # Log do erro pode ser útil aqui para depuração
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Token inválido ou expirado: {e}"
         )
 
-    # A função crud.buscar_usuario_por_firebase_uid será reescrita para usar o cliente 'db' do Firestore
     usuario_doc = crud.buscar_usuario_por_firebase_uid(db, firebase_uid=firebase_uid)
     
     if not usuario_doc:
@@ -37,24 +33,20 @@ def get_current_user_firebase(token: str = Depends(oauth2_scheme), db = Depends(
             detail="Perfil de usuário não encontrado em nosso sistema."
         )
     
-    # Converte o dicionário/documento do Firestore para o nosso modelo Pydantic
     return schemas.UsuarioProfile(**usuario_doc)
 
 
 def get_current_admin_user(
-    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
-    negocio_id: Optional[str] = Header(None, description="ID do Negócio para o qual a permissão de admin é necessária")
+    # A MUDANÇA ESTÁ AQUI: FastAPI irá injetar o 'negocio_id' da URL (Path) diretamente.
+    negocio_id: str, 
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase)
 ) -> schemas.UsuarioProfile:
     """
-    Verifica se o usuário atual é o administrador do negócio especificado no header.
+    Verifica se o usuário atual é o administrador do negócio especificado na URL.
     Esta função é a dependência de segurança para endpoints de gerenciamento de negócio.
     """
-    if not negocio_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="O header 'negocio-id' é obrigatório para esta operação."
-        )
-
+    # A verificação de `negocio_id` nulo não é mais necessária, pois um path param é sempre obrigatório.
+    
     # Verifica se o usuário tem a role 'admin' para o negocio_id específico
     if current_user.roles.get(negocio_id) != "admin":
         raise HTTPException(
@@ -64,7 +56,6 @@ def get_current_admin_user(
     return current_user
 
 
-# --- NOVA FUNÇÃO DE SEGURANÇA PARA O SUPER-ADMIN ---
 def get_super_admin_user(current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase)) -> schemas.UsuarioProfile:
     """
     Verifica se o usuário atual tem a permissão de super_admin da plataforma.
@@ -76,7 +67,6 @@ def get_super_admin_user(current_user: schemas.UsuarioProfile = Depends(get_curr
         )
     return current_user
 
-# --- FUNÇÃO QUE ESTAVA FALTANDO ---
 def get_current_profissional_user(
     current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
     negocio_id: Optional[str] = Header(None, description="ID do Negócio no qual o profissional está atuando")
