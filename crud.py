@@ -59,19 +59,6 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
                     db.collection('usuarios').document().set(user_dict)
                     logger.info(f"Novo usuário {user_data.email} criado como admin do negócio {negocio_id}.")
                 
-                # --- CORREÇÃO: CRIAÇÃO DO PERFIL DE PROFISSIONAL PARA O ADMIN ---
-                # Garante que um admin também tenha um perfil profissional para autogestão.
-                novo_profissional_data = schemas.ProfissionalCreate(
-                    negocio_id=negocio_id,
-                    usuario_uid=user_data.firebase_uid,
-                    nome=user_data.nome,
-                    especialidades="A definir",
-                    ativo=True,
-                    fotos={}
-                )
-                criar_profissional(db, novo_profissional_data)
-                logger.info(f"Perfil profissional criado para o novo admin {user_data.email}.")
-
                 negocio_doc.reference.update({'admin_uid': user_data.firebase_uid})
                 
                 return buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)

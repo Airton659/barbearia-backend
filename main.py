@@ -379,17 +379,6 @@ def get_contagem_notificacoes_nao_lidas(
     count = crud.contar_notificacoes_nao_lidas(db, current_user.id)
     return {"count": count}
 
-@app.post("/notificacoes/{notificacao_id}/marcar-como-lida", status_code=status.HTTP_200_OK, tags=["Notificações"])
-def marcar_como_lida(
-    notificacao_id: str,
-    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
-    db: firestore.client = Depends(get_db)
-):
-    """(Autenticado) Marca uma notificação como lida."""
-    if not crud.marcar_notificacao_como_lida(db, current_user.id, notificacao_id):
-        raise HTTPException(status_code=404, detail="Notificação não encontrada ou não pertence ao usuário.")
-    return {"message": "Notificação marcada como lida."}
-
 # =================================================================================
 # ENDPOINTS DE USUÁRIOS E AUTENTICAÇÃO
 # =================================================================================
@@ -403,7 +392,27 @@ def sync_user_profile(
     Sincroniza os dados do usuário do Firebase Auth com o Firestore.
     Cria um perfil de usuário no banco de dados na primeira vez que ele faz login.
     """
-    return crud.criar_ou_atualizar_usuario(db, user_data)
+    user_profile = crud.criar_ou_atualizar_usuario(db, user_data)
+    
+    # Verifica se o usuário foi promovido a admin
+    if user_data.codigo_convite and user_profile:
+        negocio_id = user_profile.get('roles', {}).keys()
+        if negocio_id:
+            negocio_id = list(negocio_id)[0]
+            if user_profile['roles'].get(negocio_id) == "admin":
+                # Se for admin, cria o perfil de profissional
+                profissional_data = schemas.ProfissionalCreate(
+                    negocio_id=negocio_id,
+                    usuario_uid=user_profile['firebase_uid'],
+                    nome=user_profile['nome'],
+                    especialidades="A definir",
+                    ativo=True,
+                    fotos={}
+                )
+                crud.criar_profissional(db, profissional_data)
+                logger.info(f"Perfil profissional criado para o novo admin: {user_profile['email']}")
+
+    return user_profile
 
 @app.get("/me/profile", response_model=schemas.UsuarioProfile, tags=["Usuários"])
 def get_me_profile(current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase)):
