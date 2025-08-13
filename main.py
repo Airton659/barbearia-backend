@@ -6,7 +6,7 @@ import schemas, crud
 import logging
 from datetime import date
 from database import initialize_firebase_app, get_db
-from auth import get_current_user_firebase, get_super_admin_user, get_current_admin_user, get_current_profissional_user
+from auth import get_current_user_firebase, get_super_admin_user, get_current_admin_user, get_current_profissional_user, get_optional_current_user_firebase
 from firebase_admin import firestore
 from pydantic import BaseModel
 from google.cloud import storage
@@ -275,10 +275,12 @@ def criar_postagem(
 @app.get("/feed", response_model=List[schemas.PostagemResponse], tags=["Feed e Interações"])
 def get_feed(
     negocio_id: str,
-    db: firestore.client = Depends(get_db)
+    db: firestore.client = Depends(get_db),
+    current_user: Optional[schemas.UsuarioProfile] = Depends(get_optional_current_user_firebase)
 ):
     """(Público) Retorna o feed de postagens de um negócio específico."""
-    return crud.listar_feed_por_negocio(db, negocio_id)
+    user_id = current_user.id if current_user else None
+    return crud.listar_feed_por_negocio(db, negocio_id, user_id)
 
 @app.post("/postagens/{postagem_id}/curtir", tags=["Feed e Interações"])
 def curtir_postagem(
@@ -341,7 +343,7 @@ def deletar_comentario(
 # ENDPOINTS DE AVALIAÇÕES
 # =================================================================================
 
-@app.post("/avaliacoes", response_model=schemas.AvaliacaoResponse, status_code=status.HTTP_201_CREATED, tags=["Avaliações"])
+@app.post("/avaliacoes", response_model=schemas.AvaliacoResponse, status_code=status.HTTP_201_CREATED, tags=["Avaliações"])
 def criar_avaliacao(
     avaliacao_data: schemas.AvaliacaoCreate,
     current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),

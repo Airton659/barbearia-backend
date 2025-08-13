@@ -156,6 +156,7 @@ class PostagemResponse(PostagemCreate):
     # Contadores podem ser atualizados via transações ou functions
     total_curtidas: int = 0
     total_comentarios: int = 0
+    curtido_pelo_usuario: bool = Field(False, description="Indica se o usuário autenticado curtiu esta postagem.")
 
 # --- Comentários ---
 class ComentarioCreate(BaseModel):

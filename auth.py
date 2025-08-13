@@ -9,13 +9,18 @@ from database import get_db
 from typing import Optional
 
 # O OAuth2PasswordBearer ainda pode ser útil para a documentação interativa (botão "Authorize")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False) # auto_error=False é importante para dependências opcionais
 
 def get_current_user_firebase(token: str = Depends(oauth2_scheme), db = Depends(get_db)) -> schemas.UsuarioProfile:
     """
     Decodifica o ID Token do Firebase, busca o usuário correspondente no Firestore
     e retorna seu perfil como um schema Pydantic.
     """
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token de autenticação não fornecido."
+        )
     try:
         decoded_token = auth.verify_id_token(token)
         firebase_uid = decoded_token['uid']
@@ -103,3 +108,20 @@ def get_current_profissional_user(
             detail="Acesso negado: você não é um profissional deste negócio."
         )
     return current_user
+
+def get_optional_current_user_firebase(
+    token: Optional[str] = Depends(oauth2_scheme), db = Depends(get_db)
+) -> Optional[schemas.UsuarioProfile]:
+    """
+    Tenta obter o usuário atual se um token for fornecido, mas não lança erro se não for.
+    Retorna o perfil do usuário ou None.
+    """
+    if not token:
+        return None
+    try:
+        # Reutiliza a lógica principal de obtenção e enriquecimento do usuário
+        return get_current_user_firebase(token, db)
+    except HTTPException:
+        # Se get_current_user_firebase lançar uma exceção (token inválido/expirado, etc.),
+        # nós a capturamos e retornamos None, tratando o usuário como anônimo.
+        return None
