@@ -675,6 +675,19 @@ def criar_postagem(db: firestore.client, postagem_data: schemas.PostagemCreate, 
     post_dict['id'] = doc_ref.id
     return post_dict
 
+def listar_postagens_por_profissional(db: firestore.client, profissional_id: str) -> List[Dict]:
+    """Lista todas as postagens de um profissional específico para seu portfólio."""
+    postagens = []
+    query = db.collection('postagens')\
+        .where('profissional_id', '==', profissional_id)\
+        .order_by('data_postagem', direction=firestore.Query.DESCENDING)
+        
+    for doc in query.stream():
+        post_data = doc.to_dict()
+        post_data['id'] = doc.id
+        postagens.append(post_data)
+    return postagens
+
 def listar_feed_por_negocio(db: firestore.client, negocio_id: str, user_id: Optional[str] = None) -> List[Dict]:
     """Lista o feed de postagens de um negócio específico."""
     postagens = []

@@ -478,6 +478,9 @@ def get_profissional_details(
     servicos = crud.listar_servicos_por_profissional(db, profissional_id)
     profissional['servicos'] = servicos
     
+    postagens = crud.listar_postagens_por_profissional(db, profissional_id)
+    profissional['postagens'] = postagens
+    
     return profissional
 
 # =================================================================================

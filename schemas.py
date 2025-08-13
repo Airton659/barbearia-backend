@@ -73,6 +73,7 @@ class ProfissionalResponse(ProfissionalBase):
     id: str = Field(..., description="ID do documento do profissional no Firestore.")
     # Adicionamos os serviços aqui para carregar o perfil completo de um profissional
     servicos: List['ServicoResponse'] = []
+    postagens: List['PostagemResponse'] = []
 
 class ProfissionalUpdate(BaseModel):
     especialidades: Optional[str] = None
