@@ -633,12 +633,26 @@ def listar_feed_por_negocio(db: firestore.client, negocio_id: str, user_id: Opti
         .where('negocio_id', '==', negocio_id)\
         .order_by('data_postagem', direction=firestore.Query.DESCENDING)
         
+    # Cache para perfis de profissionais já buscados, para evitar múltiplas leituras do mesmo perfil
+    perfis_profissionais_cache = {}
+
     for doc in query.stream():
         post_data = doc.to_dict()
         post_data['id'] = doc.id
         
-        post_data['curtido_pelo_usuario'] = False
+        # --- INÍCIO DA CORREÇÃO ---
+        profissional_id = post_data.get('profissional_id')
+        if profissional_id in perfis_profissionais_cache:
+            perfil_profissional = perfis_profissionais_cache[profissional_id]
+        else:
+            perfil_profissional = buscar_profissional_por_id(db, profissional_id)
+            perfis_profissionais_cache[profissional_id] = perfil_profissional
         
+        if perfil_profissional:
+            post_data['profissional_foto_thumbnail'] = perfil_profissional.get('fotos', {}).get('thumbnail')
+        # --- FIM DA CORREÇÃO ---
+
+        post_data['curtido_pelo_usuario'] = False
         if user_id:
             curtida_ref = db.collection('postagens').document(doc.id).collection('curtidas').document(user_id)
             if curtida_ref.get().exists:
