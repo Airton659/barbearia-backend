@@ -73,6 +73,15 @@ def admin_listar_negocios(
 # ENDPOINTS DE GERENCIAMENTO DO NEGÓCIO (ADMIN DE NEGÓCIO)
 # =================================================================================
 
+@app.get("/negocios/{negocio_id}/usuarios", response_model=List[schemas.UsuarioProfile], tags=["Admin - Gestão do Negócio"])
+def listar_usuarios_do_negocio(
+    negocio_id: str = Path(..., description="ID do negócio a ser gerenciado."),
+    admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin de Negócio) Lista todos os usuários (clientes e profissionais) do seu negócio."""
+    return crud.admin_listar_usuarios_por_negocio(db, negocio_id)
+
 @app.get("/negocios/{negocio_id}/clientes", response_model=List[schemas.UsuarioProfile], tags=["Admin - Gestão do Negócio"])
 def listar_clientes_do_negocio(
     negocio_id: str = Path(..., description="ID do negócio a ser gerenciado."),

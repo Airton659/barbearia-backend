@@ -156,6 +156,21 @@ def admin_listar_negocios(db: firestore.client) -> List[Dict]:
 # FUNÇÕES DE ADMINISTRAÇÃO DO NEGÓCIO (ADMIN DE NEGÓCIO)
 # =================================================================================
 
+def admin_listar_usuarios_por_negocio(db: firestore.client, negocio_id: str) -> List[Dict]:
+    """Lista todos os usuários (clientes e profissionais) de um negócio específico."""
+    usuarios = []
+    try:
+        # Consulta por todos os papéis válidos dentro de um negócio
+        query = db.collection('usuarios').where(f'roles.{negocio_id}', 'in', ['cliente', 'profissional', 'admin'])
+        for doc in query.stream():
+            usuario_data = doc.to_dict()
+            usuario_data['id'] = doc.id
+            usuarios.append(usuario_data)
+        return usuarios
+    except Exception as e:
+        logger.error(f"Erro ao listar usuários para o negocio_id {negocio_id}: {e}")
+        return []
+
 def admin_listar_clientes_por_negocio(db: firestore.client, negocio_id: str) -> List[Dict]:
     """Lista todos os usuários com o papel de 'cliente' para um negócio específico."""
     clientes = []
