@@ -543,6 +543,32 @@ def criar_agendamento(db: firestore.client, agendamento_data: schemas.Agendament
     doc_ref.set(agendamento_dict)
     
     agendamento_dict['id'] = doc_ref.id
+    
+    # --- INÍCIO DA LÓGICA DE NOTIFICAÇÃO ---
+    prof_user = buscar_usuario_por_firebase_uid(db, profissional['usuario_uid'])
+    if prof_user and prof_user.get('fcm_tokens'):
+        data_formatada = agendamento_data.data_hora.strftime('%d/%m/%Y')
+        hora_formatada = agendamento_data.data_hora.strftime('%H:%M')
+        mensagem_body = f"Você tem um novo agendamento com {cliente.nome} para o dia {data_formatada} às {hora_formatada}."
+        
+        message = messaging.MulticastMessage(
+            notification=messaging.Notification(
+                title="Novo Agendamento!",
+                body=mensagem_body,
+            ),
+            data={
+                "tipo": "NOVO_AGENDAMENTO",
+                "agendamento_id": doc_ref.id
+            },
+            tokens=prof_user['fcm_tokens']
+        )
+        try:
+            messaging.send_multicast(message)
+            logger.info(f"Notificação de novo agendamento enviada para o profissional {profissional['id']}.")
+        except Exception as e:
+            logger.error(f"Erro ao enviar notificação de novo agendamento: {e}")
+    # --- FIM DA LÓGICA DE NOTIFICAÇÃO ---
+
     return agendamento_dict
 
 
