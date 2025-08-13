@@ -343,7 +343,7 @@ def deletar_comentario(
 # ENDPOINTS DE AVALIAÇÕES
 # =================================================================================
 
-@app.post("/avaliacoes", response_model=schemas.AvaliacoResponse, status_code=status.HTTP_201_CREATED, tags=["Avaliações"])
+@app.post("/avaliacoes", response_model=schemas.AvaliacaoResponse, status_code=status.HTTP_201_CREATED, tags=["Avaliações"])
 def criar_avaliacao(
     avaliacao_data: schemas.AvaliacaoCreate,
     current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
