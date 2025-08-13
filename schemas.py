@@ -74,6 +74,7 @@ class ProfissionalResponse(ProfissionalBase):
     # Adicionamos os serviços aqui para carregar o perfil completo de um profissional
     servicos: List['ServicoResponse'] = []
     postagens: List['PostagemResponse'] = []
+    avaliacoes: List['AvaliacaoResponse'] = []
 
 class ProfissionalUpdate(BaseModel):
     especialidades: Optional[str] = None
