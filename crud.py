@@ -602,6 +602,7 @@ def cancelar_agendamento(db: firestore.client, agendamento_id: str, cliente_id: 
                 },
                 tokens=prof_user['fcm_tokens']
             )
+
             try:
                 messaging.send_multicast(message)
                 logger.info(f"Notificação de cancelamento enviada para o profissional: {profissional['id']}")
