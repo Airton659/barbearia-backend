@@ -552,11 +552,9 @@ def criar_agendamento(db: firestore.client, agendamento_data: schemas.Agendament
         mensagem_body = f"Você tem um novo agendamento com {cliente.nome} para o dia {data_formatada} às {hora_formatada}."
         
         message = messaging.MulticastMessage(
-            notification=messaging.Notification(
-                title="Novo Agendamento!",
-                body=mensagem_body,
-            ),
             data={
+                "title": "Novo Agendamento!",
+                "body": mensagem_body,
                 "tipo": "NOVO_AGENDAMENTO",
                 "agendamento_id": doc_ref.id
             },
@@ -596,21 +594,19 @@ def cancelar_agendamento(db: firestore.client, agendamento_id: str, cliente_id: 
             hora_formatada = agendamento['data_hora'].strftime('%H:%M')
             mensagem_body = f"O cliente {agendamento['cliente_nome']} cancelou o horário das {hora_formatada} do dia {data_formatada}."
 
-            message = messaging.Message(
+            message = messaging.MulticastMessage(
                 data={
                     "title": "Agendamento Cancelado",
                     "body": mensagem_body,
                     "tipo": "AGENDAMENTO_CANCELADO_CLIENTE"
-                }
+                },
+                tokens=prof_user['fcm_tokens']
             )
-
-            for token in prof_user['fcm_tokens']:
-                message.token = token
-                try:
-                    Messaging(message)
-                    logger.info(f"Notificação de cancelamento enviada para o token do profissional: {token}")
-                except Exception as e:
-                    logger.error(f"Erro ao enviar notificação de cancelamento para o token {token}: {e}")
+            try:
+                messaging.send_multicast(message)
+                logger.info(f"Notificação de cancelamento enviada para o profissional: {profissional['id']}")
+            except Exception as e:
+                logger.error(f"Erro ao enviar notificação de cancelamento para o profissional {profissional['id']}: {e}")
 
     agendamento_ref.delete()
     return agendamento
@@ -641,20 +637,19 @@ def cancelar_agendamento_pelo_profissional(db: firestore.client, agendamento_id:
             data_formatada = agendamento['data_hora'].strftime('%d/%m/%Y às %H:%M')
             mensagem_body = f"Seu agendamento com {agendamento['profissional_nome']} para {data_formatada} foi cancelado."
 
-            message = messaging.Message(
+            message = messaging.MulticastMessage(
                 data={
                     "title": "Agendamento Cancelado",
                     "body": mensagem_body,
                     "tipo": "AGENDAMENTO_CANCELADO"
-                }
+                },
+                tokens=cliente_data['fcm_tokens']
             )
-            for token in cliente_data['fcm_tokens']:
-                message.token = token
-                try:
-                    Messaging(message)
-                    logger.info(f"Notificação de cancelamento (pelo profissional) enviada para o cliente: {token}")
-                except Exception as e:
-                    logger.error(f"Erro ao enviar notificação para o cliente {agendamento['cliente_id']}: {e}")
+            try:
+                messaging.send_multicast(message)
+                logger.info(f"Notificação de cancelamento (pelo profissional) enviada para o cliente: {agendamento['cliente_id']}")
+            except Exception as e:
+                logger.error(f"Erro ao enviar notificação para o cliente {agendamento['cliente_id']}: {e}")
 
     return agendamento
 
