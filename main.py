@@ -95,6 +95,19 @@ def promover_cliente(
         raise HTTPException(status_code=404, detail="Usuário não encontrado ou não é um cliente deste negócio.")
     return usuario_promovido
 
+@app.post("/negocios/{negocio_id}/rebaixar", response_model=schemas.UsuarioProfile, tags=["Admin - Gestão do Negócio"])
+def rebaixar_profissional(
+    request_body: PromoteRequest,
+    negocio_id: str = Path(..., description="ID do negócio onde o rebaixamento ocorrerá."),
+    admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin de Negócio) Rebaixa um usuário de 'profissional' para 'cliente'."""
+    usuario_rebaixado = crud.admin_rebaixar_profissional_para_cliente(db, negocio_id, request_body.firebase_uid)
+    if not usuario_rebaixado:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado ou não é um profissional deste negócio.")
+    return usuario_rebaixado
+
 # =================================================================================
 # ENDPOINTS DE AUTOGESTÃO DO PROFISSIONAL
 # =================================================================================

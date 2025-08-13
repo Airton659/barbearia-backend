@@ -210,6 +210,40 @@ def admin_promover_cliente_para_profissional(db: firestore.client, negocio_id: s
         logger.error(f"Erro ao promover cliente {cliente_uid} para profissional: {e}")
         return None
 
+def admin_rebaixar_profissional_para_cliente(db: firestore.client, negocio_id: str, profissional_uid: str) -> Optional[Dict]:
+    """
+    Rebaixa um usuário de 'profissional' para 'cliente' e desativa seu perfil profissional.
+    """
+    try:
+        user_doc = buscar_usuario_por_firebase_uid(db, profissional_uid)
+        if not user_doc:
+            logger.warning(f"Tentativa de rebaixar usuário inexistente com UID: {profissional_uid}")
+            return None
+
+        if user_doc.get("roles", {}).get(negocio_id) == 'profissional':
+            # 1. Atualiza a permissão do usuário
+            user_ref = db.collection('usuarios').document(user_doc['id'])
+            user_ref.update({
+                f'roles.{negocio_id}': 'cliente'
+            })
+            
+            # 2. Desativa o perfil profissional
+            perfil_profissional = buscar_profissional_por_uid(db, negocio_id, profissional_uid)
+            if perfil_profissional:
+                prof_ref = db.collection('profissionais').document(perfil_profissional['id'])
+                prof_ref.update({"ativo": False})
+
+            logger.info(f"Usuário {user_doc['email']} rebaixado para cliente no negócio {negocio_id}.")
+            
+            # Retorna os dados atualizados do usuário
+            return buscar_usuario_por_firebase_uid(db, profissional_uid)
+        else:
+            logger.warning(f"Usuário {user_doc.get('email')} não é um profissional deste negócio e não pode ser rebaixado.")
+            return None
+    except Exception as e:
+        logger.error(f"Erro ao rebaixar profissional {profissional_uid}: {e}")
+        return None
+
 # =================================================================================
 # FUNÇÕES DE PROFISSIONAIS E AUTOGESTÃO
 # =================================================================================
