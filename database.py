@@ -37,6 +37,9 @@ def initialize_firebase_app():
             payload = response.payload.data.decode("UTF-8")
             cred_json = json.loads(payload)
 
+            # --- LINHA DE DEPURAÇÃO ADICIONADA ---
+            print(f"DEBUG: Projeto ID lido das credenciais: {cred_json.get('project_id')}")
+
             # Inicializa o Firebase com as credenciais
             cred = credentials.Certificate(cred_json)
             firebase_admin.initialize_app(cred, {
