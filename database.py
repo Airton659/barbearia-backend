@@ -39,7 +39,9 @@ def initialize_firebase_app():
 
             # Inicializa o Firebase com as credenciais
             cred = credentials.Certificate(cred_json)
-            firebase_admin.initialize_app(cred)
+            firebase_admin.initialize_app(cred, {
+                'projectId': project_id,
+            })
             
             print("Firebase Admin SDK inicializado com sucesso.")
 
