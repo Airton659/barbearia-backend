@@ -698,7 +698,8 @@ def cancelar_agendamento_pelo_profissional(db: firestore.client, agendamento_id:
                 )
             except Exception as e:
                 logger.error(f"Erro ao enviar notificação para o cliente {agendamento['cliente_id']}: {e}")
-
+    
+    agendamento['id'] = agendamento_id
     return agendamento
 
 
