@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime, time
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 # =================================================================================
 # NOVOS SCHEMAS CENTRAIS (A BASE DA ARQUITETURA MULTI-TENANT)
@@ -188,7 +188,7 @@ class AvaliacaoResponse(AvaliacaoCreate):
     cliente_nome: str
 
 # =================================================================================
-# SCHEMAS DE DISPONIBILIDADE (Horários e Bloqueios)
+# SCHEMAS DE DISPONIBILIDADE (HORÁRIOS E BLOQUEIOS)
 # =================================================================================
 
 class HorarioTrabalho(BaseModel):
@@ -207,11 +207,12 @@ class Bloqueio(BaseModel):
 
 class NotificacaoResponse(BaseModel):
     id: str
-    mensagem: str
+    title: str
+    body: str
     lida: bool
     data_criacao: datetime
     tipo: Optional[str] = None
-    referencia_id: Optional[str] = None
+    relacionado: Optional[Dict[str, str]] = None
 
 class NotificacaoContagemResponse(BaseModel):
     count: int
