@@ -655,26 +655,48 @@ def cancelar_agendamento(db: firestore.client, agendamento_id: str, cliente_id: 
     profissional = buscar_profissional_por_id(db, agendamento['profissional_id'])
     if profissional:
         prof_user = buscar_usuario_por_firebase_uid(db, profissional['usuario_uid'])
-        if prof_user and prof_user.get('fcm_tokens'):
+        if prof_user:
             data_formatada = agendamento['data_hora'].strftime('%d/%m')
             hora_formatada = agendamento['data_hora'].strftime('%H:%M')
             mensagem_body = f"O cliente {agendamento['cliente_nome']} cancelou o horário das {hora_formatada} do dia {data_formatada}."
 
-            data_payload = {
-                "title": "Agendamento Cancelado",
-                "body": mensagem_body,
-                "tipo": "AGENDAMENTO_CANCELADO_CLIENTE"
-            }
+            # 1. Persistir a notificação no Firestore
             try:
-                _send_data_push_to_tokens(
-                    db=db,
-                    firebase_uid_destinatario=profissional['usuario_uid'],
-                    tokens=prof_user['fcm_tokens'],
-                    data_dict=data_payload,
-                    logger_prefix="[Cancelamento pelo cliente] "
-                )
+                notificacao_id = f"AGENDAMENTO_CANCELADO_CLIENTE:{agendamento_id}"
+                dedupe_key = notificacao_id
+                
+                notificacao_doc_ref = db.collection('usuarios').document(prof_user['id']).collection('notificacoes').document(notificacao_id)
+                
+                notificacao_doc_ref.set({
+                    "title": "Agendamento Cancelado",
+                    "body": mensagem_body,
+                    "tipo": "AGENDAMENTO_CANCELADO_CLIENTE",
+                    "relacionado": { "agendamento_id": agendamento_id },
+                    "lida": False,
+                    "data_criacao": firestore.SERVER_TIMESTAMP,
+                    "dedupe_key": dedupe_key
+                })
+                logger.info(f"Notificação de cancelamento pelo cliente PERSISTIDA para o profissional {profissional['id']}.")
             except Exception as e:
-                logger.error(f"Erro ao enviar notificação de cancelamento para o profissional {profissional['id']}: {e}")
+                logger.error(f"Erro ao PERSISTIR notificação de cancelamento pelo cliente: {e}")
+
+            # 2. Enviar a notificação via FCM, se houver tokens
+            if prof_user.get('fcm_tokens'):
+                data_payload = {
+                    "title": "Agendamento Cancelado",
+                    "body": mensagem_body,
+                    "tipo": "AGENDAMENTO_CANCELADO_CLIENTE"
+                }
+                try:
+                    _send_data_push_to_tokens(
+                        db=db,
+                        firebase_uid_destinatario=profissional['usuario_uid'],
+                        tokens=prof_user['fcm_tokens'],
+                        data_dict=data_payload,
+                        logger_prefix="[Cancelamento pelo cliente] "
+                    )
+                except Exception as e:
+                    logger.error(f"Erro ao ENVIAR notificação de cancelamento para o profissional {profissional['id']}: {e}")
 
     agendamento_ref.delete()
     return agendamento
@@ -701,10 +723,31 @@ def cancelar_agendamento_pelo_profissional(db: firestore.client, agendamento_id:
     cliente_doc = db.collection('usuarios').document(agendamento['cliente_id']).get()
     if cliente_doc.exists:
         cliente_data = cliente_doc.to_dict()
-        if cliente_data.get('fcm_tokens'):
-            data_formatada = agendamento['data_hora'].strftime('%d/%m/%Y às %H:%M')
-            mensagem_body = f"Seu agendamento com {agendamento['profissional_nome']} para {data_formatada} foi cancelado."
+        data_formatada = agendamento['data_hora'].strftime('%d/%m/%Y às %H:%M')
+        mensagem_body = f"Seu agendamento com {agendamento['profissional_nome']} para {data_formatada} foi cancelado."
 
+        # 1. Persistir a notificação no Firestore
+        try:
+            notificacao_id = f"AGENDAMENTO_CANCELADO:{agendamento_id}"
+            dedupe_key = notificacao_id
+            
+            notificacao_doc_ref = db.collection('usuarios').document(cliente_data['id']).collection('notificacoes').document(notificacao_id)
+            
+            notificacao_doc_ref.set({
+                "title": "Agendamento Cancelado",
+                "body": mensagem_body,
+                "tipo": "AGENDAMENTO_CANCELADO",
+                "relacionado": { "agendamento_id": agendamento_id },
+                "lida": False,
+                "data_criacao": firestore.SERVER_TIMESTAMP,
+                "dedupe_key": dedupe_key
+            })
+            logger.info(f"Notificação de cancelamento pelo profissional PERSISTIDA para o cliente {agendamento['cliente_id']}.")
+        except Exception as e:
+            logger.error(f"Erro ao PERSISTIR notificação de cancelamento pelo profissional: {e}")
+
+        # 2. Enviar a notificação via FCM, se houver tokens
+        if cliente_data.get('fcm_tokens'):
             data_payload = {
                 "title": "Agendamento Cancelado",
                 "body": mensagem_body,
@@ -719,7 +762,7 @@ def cancelar_agendamento_pelo_profissional(db: firestore.client, agendamento_id:
                     logger_prefix="[Cancelamento pelo profissional] "
                 )
             except Exception as e:
-                logger.error(f"Erro ao enviar notificação para o cliente {agendamento['cliente_id']}: {e}")
+                logger.error(f"Erro ao ENVIAR notificação para o cliente {agendamento['cliente_id']}: {e}")
     
     agendamento['id'] = agendamento_id
     return agendamento
