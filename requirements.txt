@@ -2,7 +2,7 @@ fastapi==0.111.0
 uvicorn==0.29.0
 python-dotenv==1.0.1
 pydantic[email]==2.7.1
-firebase-admin==6.4.0
+firebase-admin >=6.5.0
 google-cloud-secret-manager
 Pillow==10.3.0
 python-multipart==0.0.9

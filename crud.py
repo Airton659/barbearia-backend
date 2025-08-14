@@ -1,11 +1,11 @@
-# barbearia-backend/crud.py (Versão Corrigida)
+# barbearia-backend/crud.py
 
 import schemas
 from datetime import datetime, date, time, timedelta
 from typing import Optional, List, Dict
 from firebase_admin import firestore, messaging
 import logging
-import secrets 
+import secrets
 
 # Setup do logger para este módulo
 logger = logging.getLogger(__name__)
@@ -510,6 +510,48 @@ def calcular_horarios_disponiveis(db: firestore.client, profissional_id: str, di
     return horarios_finais
 
 # =================================================================================
+# HELPER: envio FCM unitário por token (sem /batch)
+# =================================================================================
+
+def _send_data_push_to_tokens(
+    db: firestore.client,
+    firebase_uid_destinatario: str,
+    tokens: List[str],
+    data_dict: Dict[str, str],
+    logger_prefix: str = ""
+) -> None:
+    """
+    Envia mensagens data-only usando messaging.send(...) por token.
+    Remove tokens inválidos (Unregistered) do usuário.
+    """
+    successes = 0
+    failures = 0
+
+    for t in list(tokens or []):
+        try:
+            messaging.send(messaging.Message(data=data_dict, token=t))
+            successes += 1
+        except Exception as e:
+            failures += 1
+            logger.error(f"{logger_prefix}Erro no token {t[:12]}…: {e}")
+            msg = str(e)
+            # Heurísticas comuns do Admin SDK para token inválido
+            if any(s in msg for s in [
+                "Unregistered",                        # Android/iOS
+                "NotRegistered",                       # variação
+                "requested entity was not found",      # inglês minúsculo em algumas libs
+                "Requested entity was not found",      # inglês capitalizado
+                "registration-token-not-registered"    # mensagem do FCM
+            ]):
+                try:
+                    remover_fcm_token(db, firebase_uid_destinatario, t)
+                    logger.info(f"{logger_prefix}Token inválido removido do usuário {firebase_uid_destinatario}.")
+                except Exception as rem_err:
+                    logger.error(f"{logger_prefix}Falha ao remover token inválido: {rem_err}")
+
+    logger.info(f"{logger_prefix}Envio FCM concluído: sucesso={successes} falhas={failures}")
+
+# =================================================================================
 # FUNÇÕES DE AGENDAMENTOS
 # =================================================================================
 
@@ -551,18 +593,20 @@ def criar_agendamento(db: firestore.client, agendamento_data: schemas.Agendament
         hora_formatada = agendamento_data.data_hora.strftime('%H:%M')
         mensagem_body = f"Você tem um novo agendamento com {cliente.nome} para o dia {data_formatada} às {hora_formatada}."
         
-        message = messaging.MulticastMessage(
-            data={
-                "title": "Novo Agendamento!",
-                "body": mensagem_body,
-                "tipo": "NOVO_AGENDAMENTO",
-                "agendamento_id": doc_ref.id
-            },
-            tokens=prof_user['fcm_tokens']
-        )
+        data_payload = {
+            "title": "Novo Agendamento!",
+            "body": mensagem_body,
+            "tipo": "NOVO_AGENDAMENTO",
+            "agendamento_id": doc_ref.id
+        }
         try:
-            messaging.send_multicast(message)
-            logger.info(f"Notificação de novo agendamento enviada para o profissional {profissional['id']}.")
+            _send_data_push_to_tokens(
+                db=db,
+                firebase_uid_destinatario=profissional['usuario_uid'],
+                tokens=prof_user['fcm_tokens'],
+                data_dict=data_payload,
+                logger_prefix="[Novo agendamento] "
+            )
         except Exception as e:
             logger.error(f"Erro ao enviar notificação de novo agendamento: {e}")
     # --- FIM DA LÓGICA DE NOTIFICAÇÃO ---
@@ -594,18 +638,19 @@ def cancelar_agendamento(db: firestore.client, agendamento_id: str, cliente_id: 
             hora_formatada = agendamento['data_hora'].strftime('%H:%M')
             mensagem_body = f"O cliente {agendamento['cliente_nome']} cancelou o horário das {hora_formatada} do dia {data_formatada}."
 
-            message = messaging.MulticastMessage(
-                data={
-                    "title": "Agendamento Cancelado",
-                    "body": mensagem_body,
-                    "tipo": "AGENDAMENTO_CANCELADO_CLIENTE"
-                },
-                tokens=prof_user['fcm_tokens']
-            )
-
+            data_payload = {
+                "title": "Agendamento Cancelado",
+                "body": mensagem_body,
+                "tipo": "AGENDAMENTO_CANCELADO_CLIENTE"
+            }
             try:
-                messaging.send_multicast(message)
-                logger.info(f"Notificação de cancelamento enviada para o profissional: {profissional['id']}")
+                _send_data_push_to_tokens(
+                    db=db,
+                    firebase_uid_destinatario=profissional['usuario_uid'],
+                    tokens=prof_user['fcm_tokens'],
+                    data_dict=data_payload,
+                    logger_prefix="[Cancelamento pelo cliente] "
+                )
             except Exception as e:
                 logger.error(f"Erro ao enviar notificação de cancelamento para o profissional {profissional['id']}: {e}")
 
@@ -626,7 +671,7 @@ def cancelar_agendamento_pelo_profissional(db: firestore.client, agendamento_id:
     agendamento = agendamento_doc.to_dict()
 
     if agendamento.get('profissional_id') != profissional_id:
-        return None # Profissional não autorizado
+        return None  # Profissional não autorizado
 
     agendamento_ref.update({"status": "cancelado_pelo_profissional"})
     agendamento["status"] = "cancelado_pelo_profissional"
@@ -638,17 +683,19 @@ def cancelar_agendamento_pelo_profissional(db: firestore.client, agendamento_id:
             data_formatada = agendamento['data_hora'].strftime('%d/%m/%Y às %H:%M')
             mensagem_body = f"Seu agendamento com {agendamento['profissional_nome']} para {data_formatada} foi cancelado."
 
-            message = messaging.MulticastMessage(
-                data={
-                    "title": "Agendamento Cancelado",
-                    "body": mensagem_body,
-                    "tipo": "AGENDAMENTO_CANCELADO"
-                },
-                tokens=cliente_data['fcm_tokens']
-            )
+            data_payload = {
+                "title": "Agendamento Cancelado",
+                "body": mensagem_body,
+                "tipo": "AGENDAMENTO_CANCELADO"
+            }
             try:
-                messaging.send_multicast(message)
-                logger.info(f"Notificação de cancelamento (pelo profissional) enviada para o cliente: {agendamento['cliente_id']}")
+                _send_data_push_to_tokens(
+                    db=db,
+                    firebase_uid_destinatario=cliente_data.get('firebase_uid'),
+                    tokens=cliente_data['fcm_tokens'],
+                    data_dict=data_payload,
+                    logger_prefix="[Cancelamento pelo profissional] "
+                )
             except Exception as e:
                 logger.error(f"Erro ao enviar notificação para o cliente {agendamento['cliente_id']}: {e}")
 
@@ -759,13 +806,13 @@ def toggle_curtida(db: firestore.client, postagem_id: str, user_id: str) -> bool
             transaction.update(post_reference, {
                 'total_curtidas': firestore.Increment(-1)
             })
-            return False # Descurtiu
+            return False  # Descurtiu
         else:
             transaction.set(curtida_reference, {'data': datetime.utcnow()})
             transaction.update(post_reference, {
                 'total_curtidas': firestore.Increment(1)
             })
-            return True # Curtiu
+            return True  # Curtiu
 
     transaction = db.transaction()
     return update_in_transaction(transaction, post_ref, curtida_ref, curtida_doc.exists)
@@ -908,7 +955,7 @@ def marcar_notificacao_como_lida(db: firestore.client, usuario_id: str, notifica
         if notificacao_ref.get().exists:
             notificacao_ref.update({'lida': True})
             return True
-        return False # Notificação não encontrada
+        return False  # Notificação não encontrada
     except Exception as e:
         logger.error(f"Erro ao marcar notificação {notificacao_id} como lida: {e}")
         return False
