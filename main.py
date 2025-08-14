@@ -403,6 +403,15 @@ def get_contagem_notificacoes_nao_lidas(
     count = crud.contar_notificacoes_nao_lidas(db, current_user.id)
     return {"count": count}
 
+@app.post("/notificacoes/ler-todas", status_code=status.HTTP_204_NO_CONTENT, tags=["Notificações"])
+def marcar_todas_como_lidas(
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db: firestore.client = Depends(get_db)
+):
+    """(Autenticado) Marca todas as notificações do usuário como lidas."""
+    crud.marcar_todas_como_lidas(db, current_user.id)
+    return
+
 # =================================================================================
 # ENDPOINTS DE USUÁRIOS E AUTENTICAÇÃO
 # =================================================================================
