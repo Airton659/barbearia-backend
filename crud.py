@@ -588,27 +588,49 @@ def criar_agendamento(db: firestore.client, agendamento_data: schemas.Agendament
     
     # --- INÍCIO DA LÓGICA DE NOTIFICAÇÃO ---
     prof_user = buscar_usuario_por_firebase_uid(db, profissional['usuario_uid'])
-    if prof_user and prof_user.get('fcm_tokens'):
+    if prof_user: # Verifica se o usuário profissional existe
         data_formatada = agendamento_data.data_hora.strftime('%d/%m/%Y')
         hora_formatada = agendamento_data.data_hora.strftime('%H:%M')
         mensagem_body = f"Você tem um novo agendamento com {cliente.nome} para o dia {data_formatada} às {hora_formatada}."
         
-        data_payload = {
-            "title": "Novo Agendamento!",
-            "body": mensagem_body,
-            "tipo": "NOVO_AGENDAMENTO",
-            "agendamento_id": doc_ref.id
-        }
+        # 1. Persistir a notificação no Firestore
         try:
-            _send_data_push_to_tokens(
-                db=db,
-                firebase_uid_destinatario=profissional['usuario_uid'],
-                tokens=prof_user['fcm_tokens'],
-                data_dict=data_payload,
-                logger_prefix="[Novo agendamento] "
-            )
+            notificacao_id = f"NOVO_AGENDAMENTO:{doc_ref.id}"
+            dedupe_key = notificacao_id
+            
+            notificacao_doc_ref = db.collection('usuarios').document(prof_user['id']).collection('notificacoes').document(notificacao_id)
+            
+            notificacao_doc_ref.set({
+                "title": "Novo Agendamento!",
+                "body": mensagem_body,
+                "tipo": "NOVO_AGENDAMENTO",
+                "relacionado": { "agendamento_id": doc_ref.id },
+                "lida": False,
+                "data_criacao": firestore.SERVER_TIMESTAMP,
+                "dedupe_key": dedupe_key
+            })
+            logger.info(f"Notificação de novo agendamento PERSISTIDA para o profissional {profissional['id']}.")
         except Exception as e:
-            logger.error(f"Erro ao enviar notificação de novo agendamento: {e}")
+            logger.error(f"Erro ao PERSISTIR notificação de novo agendamento: {e}")
+
+        # 2. Enviar a notificação via FCM, se houver tokens
+        if prof_user.get('fcm_tokens'):
+            data_payload = {
+                "title": "Novo Agendamento!",
+                "body": mensagem_body,
+                "tipo": "NOVO_AGENDAMENTO",
+                "agendamento_id": doc_ref.id
+            }
+            try:
+                _send_data_push_to_tokens(
+                    db=db,
+                    firebase_uid_destinatario=profissional['usuario_uid'],
+                    tokens=prof_user['fcm_tokens'],
+                    data_dict=data_payload,
+                    logger_prefix="[Novo agendamento] "
+                )
+            except Exception as e:
+                logger.error(f"Erro ao ENVIAR notificação de novo agendamento: {e}")
     # --- FIM DA LÓGICA DE NOTIFICAÇÃO ---
 
     return agendamento_dict
