@@ -6,7 +6,7 @@ import schemas, crud
 import logging
 from datetime import date
 from database import initialize_firebase_app, get_db
-from auth import get_current_user_firebase, get_super_admin_user, get_current_admin_user, get_current_profissional_user, get_optional_current_user_firebase
+from auth import get_current_user_firebase, get_super_admin_user, get_current_admin_user, get_current_profissional_user, get_optional_current_user_firebase, validate_negocio_id
 from firebase_admin import firestore
 from pydantic import BaseModel
 from google.cloud import storage
@@ -75,7 +75,7 @@ def admin_listar_negocios(
 
 @app.get("/negocios/{negocio_id}/usuarios", response_model=List[schemas.UsuarioProfile], tags=["Admin - Gestão do Negócio"])
 def listar_usuarios_do_negocio(
-    negocio_id: str = Path(..., description="ID do negócio a ser gerenciado."),
+    negocio_id: str = Depends(validate_negocio_id),
     admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
     db: firestore.client = Depends(get_db)
 ):
@@ -84,7 +84,7 @@ def listar_usuarios_do_negocio(
 
 @app.get("/negocios/{negocio_id}/clientes", response_model=List[schemas.UsuarioProfile], tags=["Admin - Gestão do Negócio"])
 def listar_clientes_do_negocio(
-    negocio_id: str = Path(..., description="ID do negócio a ser gerenciado."),
+    negocio_id: str = Depends(validate_negocio_id),
     admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
     db: firestore.client = Depends(get_db)
 ):
@@ -94,7 +94,7 @@ def listar_clientes_do_negocio(
 @app.post("/negocios/{negocio_id}/promover", response_model=schemas.UsuarioProfile, tags=["Admin - Gestão do Negócio"])
 def promover_cliente(
     request_body: PromoteRequest,
-    negocio_id: str = Path(..., description="ID do negócio onde a promoção ocorrerá."),
+    negocio_id: str = Depends(validate_negocio_id),
     admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
     db: firestore.client = Depends(get_db)
 ):
@@ -107,7 +107,7 @@ def promover_cliente(
 @app.post("/negocios/{negocio_id}/rebaixar", response_model=schemas.UsuarioProfile, tags=["Admin - Gestão do Negócio"])
 def rebaixar_profissional(
     request_body: PromoteRequest,
-    negocio_id: str = Path(..., description="ID do negócio onde o rebaixamento ocorrerá."),
+    negocio_id: str = Depends(validate_negocio_id),
     admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
     db: firestore.client = Depends(get_db)
 ):
@@ -123,7 +123,7 @@ def rebaixar_profissional(
 
 @app.get("/me/profissional", response_model=schemas.ProfissionalResponse, tags=["Profissional - Autogestão"])
 def get_meu_perfil_profissional(
-    negocio_id: str = Header(..., description="ID do Negócio no qual o profissional está atuando."),
+    negocio_id: str = Depends(validate_negocio_id),
     profissional_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
@@ -136,7 +136,7 @@ def get_meu_perfil_profissional(
 @app.put("/me/profissional", response_model=schemas.ProfissionalResponse, tags=["Profissional - Autogestão"])
 def update_meu_perfil_profissional(
     update_data: schemas.ProfissionalUpdate,
-    negocio_id: str = Header(..., description="ID do Negócio no qual o profissional está atuando."),
+    negocio_id: str = Depends(validate_negocio_id),
     profissional_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
@@ -151,7 +151,7 @@ def update_meu_perfil_profissional(
 @app.post("/me/servicos", response_model=schemas.ServicoResponse, status_code=status.HTTP_201_CREATED, tags=["Profissional - Autogestão"])
 def criar_meu_servico(
     servico_data: schemas.ServicoCreate,
-    negocio_id: str = Header(..., description="ID do Negócio no qual o profissional está atuando."),
+    negocio_id: str = Depends(validate_negocio_id),
     profissional_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
@@ -168,7 +168,7 @@ def criar_meu_servico(
 
 @app.get("/me/servicos", response_model=List[schemas.ServicoResponse], tags=["Profissional - Autogestão"])
 def listar_meus_servicos(
-    negocio_id: str = Header(..., description="ID do Negócio no qual o profissional está atuando."),
+    negocio_id: str = Depends(validate_negocio_id),
     profissional_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
@@ -183,7 +183,7 @@ def listar_meus_servicos(
 def atualizar_meu_servico(
     servico_id: str,
     update_data: schemas.ServicoUpdate,
-    negocio_id: str = Header(..., description="ID do Negócio no qual o profissional está atuando."),
+    negocio_id: str = Depends(validate_negocio_id),
     profissional_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
@@ -201,7 +201,7 @@ def atualizar_meu_servico(
 @app.delete("/me/servicos/{servico_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Profissional - Autogestão"])
 def deletar_meu_servico(
     servico_id: str,
-    negocio_id: str = Header(..., description="ID do Negócio no qual o profissional está atuando."),
+    negocio_id: str = Depends(validate_negocio_id),
     profissional_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
@@ -218,7 +218,7 @@ def deletar_meu_servico(
 @app.post("/me/horarios-trabalho", response_model=List[schemas.HorarioTrabalho], tags=["Profissional - Autogestão"])
 def definir_meus_horarios(
     horarios: List[schemas.HorarioTrabalho],
-    negocio_id: str = Header(..., description="ID do Negócio no qual o profissional está atuando."),
+    negocio_id: str = Depends(validate_negocio_id),
     profissional_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
@@ -231,7 +231,7 @@ def definir_meus_horarios(
 
 @app.get("/me/horarios-trabalho", response_model=List[schemas.HorarioTrabalho], tags=["Profissional - Autogestão"])
 def get_meus_horarios(
-    negocio_id: str = Header(..., description="ID do Negócio no qual o profissional está atuando."),
+    negocio_id: str = Depends(validate_negocio_id),
     profissional_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
@@ -245,7 +245,7 @@ def get_meus_horarios(
 @app.post("/me/bloqueios", response_model=schemas.Bloqueio, tags=["Profissional - Autogestão"])
 def criar_meu_bloqueio(
     bloqueio_data: schemas.Bloqueio,
-    negocio_id: str = Header(..., description="ID do Negócio no qual o profissional está atuando."),
+    negocio_id: str = Depends(validate_negocio_id),
     profissional_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
@@ -259,7 +259,7 @@ def criar_meu_bloqueio(
 @app.delete("/me/bloqueios/{bloqueio_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Profissional - Autogestão"])
 def deletar_meu_bloqueio(
     bloqueio_id: str,
-    negocio_id: str = Header(..., description="ID do Negócio no qual o profissional está atuando."),
+    negocio_id: str = Depends(validate_negocio_id),
     profissional_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
@@ -270,7 +270,7 @@ def deletar_meu_bloqueio(
         
     if not crud.deletar_bloqueio(db, perfil_profissional['id'], bloqueio_id):
         raise HTTPException(status_code=404, detail="Bloqueio não encontrado.")
-        
+    
     return
 
 # =================================================================================
@@ -280,7 +280,7 @@ def deletar_meu_bloqueio(
 @app.post("/postagens", response_model=schemas.PostagemResponse, tags=["Feed e Interações"])
 def criar_postagem(
     postagem_data: schemas.PostagemCreate,
-    negocio_id: str = Header(..., description="ID do Negócio no qual o profissional está atuando."),
+    negocio_id: str = Depends(validate_negocio_id),
     profissional_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
@@ -334,7 +334,7 @@ def get_comentarios(
 @app.delete("/postagens/{postagem_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Feed e Interações"])
 def deletar_postagem(
     postagem_id: str,
-    negocio_id: str = Header(..., description="ID do Negócio no qual o profissional está atuando."),
+    negocio_id: str = Depends(validate_negocio_id),
     profissional_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
@@ -435,25 +435,32 @@ def sync_user_profile(
     Sincroniza os dados do usuário do Firebase Auth com o Firestore.
     Cria um perfil de usuário no banco de dados na primeira vez que ele faz login.
     """
-    user_profile = crud.criar_ou_atualizar_usuario(db, user_data)
-    
-    # Verifica se o usuário foi promovido a admin
-    if user_data.codigo_convite and user_profile:
-        negocio_id = user_profile.get('roles', {}).keys()
-        if negocio_id:
-            negocio_id = list(negocio_id)[0]
-            if user_profile['roles'].get(negocio_id) == "admin":
-                # Se for admin, cria o perfil de profissional
-                profissional_data = schemas.ProfissionalCreate(
-                    negocio_id=negocio_id,
-                    usuario_uid=user_profile['firebase_uid'],
-                    nome=user_profile['nome'],
-                    especialidades="A definir",
-                    ativo=True,
-                    fotos={}
-                )
-                crud.criar_profissional(db, profissional_data)
-                logger.info(f"Perfil profissional criado para o novo admin: {user_profile['email']}")
+    try:
+        user_profile = crud.criar_ou_atualizar_usuario(db, user_data)
+        
+        # Verifica se o usuário foi promovido a admin
+        if user_data.codigo_convite and user_profile:
+            negocio_id = user_profile.get('roles', {}).keys()
+            if negocio_id:
+                negocio_id = list(negocio_id)[0]
+                if user_profile['roles'].get(negocio_id) == "admin":
+                    # Se for admin, cria o perfil de profissional
+                    profissional_data = schemas.ProfissionalCreate(
+                        negocio_id=negocio_id,
+                        usuario_uid=user_profile['firebase_uid'],
+                        nome=user_profile['nome'],
+                        especialidades="A definir",
+                        ativo=True,
+                        fotos={}
+                    )
+                    crud.criar_profissional(db, profissional_data)
+                    logger.info(f"Perfil profissional criado para o novo admin: {user_profile['email']}")
+
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Erro inesperado ao sincronizar perfil do usuário: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Ocorreu um erro interno no servidor.")
 
     return user_profile
 
@@ -471,6 +478,17 @@ def register_fcm_token_endpoint(
     """Registra ou atualiza o token de notificação (FCM) para o dispositivo do usuário."""
     crud.adicionar_fcm_token(db, current_user.firebase_uid, request.fcm_token)
     return {"message": "FCM token registrado com sucesso."}
+
+@app.get("/negocios/{negocio_id}/admin-status", tags=["Admin - Gestão do Negócio"])
+def get_admin_status(
+    negocio_id: str,
+    db: firestore.client = Depends(get_db)
+):
+    """
+    (Público) Verifica se um negócio já possui um administrador.
+    """
+    has_admin = crud.check_admin_status(db, negocio_id)
+    return {"has_admin": has_admin}
 
 # =================================================================================
 # ENDPOINTS DE PROFISSIONAIS (Públicos)

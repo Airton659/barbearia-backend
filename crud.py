@@ -33,69 +33,81 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
     Cria ou atualiza um usuário no Firestore.
     Esta função é a única fonte da verdade para a lógica de onboarding.
     """
-    # --- FLUXO 1: CÓDIGO DE CONVITE (PRIORIDADE MÁXIMA) ---
-    if user_data.codigo_convite:
-        logger.info(f"Processando cadastro com código de convite: {user_data.codigo_convite}")
-        negocio_query = db.collection('negocios').where('codigo_convite', '==', user_data.codigo_convite).limit(1)
-        negocios = list(negocio_query.stream())
-        
-        if negocios:
-            negocio_doc = negocios[0]
-            negocio_data = negocio_doc.to_dict()
-            
-            if negocio_data.get('admin_uid') is None or negocio_data.get('admin_uid') == user_data.firebase_uid:
-                negocio_id = negocio_doc.id
-                user_existente = buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
+    negocio_id = user_data.negocio_id
 
-                if user_existente:
-                    user_ref = db.collection('usuarios').document(user_existente['id'])
-                    user_ref.update({f'roles.{negocio_id}': 'admin'})
-                    logger.info(f"Usuário existente {user_data.email} PROMOVIDO a admin do negócio {negocio_id}.")
-                else:
-                    user_dict = {
-                        "nome": user_data.nome, "email": user_data.email, "firebase_uid": user_data.firebase_uid,
-                        "roles": {negocio_id: "admin"}, "fcm_tokens": []
-                    }
-                    db.collection('usuarios').document().set(user_dict)
-                    logger.info(f"Novo usuário {user_data.email} criado como admin do negócio {negocio_id}.")
-                
-                negocio_doc.reference.update({'admin_uid': user_data.firebase_uid})
-                
-                return buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
-            
-            else:
-                logger.warning(f"Código de convite para '{negocio_data['nome']}' já foi utilizado por outro admin.")
+    # Fluxo de Super Admin (sem negocio_id)
+    is_super_admin_flow = not negocio_id
+    if is_super_admin_flow:
+        if not db.collection('usuarios').limit(1).get():
+            user_dict = {
+                "nome": user_data.nome, "email": user_data.email, "firebase_uid": user_data.firebase_uid,
+                "roles": {"platform": "super_admin"}, "fcm_tokens": []
+            }
+            doc_ref = db.collection('usuarios').document()
+            doc_ref.set(user_dict)
+            user_dict['id'] = doc_ref.id
+            logger.info(f"Novo usuário {user_data.email} criado como Super Admin.")
+            return user_dict
         else:
-            logger.warning(f"Código de convite '{user_data.codigo_convite}' é inválido.")
+            raise ValueError("Não é possível se registrar sem um negócio específico.")
+    
+    # Fluxo multi-tenant
+    @firestore.transactional
+    def transaction_sync_user(transaction):
+        user_existente = buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
+        
+        # Se o usuário já existe
+        if user_existente:
+            if negocio_id not in user_existente.get("roles", {}):
+                user_ref = db.collection('usuarios').document(user_existente['id'])
+                transaction.update(user_ref, {f'roles.{negocio_id}': 'cliente'})
+                user_existente["roles"][negocio_id] = "cliente"
+                logger.info(f"Usuário existente {user_data.email} vinculado como cliente ao negócio {negocio_id}.")
+            return user_existente
 
-    # --- FLUXO 2: USUÁRIO EXISTENTE (SEM CÓDIGO DE CONVITE) ---
-    user_existente = buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
-    if user_existente:
-        if user_data.negocio_id and user_data.negocio_id not in user_existente.get("roles", {}):
-            doc_ref = db.collection('usuarios').document(user_existente['id'])
-            doc_ref.update({f'roles.{user_data.negocio_id}': 'cliente'})
-            user_existente["roles"][user_data.negocio_id] = "cliente"
-        return user_existente
+        # Se é um novo usuário
+        negocio_doc_ref = db.collection('negocios').document(negocio_id)
+        negocio_doc = negocio_doc_ref.get(transaction=transaction)
 
-    # --- FLUXO 3: NOVO USUÁRIO (SEM CÓDIGO DE CONVITE) ---
-    user_dict = {
-        "nome": user_data.nome, "email": user_data.email, "firebase_uid": user_data.firebase_uid,
-        "roles": {}, "fcm_tokens": []
-    }
+        if not negocio_doc.exists:
+            raise ValueError(f"O negócio com ID '{negocio_id}' não foi encontrado.")
+
+        negocio_data = negocio_doc.to_dict()
+        has_admin = negocio_data.get('admin_uid') is not None
+        role = "cliente"
+
+        # Lógica para o primeiro admin do negócio
+        if not has_admin and user_data.codigo_convite and user_data.codigo_convite == negocio_data.get('codigo_convite'):
+            role = "admin"
+        
+        user_dict = {
+            "nome": user_data.nome, "email": user_data.email, "firebase_uid": user_data.firebase_uid,
+            "roles": {negocio_id: role}, "fcm_tokens": []
+        }
+        
+        new_user_ref = db.collection('usuarios').document()
+        transaction.set(new_user_ref, user_dict)
+        user_dict['id'] = new_user_ref.id
+
+        if role == "admin":
+            transaction.update(negocio_doc_ref, {'admin_uid': user_data.firebase_uid})
+            logger.info(f"Novo usuário {user_data.email} criado como admin do negócio {negocio_id}.")
+        else:
+            logger.info(f"Novo usuário {user_data.email} criado como cliente do negócio {negocio_id}.")
+        
+        return user_dict
     
-    is_super_admin_flow = not user_data.negocio_id
-    if is_super_admin_flow and not db.collection('usuarios').limit(1).get():
-        user_dict["roles"]["platform"] = "super_admin"
-        logger.info(f"Novo usuário {user_data.email} criado como Super Admin.")
-    elif user_data.negocio_id:
-        user_dict["roles"][user_data.negocio_id] = "cliente"
-        logger.info(f"Novo usuário {user_data.email} criado como cliente do negócio {user_data.negocio_id}.")
-    
-    doc_ref = db.collection('usuarios').document()
-    doc_ref.set(user_dict)
-    
-    user_dict['id'] = doc_ref.id
-    return user_dict
+    return transaction_sync_user(db.transaction())
+
+
+def check_admin_status(db: firestore.client, negocio_id: str) -> bool:
+    """Verifica se o negócio já tem um admin."""
+    try:
+        negocio_doc = db.collection('negocios').document(negocio_id).get()
+        return negocio_doc.exists and negocio_doc.to_dict().get("admin_uid") is not None
+    except Exception as e:
+        logger.error(f"Erro ao verificar o status do admin para o negócio {negocio_id}: {e}")
+        return False
 
 
 def adicionar_fcm_token(db: firestore.client, firebase_uid: str, fcm_token: str):

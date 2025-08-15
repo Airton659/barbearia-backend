@@ -55,6 +55,21 @@ def get_current_user_firebase(token: str = Depends(oauth2_scheme), db = Depends(
     return schemas.UsuarioProfile(**usuario_doc)
 
 
+def validate_negocio_id(
+    negocio_id: str = Header(..., description="ID do Negócio a ser validado."),
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase)
+):
+    """
+    Valida se o usuário tem permissão para acessar o negócio especificado.
+    """
+    if negocio_id not in current_user.roles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado: você não tem permissão para acessar este negócio."
+        )
+    return negocio_id
+
+
 def get_current_admin_user(
     # A MUDANÇA ESTÁ AQUI: FastAPI irá injetar o 'negocio_id' da URL (Path) diretamente.
     negocio_id: str, 
