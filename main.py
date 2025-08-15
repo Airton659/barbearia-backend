@@ -6,7 +6,7 @@ import schemas, crud
 import logging
 from datetime import date
 from database import initialize_firebase_app, get_db
-from auth import get_current_user_firebase, get_super_admin_user, get_current_admin_user, get_current_profissional_user, get_optional_current_user_firebase, validate_negocio_id
+from auth import get_current_user_firebase, get_super_admin_user, get_current_admin_user, get_current_profissional_user, get_optional_current_user_firebase, validate_negocio_id, validate_path_negocio_id
 from firebase_admin import firestore
 from pydantic import BaseModel
 from google.cloud import storage
@@ -75,7 +75,7 @@ def admin_listar_negocios(
 
 @app.get("/negocios/{negocio_id}/usuarios", response_model=List[schemas.UsuarioProfile], tags=["Admin - Gestão do Negócio"])
 def listar_usuarios_do_negocio(
-    negocio_id: str = Depends(validate_negocio_id),
+    negocio_id: str = Depends(validate_path_negocio_id),
     admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
     db: firestore.client = Depends(get_db)
 ):
@@ -84,7 +84,7 @@ def listar_usuarios_do_negocio(
 
 @app.get("/negocios/{negocio_id}/clientes", response_model=List[schemas.UsuarioProfile], tags=["Admin - Gestão do Negócio"])
 def listar_clientes_do_negocio(
-    negocio_id: str = Depends(validate_negocio_id),
+    negocio_id: str = Depends(validate_path_negocio_id),
     admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
     db: firestore.client = Depends(get_db)
 ):
@@ -94,7 +94,7 @@ def listar_clientes_do_negocio(
 @app.post("/negocios/{negocio_id}/promover", response_model=schemas.UsuarioProfile, tags=["Admin - Gestão do Negócio"])
 def promover_cliente(
     request_body: PromoteRequest,
-    negocio_id: str = Depends(validate_negocio_id),
+    negocio_id: str = Depends(validate_path_negocio_id),
     admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
     db: firestore.client = Depends(get_db)
 ):
@@ -107,7 +107,7 @@ def promover_cliente(
 @app.post("/negocios/{negocio_id}/rebaixar", response_model=schemas.UsuarioProfile, tags=["Admin - Gestão do Negócio"])
 def rebaixar_profissional(
     request_body: PromoteRequest,
-    negocio_id: str = Depends(validate_negocio_id),
+    negocio_id: str = Depends(validate_path_negocio_id),
     admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
     db: firestore.client = Depends(get_db)
 ):
@@ -188,11 +188,11 @@ def atualizar_meu_servico(
     db: firestore.client = Depends(get_db)
 ):
     """(Profissional) Atualiza um de seus serviços."""
-    perfil_profissional = crud.buscar_profissional_por_uid(db, negocio_id, profissional_user.firebase_uid)
-    if not perfil_profissional:
+    perfil_atual = crud.buscar_profissional_por_uid(db, negocio_id, profissional_user.firebase_uid)
+    if not perfil_atual:
         raise HTTPException(status_code=404, detail="Perfil profissional não encontrado.")
     
-    servico_atualizado = crud.atualizar_servico(db, servico_id, perfil_profissional['id'], update_data)
+    servico_atualizado = crud.atualizar_servico(db, servico_id, perfil_atual['id'], update_data)
     if not servico_atualizado:
         raise HTTPException(status_code=403, detail="Serviço não encontrado ou não pertence a este profissional.")
         

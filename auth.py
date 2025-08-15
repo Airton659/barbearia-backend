@@ -70,6 +70,21 @@ def validate_negocio_id(
     return negocio_id
 
 
+def validate_path_negocio_id(
+    negocio_id: str = Path(..., description="ID do negócio a ser validado."),
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase)
+):
+    """
+    Valida se o usuário tem permissão para acessar o negócio especificado via path.
+    """
+    if negocio_id not in current_user.roles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado: você não tem permissão para acessar este negócio."
+        )
+    return negocio_id
+
+
 def get_current_admin_user(
     # A MUDANÇA ESTÁ AQUI: FastAPI irá injetar o 'negocio_id' da URL (Path) diretamente.
     negocio_id: str, 
