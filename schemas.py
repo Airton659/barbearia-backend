@@ -217,5 +217,8 @@ class NotificacaoResponse(BaseModel):
 class NotificacaoContagemResponse(BaseModel):
     count: int
 
+class MarcarLidaRequest(BaseModel):
+    notificacao_id: str
+
 # CORREÇÃO: Usa o método model_rebuild() do Pydantic V2 para resolver as referências
 ProfissionalResponse.model_rebuild()

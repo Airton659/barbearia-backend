@@ -1025,3 +1025,25 @@ def marcar_notificacao_como_lida(db: firestore.client, usuario_id: str, notifica
     except Exception as e:
         logger.error(f"Erro ao marcar notificação {notificacao_id} como lida: {e}")
         return False
+
+def marcar_todas_como_lidas(db: firestore.client, usuario_id: str) -> bool:
+    """Marca todas as notificações não lidas de um usuário como lidas."""
+    try:
+        notificacoes_ref = db.collection('usuarios').document(usuario_id).collection('notificacoes')
+        query = notificacoes_ref.where('lida', '==', False)
+        docs = query.stream()
+
+        batch = db.batch()
+        doc_count = 0
+        for doc in docs:
+            batch.update(doc.reference, {'lida': True})
+            doc_count += 1
+        
+        if doc_count > 0:
+            batch.commit()
+            logger.info(f"{doc_count} notificações marcadas como lidas para o usuário {usuario_id}.")
+        
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao marcar todas as notificações como lidas para o usuário {usuario_id}: {e}")
+        return False

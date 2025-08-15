@@ -412,6 +412,16 @@ def marcar_todas_como_lidas(
     crud.marcar_todas_como_lidas(db, current_user.id)
     return
 
+@app.post("/notificacoes/marcar-como-lida", status_code=status.HTTP_204_NO_CONTENT, tags=["Notificações"])
+def marcar_como_lida(
+    request: schemas.MarcarLidaRequest,
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db: firestore.client = Depends(get_db)
+):
+    """(Autenticado) Marca uma notificação específica como lida."""
+    crud.marcar_notificacao_como_lida(db, current_user.id, request.notificacao_id)
+    return
+
 # =================================================================================
 # ENDPOINTS DE USUÁRIOS E AUTENTICAÇÃO
 # =================================================================================
