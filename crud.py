@@ -494,6 +494,7 @@ def calcular_horarios_disponiveis(db: firestore.client, profissional_id: str, di
 
     agendamentos_no_dia_query = db.collection('agendamentos')\
         .where('profissional_id', '==', profissional_id)\
+        .where('status', '==', 'pendente')\
         .where('data_hora', '>=', datetime.combine(dia, time.min))\
         .where('data_hora', '<=', datetime.combine(dia, time.max))
         
@@ -650,7 +651,7 @@ def criar_agendamento(db: firestore.client, agendamento_data: schemas.Agendament
 
 def cancelar_agendamento(db: firestore.client, agendamento_id: str, cliente_id: str) -> Optional[Dict]:
     """
-    Cancela um agendamento. No Firestore, isso geralmente significa deletar o documento.
+    Cancela um agendamento a pedido do cliente, atualizando seu status.
     Envia uma notificação para o profissional.
     """
     agendamento_ref = db.collection('agendamentos').document(agendamento_id)
@@ -663,6 +664,9 @@ def cancelar_agendamento(db: firestore.client, agendamento_id: str, cliente_id: 
     
     if agendamento.get('cliente_id') != cliente_id:
         return None
+    
+    agendamento_ref.update({"status": "cancelado_pelo_cliente"})
+    agendamento["status"] = "cancelado_pelo_cliente"
         
     profissional = buscar_profissional_por_id(db, agendamento['profissional_id'])
     if profissional:
@@ -710,7 +714,6 @@ def cancelar_agendamento(db: firestore.client, agendamento_id: str, cliente_id: 
                 except Exception as e:
                     logger.error(f"Erro ao ENVIAR notificação de cancelamento para o profissional {profissional['id']}: {e}")
 
-    agendamento_ref.delete()
     return agendamento
 
 def cancelar_agendamento_pelo_profissional(db: firestore.client, agendamento_id: str, profissional_id: str) -> Optional[Dict]:
