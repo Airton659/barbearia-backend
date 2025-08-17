@@ -241,5 +241,76 @@ class NotificacaoContagemResponse(BaseModel):
 class MarcarLidaRequest(BaseModel):
     notificacao_id: str
 
+# =================================================================================
+# SCHEMAS DA FICHA DO PACIENTE (Módulo Clínico)
+# =================================================================================
+
+class VinculoCreate(BaseModel):
+    paciente_id: str
+    enfermeiro_id: str # ID do documento do usuário enfermeiro
+
+class ConsultaBase(BaseModel):
+    negocio_id: str
+    paciente_id: str
+    data_consulta: datetime
+    resumo: str
+    medico_id: Optional[str] = None
+
+class ConsultaCreate(ConsultaBase):
+    pass
+
+class ConsultaResponse(ConsultaBase):
+    id: str
+
+class ExameBase(BaseModel):
+    negocio_id: str
+    paciente_id: str
+    nome_exame: str
+    data_exame: datetime
+    url_anexo: Optional[str] = None
+
+class ExameCreate(ExameBase):
+    pass
+
+class ExameResponse(ExameBase):
+    id: str
+
+class MedicacaoBase(BaseModel):
+    negocio_id: str
+    paciente_id: str
+    nome_medicamento: str
+    dosagem: str
+    instrucoes: str
+
+class MedicacaoCreate(MedicacaoBase):
+    pass
+
+class MedicacaoResponse(MedicacaoBase):
+    id: str
+
+class ChecklistItemBase(BaseModel):
+    negocio_id: str
+    paciente_id: str
+    descricao_item: str
+    concluido: bool = False
+
+class ChecklistItemCreate(ChecklistItemBase):
+    pass
+
+class ChecklistItemResponse(ChecklistItemBase):
+    id: str
+
+class OrientacaoBase(BaseModel):
+    negocio_id: str
+    paciente_id: str
+    titulo: str
+    conteudo: str
+
+class OrientacaoCreate(OrientacaoBase):
+    pass
+
+class OrientacaoResponse(OrientacaoBase):
+    id: str
+
 # CORREÇÃO: Usa o método model_rebuild() do Pydantic V2 para resolver as referências
 ProfissionalResponse.model_rebuild()

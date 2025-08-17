@@ -1113,3 +1113,73 @@ def _notificar_cliente_cancelamento(db: firestore.client, agendamento: Dict, age
 
     except Exception as e:
         logger.error(f"Falha crítica na função _notificar_cliente_cancelamento para agendamento {agendamento_id}: {e}")
+
+
+# =================================================================================
+# FUNÇÕES DO MÓDULO CLÍNICO
+# =================================================================================
+
+def vincular_paciente_enfermeiro(db: firestore.client, negocio_id: str, paciente_id: str, enfermeiro_id: str) -> Optional[Dict]:
+    """Vincula um paciente a um enfermeiro (profissional) em uma clínica."""
+    try:
+        paciente_ref = db.collection('usuarios').document(paciente_id)
+        # Adiciona/atualiza o campo enfermeiro_id no documento do paciente
+        paciente_ref.update({
+            'enfermeiro_id': enfermeiro_id
+        })
+        logger.info(f"Paciente {paciente_id} vinculado ao enfermeiro {enfermeiro_id} no negócio {negocio_id}.")
+        doc = paciente_ref.get()
+        if doc.exists:
+            # Retorna o documento atualizado do paciente
+            updated_doc = doc.to_dict()
+            updated_doc['id'] = doc.id
+            return updated_doc
+        return None
+    except Exception as e:
+        logger.error(f"Erro ao vincular paciente {paciente_id} ao enfermeiro {enfermeiro_id}: {e}")
+        return None
+
+def criar_consulta(db: firestore.client, consulta_data: schemas.ConsultaCreate) -> Dict:
+    """Salva uma nova consulta na subcoleção de um paciente."""
+    consulta_dict = consulta_data.model_dump()
+    paciente_ref = db.collection('usuarios').document(consulta_data.paciente_id)
+    doc_ref = paciente_ref.collection('consultas').document()
+    doc_ref.set(consulta_dict)
+    consulta_dict['id'] = doc_ref.id
+    return consulta_dict
+
+def adicionar_exame(db: firestore.client, exame_data: schemas.ExameCreate) -> Dict:
+    """Salva um novo exame na subcoleção de um paciente."""
+    exame_dict = exame_data.model_dump()
+    paciente_ref = db.collection('usuarios').document(exame_data.paciente_id)
+    doc_ref = paciente_ref.collection('exames').document()
+    doc_ref.set(exame_dict)
+    exame_dict['id'] = doc_ref.id
+    return exame_dict
+
+def prescrever_medicacao(db: firestore.client, medicacao_data: schemas.MedicacaoCreate) -> Dict:
+    """Salva uma nova medicação na subcoleção de um paciente."""
+    medicacao_dict = medicacao_data.model_dump()
+    paciente_ref = db.collection('usuarios').document(medicacao_data.paciente_id)
+    doc_ref = paciente_ref.collection('medicacoes').document()
+    doc_ref.set(medicacao_dict)
+    medicacao_dict['id'] = doc_ref.id
+    return medicacao_dict
+
+def adicionar_item_checklist(db: firestore.client, item_data: schemas.ChecklistItemCreate) -> Dict:
+    """Salva um novo item de checklist na subcoleção de um paciente."""
+    item_dict = item_data.model_dump()
+    paciente_ref = db.collection('usuarios').document(item_data.paciente_id)
+    doc_ref = paciente_ref.collection('checklist').document()
+    doc_ref.set(item_dict)
+    item_dict['id'] = doc_ref.id
+    return item_dict
+
+def criar_orientacao(db: firestore.client, orientacao_data: schemas.OrientacaoCreate) -> Dict:
+    """Salva uma nova orientação na subcoleção de um paciente."""
+    orientacao_dict = orientacao_data.model_dump()
+    paciente_ref = db.collection('usuarios').document(orientacao_data.paciente_id)
+    doc_ref = paciente_ref.collection('orientacoes').document()
+    doc_ref.set(orientacao_dict)
+    orientacao_dict['id'] = doc_ref.id
+    return orientacao_dict

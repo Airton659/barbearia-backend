@@ -137,6 +137,84 @@ def listar_medicos(
     """(Admin de Negócio) Lista todos os médicos de referência da clínica."""
     return crud.listar_medicos_por_negocio(db, negocio_id)
 
+@app.post("/negocios/{negocio_id}/vincular-paciente", response_model=schemas.UsuarioProfile, tags=["Admin - Gestão do Negócio"])
+def vincular_paciente(
+    vinculo_data: schemas.VinculoCreate,
+    negocio_id: str = Depends(validate_path_negocio_id),
+    admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin de Negócio) Vincula um paciente a um enfermeiro."""
+    paciente_atualizado = crud.vincular_paciente_enfermeiro(
+        db,
+        negocio_id=negocio_id,
+        paciente_id=vinculo_data.paciente_id,
+        enfermeiro_id=vinculo_data.enfermeiro_id
+    )
+    if not paciente_atualizado:
+        raise HTTPException(status_code=404, detail="Paciente ou enfermeiro não encontrado.")
+    return paciente_atualizado
+
+# =================================================================================
+# ENDPOINTS DA FICHA DO PACIENTE (Módulo Clínico)
+# =================================================================================
+
+@app.post("/pacientes/{paciente_id}/consultas", response_model=schemas.ConsultaResponse, tags=["Ficha do Paciente"])
+def adicionar_consulta(
+    paciente_id: str,
+    consulta_data: schemas.ConsultaCreate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db: firestore.client = Depends(get_db)
+):
+    """(Autenticado) Adiciona uma nova consulta à ficha do paciente."""
+    # Validação de permissão será adicionada na Fase 3
+    consulta_data.paciente_id = paciente_id
+    return crud.criar_consulta(db, consulta_data)
+
+@app.post("/pacientes/{paciente_id}/exames", response_model=schemas.ExameResponse, tags=["Ficha do Paciente"])
+def adicionar_exame(
+    paciente_id: str,
+    exame_data: schemas.ExameCreate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db: firestore.client = Depends(get_db)
+):
+    """(Autenticado) Adiciona um novo exame à ficha do paciente."""
+    exame_data.paciente_id = paciente_id
+    return crud.adicionar_exame(db, exame_data)
+
+@app.post("/pacientes/{paciente_id}/medicacoes", response_model=schemas.MedicacaoResponse, tags=["Ficha do Paciente"])
+def adicionar_medicacao(
+    paciente_id: str,
+    medicacao_data: schemas.MedicacaoCreate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db: firestore.client = Depends(get_db)
+):
+    """(Autenticado) Adiciona uma nova medicação à ficha do paciente."""
+    medicacao_data.paciente_id = paciente_id
+    return crud.prescrever_medicacao(db, medicacao_data)
+
+@app.post("/pacientes/{paciente_id}/checklist-itens", response_model=schemas.ChecklistItemResponse, tags=["Ficha do Paciente"])
+def adicionar_checklist_item(
+    paciente_id: str,
+    item_data: schemas.ChecklistItemCreate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db: firestore.client = Depends(get_db)
+):
+    """(Autenticado) Adiciona um novo item ao checklist do paciente."""
+    item_data.paciente_id = paciente_id
+    return crud.adicionar_item_checklist(db, item_data)
+
+@app.post("/pacientes/{paciente_id}/orientacoes", response_model=schemas.OrientacaoResponse, tags=["Ficha do Paciente"])
+def adicionar_orientacao(
+    paciente_id: str,
+    orientacao_data: schemas.OrientacaoCreate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db: firestore.client = Depends(get_db)
+):
+    """(Autenticado) Adiciona uma nova orientação à ficha do paciente."""
+    orientacao_data.paciente_id = paciente_id
+    return crud.criar_orientacao(db, orientacao_data)
+
 # =================================================================================
 # ENDPOINTS DE AUTOGESTÃO DO PROFISSIONAL
 # =================================================================================
