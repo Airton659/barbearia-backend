@@ -3,6 +3,9 @@
 import schemas
 from datetime import datetime, date, time, timedelta
 from typing import Optional, List, Dict
+
+from pydantic import BaseModel
+
 from firebase_admin import firestore, messaging, auth
 import logging
 import secrets
