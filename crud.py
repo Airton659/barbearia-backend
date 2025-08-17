@@ -3,7 +3,7 @@
 import schemas
 from datetime import datetime, date, time, timedelta
 from typing import Optional, List, Dict
-from firebase_admin import firestore, messaging
+from firebase_admin import firestore, messaging, auth
 import logging
 import secrets
 
@@ -168,31 +168,175 @@ def admin_listar_negocios(db: firestore.client) -> List[Dict]:
 # FUNÇÕES DE ADMINISTRAÇÃO DO NEGÓCIO (ADMIN DE NEGÓCIO)
 # =================================================================================
 
-def admin_listar_usuarios_por_negocio(db: firestore.client, negocio_id: str) -> List[Dict]:
-    """Lista todos os usuários (clientes e profissionais) de um negócio específico."""
+def admin_listar_usuarios_por_negocio(db: firestore.client, negocio_id: str, status: str = 'ativo') -> List[Dict]:
+    """Lista todos os usuários (clientes e profissionais) de um negócio, com filtro de status."""
     usuarios = []
     try:
-        # Consulta por todos os papéis válidos dentro de um negócio
         query = db.collection('usuarios').where(f'roles.{negocio_id}', 'in', ['cliente', 'profissional', 'admin'])
+
         for doc in query.stream():
             usuario_data = doc.to_dict()
-            usuario_data['id'] = doc.id
-            usuarios.append(usuario_data)
+            status_no_negocio = usuario_data.get('status_por_negocio', {}).get(negocio_id, 'ativo')
+
+            if status_no_negocio == status:
+                usuario_data['id'] = doc.id
+                usuarios.append(usuario_data)
+
         return usuarios
     except Exception as e:
         logger.error(f"Erro ao listar usuários para o negocio_id {negocio_id}: {e}")
         return []
 
-def admin_listar_clientes_por_negocio(db: firestore.client, negocio_id: str) -> List[Dict]:
-    """Lista todos os usuários com o papel de 'cliente' para um negócio específico."""
+def admin_set_paciente_status(db: firestore.client, negocio_id: str, paciente_id: str, status: str, autor_uid: str) -> Optional[Dict]:
+    """Define o status de um paciente ('ativo' ou 'arquivado') em um negócio."""
+    if status not in ['ativo', 'arquivado']:
+        raise ValueError("Status inválido. Use 'ativo' ou 'arquivado'.")
+
+    user_ref = db.collection('usuarios').document(paciente_id)
+    status_path = f'status_por_negocio.{negocio_id}'
+    user_ref.update({status_path: status})
+
+    criar_log_auditoria(
+        db,
+        autor_uid=autor_uid,
+        negocio_id=negocio_id,
+        acao=f"PACIENTE_STATUS_{status.upper()}",
+        detalhes={"paciente_alvo_id": paciente_id}
+    )
+
+    logger.info(f"Status do paciente {paciente_id} definido como '{status}' no negócio {negocio_id}.")
+
+    doc = user_ref.get()
+    if doc.exists:
+        data = doc.to_dict()
+        data['id'] = doc.id
+        return data
+    return None
+
+def admin_atualizar_role_usuario(db: firestore.client, negocio_id: str, user_id: str, novo_role: str, autor_uid: str) -> Optional[Dict]:
+    """
+    Atualiza a role de um usuário dentro de um negócio específico.
+    Cria/desativa o perfil profissional conforme necessário.
+    """
+    if novo_role not in ['cliente', 'profissional', 'admin']:
+        raise ValueError("Role inválida. As roles permitidas são 'cliente', 'profissional' e 'admin'.")
+
+    user_ref = db.collection('usuarios').document(user_id)
+    user_doc = user_ref.get()
+
+    if not user_doc.exists:
+        logger.warning(f"Tentativa de atualizar role de usuário inexistente com ID: {user_id}")
+        return None
+
+    user_data = user_doc.to_dict()
+
+    # Verifica se o usuário pertence ao negócio
+    if negocio_id not in user_data.get("roles", {}):
+        logger.warning(f"Usuário {user_id} não pertence ao negócio {negocio_id}.")
+        return None
+
+    role_antiga = user_data.get("roles", {}).get(negocio_id)
+
+    role_path = f'roles.{negocio_id}'
+    user_ref.update({role_path: novo_role})
+
+    criar_log_auditoria(
+        db,
+        autor_uid=autor_uid,
+        negocio_id=negocio_id,
+        acao="ROLE_UPDATE",
+        detalhes={"usuario_alvo_id": user_id, "role_antiga": role_antiga, "nova_role": novo_role}
+    )
+
+    # Lógica para perfil profissional
+    perfil_profissional = buscar_profissional_por_uid(db, negocio_id, user_data['firebase_uid'])
+
+    if novo_role == 'profissional' or novo_role == 'admin':
+        if not perfil_profissional:
+            # Cria o perfil profissional se não existir
+            novo_profissional_data = schemas.ProfissionalCreate(
+                negocio_id=negocio_id,
+                usuario_uid=user_data['firebase_uid'],
+                nome=user_data.get('nome', 'Profissional sem nome'),
+                ativo=True,
+                fotos={}
+            )
+            criar_profissional(db, novo_profissional_data)
+            logger.info(f"Perfil profissional criado para o usuário {user_data['email']} no negócio {negocio_id}.")
+        elif not perfil_profissional.get('ativo'):
+            # Reativa o perfil se já existir e estiver inativo
+            prof_ref = db.collection('profissionais').document(perfil_profissional['id'])
+            prof_ref.update({"ativo": True})
+            logger.info(f"Perfil profissional reativado para o usuário {user_data['email']} no negócio {negocio_id}.")
+
+    elif novo_role == 'cliente':
+        if perfil_profissional and perfil_profissional.get('ativo'):
+            # Desativa o perfil profissional se existir e estiver ativo
+            prof_ref = db.collection('profissionais').document(perfil_profissional['id'])
+            prof_ref.update({"ativo": False})
+            logger.info(f"Perfil profissional desativado para o usuário {user_data['email']} no negócio {negocio_id}.")
+
+    logger.info(f"Role do usuário {user_data['email']} atualizada para '{novo_role}' no negócio {negocio_id}.")
+
+    updated_user_doc = user_ref.get()
+    updated_user_data = updated_user_doc.to_dict()
+    updated_user_data['id'] = updated_user_doc.id
+    return updated_user_data
+
+def admin_criar_paciente(db: firestore.client, negocio_id: str, paciente_data: schemas.PacienteCreateByAdmin) -> Dict:
+    """
+    (Admin) Cria um novo usuário de paciente no Firebase Auth e o sincroniza no Firestore.
+    """
+    # 1. Criar usuário no Firebase Auth
+    try:
+        firebase_user = auth.create_user(
+            email=paciente_data.email,
+            password=paciente_data.password,
+            display_name=paciente_data.nome,
+            email_verified=False
+        )
+        logger.info(f"Usuário paciente criado no Firebase Auth com UID: {firebase_user.uid}")
+    except auth.EmailAlreadyExistsError:
+        raise ValueError(f"O e-mail {paciente_data.email} já está em uso.")
+    except Exception as e:
+        logger.error(f"Erro ao criar usuário paciente no Firebase Auth: {e}")
+        raise
+
+    # 2. Sincronizar o usuário no Firestore
+    sync_data = schemas.UsuarioSync(
+        nome=paciente_data.nome,
+        email=paciente_data.email,
+        firebase_uid=firebase_user.uid,
+        negocio_id=negocio_id
+    )
+
+    try:
+        user_profile = criar_ou_atualizar_usuario(db, sync_data)
+        logger.info(f"Perfil do paciente {paciente_data.email} sincronizado no Firestore.")
+        return user_profile
+    except Exception as e:
+        logger.error(f"Erro ao sincronizar paciente no Firestore. Tentando reverter a criação no Auth... UID: {firebase_user.uid}")
+        try:
+            auth.delete_user(firebase_user.uid)
+            logger.info(f"Reversão bem-sucedida: usuário {firebase_user.uid} deletado do Auth.")
+        except Exception as delete_e:
+            logger.critical(f"FALHA CRÍTICA NA REVERSÃO: não foi possível deletar o usuário {firebase_user.uid} do Auth. {delete_e}")
+        raise e
+
+def admin_listar_clientes_por_negocio(db: firestore.client, negocio_id: str, status: str = 'ativo') -> List[Dict]:
+    """Lista todos os usuários com o papel de 'cliente' para um negócio, com filtro de status."""
     clientes = []
     try:
-        # No Firestore, para consultar um campo dentro de um mapa (roles), usamos a notação de ponto.
         query = db.collection('usuarios').where(f'roles.{negocio_id}', '==', 'cliente')
+
         for doc in query.stream():
             cliente_data = doc.to_dict()
-            cliente_data['id'] = doc.id
-            clientes.append(cliente_data)
+            status_no_negocio = cliente_data.get('status_por_negocio', {}).get(negocio_id, 'ativo')
+
+            if status_no_negocio == status:
+                cliente_data['id'] = doc.id
+                clientes.append(cliente_data)
+
         return clientes
     except Exception as e:
         logger.error(f"Erro ao listar clientes para o negocio_id {negocio_id}: {e}")
@@ -296,6 +440,49 @@ def listar_medicos_por_negocio(db: firestore.client, negocio_id: str) -> List[Di
     except Exception as e:
         logger.error(f"Erro ao listar médicos para o negocio_id {negocio_id}: {e}")
         return []
+
+def update_medico(db: firestore.client, negocio_id: str, medico_id: str, update_data: schemas.MedicoUpdate) -> Optional[Dict]:
+    """Atualiza os dados de um médico, garantindo que ele pertence ao negócio correto."""
+    try:
+        medico_ref = db.collection('medicos').document(medico_id)
+        medico_doc = medico_ref.get()
+
+        if not medico_doc.exists or medico_doc.to_dict().get('negocio_id') != negocio_id:
+            logger.warning(f"Tentativa de atualização do médico {medico_id} por admin não autorizado ou médico inexistente.")
+            return None
+
+        update_dict = update_data.model_dump(exclude_unset=True)
+        if not update_dict:
+            data = medico_doc.to_dict()
+            data['id'] = medico_doc.id
+            return data
+
+        medico_ref.update(update_dict)
+        logger.info(f"Médico {medico_id} atualizado.")
+
+        updated_doc = medico_ref.get().to_dict()
+        updated_doc['id'] = medico_id
+        return updated_doc
+    except Exception as e:
+        logger.error(f"Erro ao atualizar médico {medico_id}: {e}")
+        return None
+
+def delete_medico(db: firestore.client, negocio_id: str, medico_id: str) -> bool:
+    """Deleta um médico, garantindo que ele pertence ao negócio correto."""
+    try:
+        medico_ref = db.collection('medicos').document(medico_id)
+        medico_doc = medico_ref.get()
+
+        if not medico_doc.exists or medico_doc.to_dict().get('negocio_id') != negocio_id:
+            logger.warning(f"Tentativa de exclusão do médico {medico_id} por admin não autorizado ou médico inexistente.")
+            return False
+
+        medico_ref.delete()
+        logger.info(f"Médico {medico_id} deletado.")
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao deletar médico {medico_id}: {e}")
+        return False
 
 # =================================================================================
 # FUNÇÕES DE PROFISSIONAIS E AUTOGESTÃO
@@ -1030,6 +1217,27 @@ def marcar_notificacao_como_lida(db: firestore.client, usuario_id: str, notifica
         logger.error(f"Erro ao marcar notificação {notificacao_id} como lida: {e}")
         return False
 
+def agendar_notificacao(db: firestore.client, notificacao_data: schemas.NotificacaoAgendadaCreate, criador_uid: str) -> Dict:
+    """
+    Salva uma notificação no Firestore para ser enviada posteriormente por um worker.
+    """
+    agendamento_dict = notificacao_data.model_dump()
+    agendamento_dict.update({
+        "status": "agendada",
+        "criado_em": datetime.utcnow(),
+        "criado_por_uid": criador_uid,
+        "tentativas_envio": 0,
+        "ultimo_erro": None
+    })
+
+    doc_ref = db.collection('notificacoes_agendadas').document()
+    doc_ref.set(agendamento_dict)
+
+    agendamento_dict['id'] = doc_ref.id
+    logger.info(f"Notificação agendada para paciente {notificacao_data.paciente_id} com ID: {doc_ref.id}")
+
+    return agendamento_dict
+
 def marcar_todas_como_lidas(db: firestore.client, usuario_id: str) -> bool:
     """Marca todas as notificações não lidas de um usuário como lidas."""
     try:
@@ -1119,7 +1327,7 @@ def _notificar_cliente_cancelamento(db: firestore.client, agendamento: Dict, age
 # FUNÇÕES DO MÓDULO CLÍNICO
 # =================================================================================
 
-def vincular_paciente_enfermeiro(db: firestore.client, negocio_id: str, paciente_id: str, enfermeiro_id: str) -> Optional[Dict]:
+def vincular_paciente_enfermeiro(db: firestore.client, negocio_id: str, paciente_id: str, enfermeiro_id: str, autor_uid: str) -> Optional[Dict]:
     """Vincula um paciente a um enfermeiro (profissional) em uma clínica."""
     try:
         paciente_ref = db.collection('usuarios').document(paciente_id)
@@ -1127,6 +1335,15 @@ def vincular_paciente_enfermeiro(db: firestore.client, negocio_id: str, paciente
         paciente_ref.update({
             'enfermeiro_id': enfermeiro_id
         })
+
+        criar_log_auditoria(
+            db,
+            autor_uid=autor_uid,
+            negocio_id=negocio_id,
+            acao="VINCULO_PACIENTE_ENFERMEIRO",
+            detalhes={"paciente_id": paciente_id, "enfermeiro_id": enfermeiro_id}
+        )
+
         logger.info(f"Paciente {paciente_id} vinculado ao enfermeiro {enfermeiro_id} no negócio {negocio_id}.")
         doc = paciente_ref.get()
         if doc.exists:
@@ -1138,6 +1355,49 @@ def vincular_paciente_enfermeiro(db: firestore.client, negocio_id: str, paciente
     except Exception as e:
         logger.error(f"Erro ao vincular paciente {paciente_id} ao enfermeiro {enfermeiro_id}: {e}")
         return None
+
+def desvincular_paciente_enfermeiro(db: firestore.client, negocio_id: str, paciente_id: str, autor_uid: str) -> Optional[Dict]:
+    """Desvincula um paciente de um enfermeiro, removendo o campo enfermeiro_id."""
+    try:
+        paciente_ref = db.collection('usuarios').document(paciente_id)
+        # Remove o campo enfermeiro_id do documento
+        paciente_ref.update({
+            'enfermeiro_id': firestore.DELETE_FIELD
+        })
+
+        criar_log_auditoria(
+            db,
+            autor_uid=autor_uid,
+            negocio_id=negocio_id,
+            acao="DESVINCULO_PACIENTE_ENFERMEIRO",
+            detalhes={"paciente_id": paciente_id}
+        )
+
+        logger.info(f"Paciente {paciente_id} desvinculado de seu enfermeiro no negócio {negocio_id}.")
+        doc = paciente_ref.get()
+        if doc.exists:
+            updated_doc = doc.to_dict()
+            updated_doc['id'] = doc.id
+            return updated_doc
+        return None
+    except Exception as e:
+        logger.error(f"Erro ao desvincular paciente {paciente_id}: {e}")
+        return None
+
+def listar_pacientes_por_enfermeiro(db: firestore.client, negocio_id: str, enfermeiro_id: str) -> List[Dict]:
+    """Lista todos os pacientes vinculados a um enfermeiro específico em um negócio."""
+    pacientes = []
+    try:
+        # Esta query assume que o enfermeiro_id está no documento do usuário/paciente
+        query = db.collection('usuarios').where(f'roles.{negocio_id}', '==', 'cliente').where('enfermeiro_id', '==', enfermeiro_id)
+        for doc in query.stream():
+            paciente_data = doc.to_dict()
+            paciente_data['id'] = doc.id
+            pacientes.append(paciente_data)
+        return pacientes
+    except Exception as e:
+        logger.error(f"Erro ao listar pacientes para o enfermeiro {enfermeiro_id}: {e}")
+        return []
 
 def criar_consulta(db: firestore.client, consulta_data: schemas.ConsultaCreate) -> Dict:
     """Salva uma nova consulta na subcoleção de um paciente."""
@@ -1183,3 +1443,189 @@ def criar_orientacao(db: firestore.client, orientacao_data: schemas.OrientacaoCr
     doc_ref.set(orientacao_dict)
     orientacao_dict['id'] = doc_ref.id
     return orientacao_dict
+
+# =================================================================================
+# FUNÇÕES DE LEITURA DA FICHA DO PACIENTE
+# =================================================================================
+
+def listar_consultas(db: firestore.client, paciente_id: str) -> List[Dict]:
+    """Lista todas as consultas de um paciente."""
+    consultas = []
+    try:
+        query = db.collection('usuarios').document(paciente_id).collection('consultas').order_by('data_consulta', direction=firestore.Query.DESCENDING)
+        for doc in query.stream():
+            consulta_data = doc.to_dict()
+            consulta_data['id'] = doc.id
+            consultas.append(consulta_data)
+    except Exception as e:
+        logger.error(f"Erro ao listar consultas do paciente {paciente_id}: {e}")
+    return consultas
+
+def listar_exames(db: firestore.client, paciente_id: str) -> List[Dict]:
+    """Lista todos os exames de um paciente."""
+    exames = []
+    try:
+        query = db.collection('usuarios').document(paciente_id).collection('exames').order_by('data_exame', direction=firestore.Query.DESCENDING)
+        for doc in query.stream():
+            exame_data = doc.to_dict()
+            exame_data['id'] = doc.id
+            exames.append(exame_data)
+    except Exception as e:
+        logger.error(f"Erro ao listar exames do paciente {paciente_id}: {e}")
+    return exames
+
+def listar_medicacoes(db: firestore.client, paciente_id: str) -> List[Dict]:
+    """Lista todas as medicações de um paciente."""
+    medicacoes = []
+    try:
+        query = db.collection('usuarios').document(paciente_id).collection('medicacoes').order_by('nome_medicamento')
+        for doc in query.stream():
+            medicacao_data = doc.to_dict()
+            medicacao_data['id'] = doc.id
+            medicacoes.append(medicacao_data)
+    except Exception as e:
+        logger.error(f"Erro ao listar medicações do paciente {paciente_id}: {e}")
+    return medicacoes
+
+def listar_checklist(db: firestore.client, paciente_id: str) -> List[Dict]:
+    """Lista todos os itens do checklist de um paciente."""
+    checklist_itens = []
+    try:
+        query = db.collection('usuarios').document(paciente_id).collection('checklist').order_by('descricao_item')
+        for doc in query.stream():
+            item_data = doc.to_dict()
+            item_data['id'] = doc.id
+            checklist_itens.append(item_data)
+    except Exception as e:
+        logger.error(f"Erro ao listar checklist do paciente {paciente_id}: {e}")
+    return checklist_itens
+
+def listar_orientacoes(db: firestore.client, paciente_id: str) -> List[Dict]:
+    """Lista todas as orientações de um paciente."""
+    orientacoes = []
+    try:
+        query = db.collection('usuarios').document(paciente_id).collection('orientacoes').order_by('titulo')
+        for doc in query.stream():
+            orientacao_data = doc.to_dict()
+            orientacao_data['id'] = doc.id
+            orientacoes.append(orientacao_data)
+    except Exception as e:
+        logger.error(f"Erro ao listar orientações do paciente {paciente_id}: {e}")
+    return orientacoes
+
+def get_ficha_completa_paciente(db: firestore.client, paciente_id: str) -> Dict:
+    """Retorna um dicionário com todos os dados da ficha de um paciente."""
+    ficha = {
+        "consultas": listar_consultas(db, paciente_id),
+        "exames": listar_exames(db, paciente_id),
+        "medicacoes": listar_medicacoes(db, paciente_id),
+        "checklist": listar_checklist(db, paciente_id),
+        "orientacoes": listar_orientacoes(db, paciente_id),
+    }
+    return ficha
+
+# =================================================================================
+# FUNÇÕES DE UPDATE/DELETE DA FICHA DO PACIENTE
+# =================================================================================
+
+def _update_subcollection_item(db: firestore.client, paciente_id: str, collection_name: str, item_id: str, update_data: BaseModel) -> Optional[Dict]:
+    """Função genérica para atualizar um item em uma subcoleção do paciente."""
+    try:
+        item_ref = db.collection('usuarios').document(paciente_id).collection(collection_name).document(item_id)
+        update_dict = update_data.model_dump(exclude_unset=True)
+
+        if not update_dict:
+            doc = item_ref.get()
+            if doc.exists:
+                data = doc.to_dict()
+                data['id'] = doc.id
+                return data
+            return None
+
+        item_ref.update(update_dict)
+        doc = item_ref.get()
+        if doc.exists:
+            data = doc.to_dict()
+            data['id'] = doc.id
+            logger.info(f"Item {item_id} na coleção {collection_name} do paciente {paciente_id} atualizado.")
+            return data
+        return None
+    except Exception as e:
+        logger.error(f"Erro ao atualizar item {item_id} em {collection_name} do paciente {paciente_id}: {e}")
+        return None
+
+def _delete_subcollection_item(db: firestore.client, paciente_id: str, collection_name: str, item_id: str) -> bool:
+    """Função genérica para deletar um item de uma subcoleção do paciente."""
+    try:
+        item_ref = db.collection('usuarios').document(paciente_id).collection(collection_name).document(item_id)
+        if item_ref.get().exists:
+            item_ref.delete()
+            logger.info(f"Item {item_id} da coleção {collection_name} do paciente {paciente_id} deletado.")
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"Erro ao deletar item {item_id} em {collection_name} do paciente {paciente_id}: {e}")
+        return False
+
+# --- Consultas ---
+def update_consulta(db: firestore.client, paciente_id: str, consulta_id: str, update_data: schemas.ConsultaUpdate) -> Optional[Dict]:
+    return _update_subcollection_item(db, paciente_id, "consultas", consulta_id, update_data)
+
+def delete_consulta(db: firestore.client, paciente_id: str, consulta_id: str) -> bool:
+    return _delete_subcollection_item(db, paciente_id, "consultas", consulta_id)
+
+# --- Exames ---
+def update_exame(db: firestore.client, paciente_id: str, exame_id: str, update_data: schemas.ExameUpdate) -> Optional[Dict]:
+    return _update_subcollection_item(db, paciente_id, "exames", exame_id, update_data)
+
+def delete_exame(db: firestore.client, paciente_id: str, exame_id: str) -> bool:
+    return _delete_subcollection_item(db, paciente_id, "exames", exame_id)
+
+# --- Medicações ---
+def update_medicacao(db: firestore.client, paciente_id: str, medicacao_id: str, update_data: schemas.MedicacaoUpdate) -> Optional[Dict]:
+    return _update_subcollection_item(db, paciente_id, "medicacoes", medicacao_id, update_data)
+
+def delete_medicacao(db: firestore.client, paciente_id: str, medicacao_id: str) -> bool:
+    return _delete_subcollection_item(db, paciente_id, "medicacoes", medicacao_id)
+
+# --- Checklist ---
+def update_checklist_item(db: firestore.client, paciente_id: str, item_id: str, update_data: schemas.ChecklistItemUpdate) -> Optional[Dict]:
+    return _update_subcollection_item(db, paciente_id, "checklist", item_id, update_data)
+
+def delete_checklist_item(db: firestore.client, paciente_id: str, item_id: str) -> bool:
+    return _delete_subcollection_item(db, paciente_id, "checklist", item_id)
+
+# --- Orientações ---
+def update_orientacao(db: firestore.client, paciente_id: str, orientacao_id: str, update_data: schemas.OrientacaoUpdate) -> Optional[Dict]:
+    return _update_subcollection_item(db, paciente_id, "orientacoes", orientacao_id, update_data)
+
+def delete_orientacao(db: firestore.client, paciente_id: str, orientacao_id: str) -> bool:
+    return _delete_subcollection_item(db, paciente_id, "orientacoes", orientacao_id)
+
+# =================================================================================
+# FUNÇÕES DE AUDITORIA
+# =================================================================================
+
+def criar_log_auditoria(db: firestore.client, autor_uid: str, negocio_id: str, acao: str, detalhes: Dict):
+    """
+    Cria um registro de log na coleção 'auditoria'.
+
+    Args:
+        autor_uid (str): Firebase UID do usuário que realizou a ação.
+        negocio_id (str): ID do negócio onde a ação ocorreu.
+        acao (str): Descrição da ação (ex: 'ARQUIVOU_PACIENTE').
+        detalhes (Dict): Dicionário com informações contextuais (ex: {'paciente_id': 'xyz'}).
+    """
+    try:
+        log_entry = {
+            "autor_uid": autor_uid,
+            "negocio_id": negocio_id,
+            "acao": acao,
+            "detalhes": detalhes,
+            "timestamp": datetime.utcnow()
+        }
+        db.collection('auditoria').add(log_entry)
+        logger.info(f"Log de auditoria criado para ação '{acao}' por UID {autor_uid}.")
+    except Exception as e:
+        # Loga o erro mas não interrompe a operação principal
+        logger.error(f"Falha ao criar log de auditoria: {e}")
