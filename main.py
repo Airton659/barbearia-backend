@@ -161,52 +161,57 @@ def vincular_paciente(
 
 @app.post("/pacientes/{paciente_id}/consultas", response_model=schemas.ConsultaResponse, tags=["Ficha do Paciente"])
 def adicionar_consulta(
+    paciente_id: str,
     consulta_data: schemas.ConsultaCreate,
     current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Adiciona uma nova consulta à ficha do paciente."""
-    consulta_data.paciente_id = current_user.id
+    consulta_data.paciente_id = paciente_id
     return crud.criar_consulta(db, consulta_data)
 
 @app.post("/pacientes/{paciente_id}/exames", response_model=schemas.ExameResponse, tags=["Ficha do Paciente"])
 def adicionar_exame(
+    paciente_id: str,
     exame_data: schemas.ExameCreate,
     current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Adiciona um novo exame à ficha do paciente."""
-    exame_data.paciente_id = current_user.id
+    exame_data.paciente_id = paciente_id
     return crud.adicionar_exame(db, exame_data)
 
 @app.post("/pacientes/{paciente_id}/medicacoes", response_model=schemas.MedicacaoResponse, tags=["Ficha do Paciente"])
 def adicionar_medicacao(
+    paciente_id: str,
     medicacao_data: schemas.MedicacaoCreate,
     current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Adiciona uma nova medicação à ficha do paciente."""
-    medicacao_data.paciente_id = current_user.id
+    medicacao_data.paciente_id = paciente_id
     return crud.prescrever_medicacao(db, medicacao_data)
 
 @app.post("/pacientes/{paciente_id}/checklist-itens", response_model=schemas.ChecklistItemResponse, tags=["Ficha do Paciente"])
 def adicionar_checklist_item(
+    paciente_id: str,
     item_data: schemas.ChecklistItemCreate,
     current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Adiciona um novo item ao checklist do paciente."""
-    item_data.paciente_id = current_user.id
+    item_data.paciente_id = paciente_id
     return crud.adicionar_item_checklist(db, item_data)
 
 @app.post("/pacientes/{paciente_id}/orientacoes", response_model=schemas.OrientacaoResponse, tags=["Ficha do Paciente"])
 def adicionar_orientacao(
+    paciente_id: str,
     orientacao_data: schemas.OrientacaoCreate,
     current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Adiciona uma nova orientação à ficha do paciente."""
-    orientacao_data.paciente_id = current_user.id
+    orientacao_data.paciente_id = paciente_id
     return crud.criar_orientacao(db, orientacao_data)
 
 # =================================================================================
