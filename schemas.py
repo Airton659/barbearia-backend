@@ -60,6 +60,17 @@ class EnfermeiroProfile(UsuarioProfile):
 class PacienteProfile(UsuarioProfile):
     pass
 
+class RoleUpdateRequest(BaseModel):
+    role: str = Field(..., description="O novo papel do usuário (ex: 'cliente', 'profissional').")
+
+class PacienteCreateByAdmin(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=6, description="Senha para o novo paciente. Deve ser forte.")
+    nome: str
+
+class StatusUpdateRequest(BaseModel):
+    status: str = Field(..., description="O novo status do paciente (ex: 'ativo', 'arquivado').")
+
 
 # =================================================================================
 # SCHEMAS DE PROFISSIONAIS (Antigos Barbeiros)
@@ -208,6 +219,11 @@ class MedicoBase(BaseModel):
 class MedicoResponse(MedicoBase):
     id: str
 
+class MedicoUpdate(BaseModel):
+    nome: Optional[str] = None
+    especialidade: Optional[str] = None
+    crm: Optional[str] = None
+
 # =================================================================================
 # SCHEMAS DE DISPONIBILIDADE (HORÁRIOS E BLOQUEIOS)
 # =================================================================================
@@ -241,6 +257,19 @@ class NotificacaoContagemResponse(BaseModel):
 class MarcarLidaRequest(BaseModel):
     notificacao_id: str
 
+class NotificacaoAgendadaCreate(BaseModel):
+    paciente_id: str
+    negocio_id: str
+    titulo: str
+    mensagem: str
+    data_agendamento: datetime = Field(..., description="Data e hora em que a notificação deve ser enviada.")
+
+class NotificacaoAgendadaResponse(NotificacaoAgendadaCreate):
+    id: str
+    status: str = "agendada"
+    criado_em: datetime
+    criado_por_uid: str # Firebase UID do enfermeiro que agendou
+
 # =================================================================================
 # SCHEMAS DA FICHA DO PACIENTE (Módulo Clínico)
 # =================================================================================
@@ -262,6 +291,11 @@ class ConsultaCreate(ConsultaBase):
 class ConsultaResponse(ConsultaBase):
     id: str
 
+class ConsultaUpdate(BaseModel):
+    data_consulta: Optional[datetime] = None
+    resumo: Optional[str] = None
+    medico_id: Optional[str] = None
+
 class ExameBase(BaseModel):
     negocio_id: str
     paciente_id: str
@@ -274,6 +308,11 @@ class ExameCreate(ExameBase):
 
 class ExameResponse(ExameBase):
     id: str
+
+class ExameUpdate(BaseModel):
+    nome_exame: Optional[str] = None
+    data_exame: Optional[datetime] = None
+    url_anexo: Optional[str] = None
 
 class MedicacaoBase(BaseModel):
     negocio_id: str
@@ -288,6 +327,11 @@ class MedicacaoCreate(MedicacaoBase):
 class MedicacaoResponse(MedicacaoBase):
     id: str
 
+class MedicacaoUpdate(BaseModel):
+    nome_medicamento: Optional[str] = None
+    dosagem: Optional[str] = None
+    instrucoes: Optional[str] = None
+
 class ChecklistItemBase(BaseModel):
     negocio_id: str
     paciente_id: str
@@ -300,6 +344,10 @@ class ChecklistItemCreate(ChecklistItemBase):
 class ChecklistItemResponse(ChecklistItemBase):
     id: str
 
+class ChecklistItemUpdate(BaseModel):
+    descricao_item: Optional[str] = None
+    concluido: Optional[bool] = None
+
 class OrientacaoBase(BaseModel):
     negocio_id: str
     paciente_id: str
@@ -311,6 +359,17 @@ class OrientacaoCreate(OrientacaoBase):
 
 class OrientacaoResponse(OrientacaoBase):
     id: str
+
+class OrientacaoUpdate(BaseModel):
+    titulo: Optional[str] = None
+    conteudo: Optional[str] = None
+
+class FichaCompletaResponse(BaseModel):
+    consultas: List[ConsultaResponse]
+    exames: List[ExameResponse]
+    medicacoes: List[MedicacaoResponse]
+    checklist: List[ChecklistItemResponse]
+    orientacoes: List[OrientacaoResponse]
 
 # CORREÇÃO: Usa o método model_rebuild() do Pydantic V2 para resolver as referências
 ProfissionalResponse.model_rebuild()
