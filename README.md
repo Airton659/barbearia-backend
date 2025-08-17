@@ -1,18 +1,12 @@
-# 📘 API Multi-Tenant para Agendamentos (v2.0)
+# 📘 API Multi-Tenant para Agendamentos e Gestão Clínica (v2.1)
 
-Bem-vindo ao repositório da API de Agendamentos. Este projeto serve como um backend robusto, escalável e genérico para aplicações de agendamento de serviços, construído com uma arquitetura moderna e multi-tenant.
+Bem-vindo ao repositório da API. Este projeto serve como um backend robusto, escalável e genérico, construído com uma arquitetura moderna e multi-tenant, capaz de atender tanto aplicações de agendamento de serviços quanto sistemas de gestão clínica.
 
 ## 🚀 Sobre o Projeto
 
-Esta API foi desenvolvida para ser o backend de múltiplas aplicações de agendamento (barbearias, salões de beleza, confeitarias, etc.). Ela permite que donos de negócios gerenciem seus profissionais, serviços e agenda, enquanto os clientes finais podem agendar horários e interagir com o conteúdo do negócio.
+Esta API foi desenvolvida para ser o backend de múltiplas aplicações. Ela nasceu suportando negócios de agendamento (como barbearias e salões) e foi expandida para incluir um módulo completo de gestão de pacientes para clínicas.
 
 O projeto utiliza **FastAPI**, **Firebase Authentication**, **Firestore** e está hospedado no **Google Cloud Run**, garantindo alta performance e escalabilidade.
-
-## ✅ Status Atual do Projeto
-
-**API 100% Migrada e Funcional\!**
-
-A migração da arquitetura original (SQL single-tenant) para a nova arquitetura (Firestore multi-tenant) foi concluída com sucesso. Todas as funcionalidades foram reconstruídas e a base do projeto está estável e pronta para ser consumida por diversas aplicações front-end.
 
 **URL Base da API:** `https://barbearia-backend-service-198513369137.southamerica-east1.run.app`
 
@@ -20,7 +14,7 @@ A migração da arquitetura original (SQL single-tenant) para a nova arquitetura
 
 ## 🛠️ Como Usar a API
 
-Para interagir com os endpoints, você pode usar uma ferramenta de cliente HTTP como o [Postman](https://www.postman.com/) ou a documentação interativa do Swagger.
+A interação com a API segue dois princípios fundamentais da sua arquitetura multi-tenant.
 
 ### 1. Autenticação
 
@@ -30,41 +24,49 @@ A autenticação é gerenciada pelo **Firebase Authentication**. Toda requisiç�
 
 ### 2. Identificação do Negócio (Multi-Tenant)
 
-A maioria das operações ocorre no contexto de um "Negócio" específico. Para isso, é obrigatório enviar o ID do negócio no cabeçalho da requisição:
+A maioria das operações ocorre no contexto de um "Negócio" específico (seja uma barbearia ou uma clínica). Para isso, é obrigatório enviar o ID do negócio no cabeçalho da requisição:
 * **Key**: `negocio-id`
 * **Value**: `{ID_DO_NEGOCIO_AQUI}`
 
 -----
 
-## 🔑 Fluxos Principais da API
+## 🔑 Módulos e Funcionalidades Principais
 
-A documentação completa de todos os endpoints está disponível na **documentação interativa do Swagger**, acessível em `/docs` na URL base. Abaixo estão os fluxos mais importantes.
+A documentação interativa completa de todos os endpoints está disponível em `/docs` na URL base.
 
-### Onboarding de Usuários (`POST /users/sync-profile`)
+### Módulo de Agendamentos (Ex: Barbearias)
 
-Este é o endpoint central para o cadastro de qualquer usuário. O comportamento muda com base nos dados enviados:
-* **Super-Admin:** O primeiro usuário a chamar este endpoint (com a base de dados vazia) se torna o administrador da plataforma.
-* **Admin de Negócio:** Um usuário que envia um `codigo_convite` válido é promovido a `admin` do negócio correspondente.
-* **Cliente:** Um usuário que envia um `negocio_id` (sem código de convite) é registrado como `cliente` daquele negócio.
+Este é o módulo original da aplicação, focado em negócios de agendamento de serviços.
+* Gestão de Profissionais e Serviços.
+* Sistema de Agendamento com cálculo de horários disponíveis.
+* Feed de postagens com interações (curtidas e comentários).
+* Sistema de avaliações de profissionais.
 
-### Gerenciamento (Super-Admin)
+### Módulo de Gestão Clínica (Ex: Concierge App)
 
-Endpoints prefixados com `/admin` permitem ao Super-Admin criar e listar negócios na plataforma, gerando os convites para os donos.
+Este módulo expande a API para atender às necessidades de uma clínica no acompanhamento de pacientes.
 
-### Gerenciamento (Admin de Negócio)
+#### Gestão da Clínica (Perfil: Gestor/Admin)
+* **Gestão de Pacientes:**
+    * Criação de novos pacientes (incluindo a conta de usuário no Firebase Auth) via `POST /negocios/{id}/pacientes`.
+    * Listagem de pacientes com filtros por status (`ativo` ou `arquivado`) via `GET /negocios/{id}/usuarios`.
+    * Arquivamento e reativação de pacientes via `PATCH /negocios/{id}/pacientes/{id}/status`.
+* **Gestão de Equipe:**
+    * Atualização de papéis de usuários para `cliente` (Paciente) ou `profissional` (Enfermeiro) via `PATCH /negocios/{id}/usuarios/{id}/role`.
+* **Gestão de Médicos:**
+    * CRUD completo para médicos de referência (sem login) nos endpoints `.../medicos`.
+* **Vínculo Paciente-Enfermeiro:**
+    * Endpoints para vincular (`POST`) e desvincular (`DELETE`) um paciente a um enfermeiro em `.../vincular-paciente`.
 
-Endpoints prefixados com `/negocios/{negocio_id}` permitem que um `admin` de negócio gerencie sua equipe, como listar clientes e promovê-los a `profissionais`.
+#### Atendimento ao Paciente (Perfil: Enfermeiro)
+* **Listagem de Pacientes:**
+    * Um enfermeiro pode listar todos os pacientes que estão sob sua responsabilidade via `GET /me/pacientes`.
+* **Gestão da Ficha Clínica:**
+    * CRUD completo para todas as seções da ficha de um paciente vinculado (`/pacientes/{paciente_id}/...`).
+    * Endpoint otimizado para carregar a ficha inteira de uma vez: `GET /pacientes/{paciente_id}/ficha-completa`.
+* **Notificações:**
+    * Agendamento de notificações futuras para pacientes vinculados via `POST /notificacoes/agendar`.
 
-### Autogestão (Profissional)
-
-Endpoints prefixados com `/me` (ex: `/me/profissional`, `/me/servicos`) permitem que um usuário `profissional` gerencie seu próprio perfil, catálogo de serviços e agenda.
-
------
-
-## 🧪 Testes
-
-A suíte de testes original, baseada em SQL, foi descontinuada. Testes para a nova arquitetura Firestore devem ser desenvolvidos para garantir a cobertura das novas regras de negócio.
-
------
-
-**Última atualização:** 11/08/2025 - Migração para arquitetura Firestore multi-tenant concluída.
+#### Segurança e Privacidade
+* O acesso à ficha de um paciente é estritamente controlado. Apenas o **próprio paciente**, o **enfermeiro vinculado** ou o **gestor da clínica** podem visualizar ou modificar os dados, garantido pela dependência `get_paciente_autorizado`.
+* Ações administrativas críticas, como mudança de status de paciente ou vínculo, são registradas em uma trilha de auditoria.
