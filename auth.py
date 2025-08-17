@@ -187,9 +187,13 @@ def get_paciente_autorizado(
         return current_user
         
     # 3. O Enfermeiro vinculado ao paciente tem acesso.
-    enfermeiro_vinculado_id = paciente_data.get('enfermeiro_id')
-    if enfermeiro_vinculado_id and current_user.id == enfermeiro_vinculado_id:
-        return current_user
+    # CORREÇÃO: Primeiro, checa se o usuário é um profissional/admin da clínica.
+    user_role_na_clinica = current_user.roles.get(negocio_id_paciente)
+    if user_role_na_clinica in ["profissional", "admin"]:
+        # Se for, checa se o ID dele é o que está vinculado ao paciente.
+        enfermeiro_vinculado_id = paciente_data.get('enfermeiro_id')
+        if enfermeiro_vinculado_id and current_user.id == enfermeiro_vinculado_id:
+            return current_user
 
     # Se nenhuma das condições for atendida, nega o acesso.
     raise HTTPException(
