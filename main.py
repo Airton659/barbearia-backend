@@ -117,6 +117,26 @@ def rebaixar_profissional(
         raise HTTPException(status_code=404, detail="Usuário não encontrado ou não é um profissional deste negócio.")
     return usuario_rebaixado
 
+@app.post("/negocios/{negocio_id}/medicos", response_model=schemas.MedicoResponse, tags=["Admin - Gestão do Negócio"])
+def criar_medico(
+    medico_data: schemas.MedicoBase,
+    negocio_id: str = Depends(validate_path_negocio_id),
+    admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin de Negócio) Cadastra um novo médico de referência para a clínica."""
+    medico_data.negocio_id = negocio_id
+    return crud.criar_medico(db, medico_data)
+
+@app.get("/negocios/{negocio_id}/medicos", response_model=List[schemas.MedicoResponse], tags=["Admin - Gestão do Negócio"])
+def listar_medicos(
+    negocio_id: str = Depends(validate_path_negocio_id),
+    admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin de Negócio) Lista todos os médicos de referência da clínica."""
+    return crud.listar_medicos_por_negocio(db, negocio_id)
+
 # =================================================================================
 # ENDPOINTS DE AUTOGESTÃO DO PROFISSIONAL
 # =================================================================================

@@ -53,6 +53,14 @@ class UsuarioSync(BaseModel):
 class FCMTokenUpdate(BaseModel):
     fcm_token: str
 
+# Perfis para o módulo clínico, herdando do perfil base para compatibilidade
+class EnfermeiroProfile(UsuarioProfile):
+    pass
+
+class PacienteProfile(UsuarioProfile):
+    pass
+
+
 # =================================================================================
 # SCHEMAS DE PROFISSIONAIS (Antigos Barbeiros)
 # =================================================================================
@@ -186,6 +194,19 @@ class AvaliacaoResponse(AvaliacaoCreate):
     # Desnormalizado
     cliente_id: str
     cliente_nome: str
+
+# =================================================================================
+# SCHEMAS DE MÉDICOS (Módulo Clínico)
+# =================================================================================
+
+class MedicoBase(BaseModel):
+    negocio_id: str
+    nome: str
+    especialidade: str
+    crm: Optional[str] = None
+
+class MedicoResponse(MedicoBase):
+    id: str
 
 # =================================================================================
 # SCHEMAS DE DISPONIBILIDADE (HORÁRIOS E BLOQUEIOS)

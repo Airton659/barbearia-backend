@@ -272,6 +272,32 @@ def admin_rebaixar_profissional_para_cliente(db: firestore.client, negocio_id: s
         return None
 
 # =================================================================================
+# FUNÇÕES DE GESTÃO CLÍNICA (MÉDICOS)
+# =================================================================================
+
+def criar_medico(db: firestore.client, medico_data: schemas.MedicoBase) -> Dict:
+    """Cria um novo médico (referência) para uma clínica."""
+    medico_dict = medico_data.model_dump()
+    doc_ref = db.collection('medicos').document()
+    doc_ref.set(medico_dict)
+    medico_dict['id'] = doc_ref.id
+    return medico_dict
+
+def listar_medicos_por_negocio(db: firestore.client, negocio_id: str) -> List[Dict]:
+    """Lista todos os médicos de referência de uma clínica."""
+    medicos = []
+    try:
+        query = db.collection('medicos').where('negocio_id', '==', negocio_id)
+        for doc in query.stream():
+            medico_data = doc.to_dict()
+            medico_data['id'] = doc.id
+            medicos.append(medico_data)
+        return medicos
+    except Exception as e:
+        logger.error(f"Erro ao listar médicos para o negocio_id {negocio_id}: {e}")
+        return []
+
+# =================================================================================
 # FUNÇÕES DE PROFISSIONAIS E AUTOGESTÃO
 # =================================================================================
 
