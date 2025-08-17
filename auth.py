@@ -155,3 +155,44 @@ def get_optional_current_user_firebase(
         # Se get_current_user_firebase lançar uma exceção (token inválido/expirado, etc.),
         # nós a capturamos e retornamos None, tratando o usuário como anônimo.
         return None
+
+def get_paciente_autorizado(
+    paciente_id: str = Path(..., description="ID do paciente cujos dados estão sendo acessados."),
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db = Depends(get_db)
+) -> schemas.UsuarioProfile:
+    """
+    Dependência de segurança para garantir que o usuário atual tem permissão
+    para acessar ou modificar os dados de um paciente específico.
+    """
+    # 1. O próprio paciente sempre tem acesso.
+    if current_user.id == paciente_id:
+        return current_user
+
+    # Busca o documento completo do paciente para obter o negocio_id e o enfermeiro_id
+    paciente_doc_ref = db.collection('usuarios').document(paciente_id)
+    paciente_doc = paciente_doc_ref.get()
+    if not paciente_doc.exists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paciente não encontrado.")
+    
+    paciente_data = paciente_doc.to_dict()
+    
+    # Extrai o negocio_id do paciente (um paciente pode estar em vários, pegamos o primeiro por segurança)
+    negocio_id_paciente = list(paciente_data.get('roles', {}).keys())[0] if paciente_data.get('roles') else None
+    if not negocio_id_paciente:
+         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Paciente não está associado a uma clínica.")
+
+    # 2. O Gestor (admin) da clínica do paciente tem acesso.
+    if current_user.roles.get(negocio_id_paciente) == 'admin':
+        return current_user
+        
+    # 3. O Enfermeiro vinculado ao paciente tem acesso.
+    enfermeiro_vinculado_id = paciente_data.get('enfermeiro_id')
+    if enfermeiro_vinculado_id and current_user.id == enfermeiro_vinculado_id:
+        return current_user
+
+    # Se nenhuma das condições for atendida, nega o acesso.
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Acesso negado: você não tem permissão para visualizar ou modificar os dados deste paciente."
+    )
