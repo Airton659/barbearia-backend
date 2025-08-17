@@ -165,8 +165,14 @@ def get_paciente_autorizado(
     Dependência de segurança para garantir que o usuário atual tem permissão
     para acessar ou modificar os dados de um paciente específico.
     """
+    print("--- INICIANDO VERIFICAÇÃO DE ACESSO AO PACIENTE ---")
+    print(f"ID do Paciente alvo: {paciente_id}")
+    print(f"ID do Usuário tentando acessar: {current_user.id}")
+    print(f"Roles do Usuário: {current_user.roles}")
+
     # 1. O próprio paciente sempre tem acesso.
     if current_user.id == paciente_id:
+        print("DEBUG: Acesso permitido. Usuário é o próprio paciente.")
         return current_user
 
     # Busca o documento completo do paciente para obter o negocio_id e o enfermeiro_id
@@ -176,26 +182,31 @@ def get_paciente_autorizado(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paciente não encontrado.")
     
     paciente_data = paciente_doc.to_dict()
+    print(f"Dados do Paciente no DB: {paciente_data}")
     
     # Extrai o negocio_id do paciente (um paciente pode estar em vários, pegamos o primeiro por segurança)
     negocio_id_paciente = list(paciente_data.get('roles', {}).keys())[0] if paciente_data.get('roles') else None
+    print(f"Clínica (negocio_id) do Paciente: {negocio_id_paciente}")
     if not negocio_id_paciente:
          raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Paciente não está associado a uma clínica.")
 
     # 2. O Gestor (admin) da clínica do paciente tem acesso.
     if current_user.roles.get(negocio_id_paciente) == 'admin':
+        print("DEBUG: Acesso permitido. Usuário é admin da clínica.")
         return current_user
         
     # 3. O Enfermeiro vinculado ao paciente tem acesso.
-    # CORREÇÃO: Primeiro, checa se o usuário é um profissional/admin da clínica.
     user_role_na_clinica = current_user.roles.get(negocio_id_paciente)
+    print(f"Role do usuário na clínica do paciente: {user_role_na_clinica}")
     if user_role_na_clinica in ["profissional", "admin"]:
-        # Se for, checa se o ID dele é o que está vinculado ao paciente.
         enfermeiro_vinculado_id = paciente_data.get('enfermeiro_id')
+        print(f"ID do Enfermeiro vinculado no DB: {enfermeiro_vinculado_id}")
         if enfermeiro_vinculado_id and current_user.id == enfermeiro_vinculado_id:
+            print("DEBUG: Acesso permitido. Usuário é o enfermeiro vinculado.")
             return current_user
 
     # Se nenhuma das condições for atendida, nega o acesso.
+    print("--- ACESSO NEGADO. Nenhuma regra de permissão foi atendida. ---")
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Acesso negado: você não tem permissão para visualizar ou modificar os dados deste paciente."
