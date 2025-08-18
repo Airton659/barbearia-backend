@@ -90,6 +90,7 @@ class ProfissionalCreate(ProfissionalBase):
 
 class ProfissionalResponse(ProfissionalBase):
     id: str = Field(..., description="ID do documento do profissional no Firestore.")
+    email: EmailStr = Field(..., description="E-mail do profissional (vinculado à sua conta de usuário).") # <-- ADICIONAR ESTA LINHA
     # Adicionamos os serviços aqui para carregar o perfil completo de um profissional
     servicos: List['ServicoResponse'] = []
     postagens: List['PostagemResponse'] = []

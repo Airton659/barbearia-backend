@@ -547,6 +547,16 @@ def listar_profissionais_por_negocio(db: firestore.client, negocio_id: str) -> L
         for doc in query.stream():
             prof_data = doc.to_dict()
             prof_data['id'] = doc.id
+            
+            # --- INÍCIO DA CORREÇÃO ---
+            # Busca o usuário correspondente para obter o e-mail
+            usuario_doc = buscar_usuario_por_firebase_uid(db, prof_data.get('usuario_uid'))
+            if usuario_doc:
+                prof_data['email'] = usuario_doc.get('email', '') # Adiciona o e-mail ao dicionário
+            else:
+                prof_data['email'] = '' # Garante que o campo sempre exista
+            # --- FIM DA CORREÇÃO ---
+
             profissionais.append(prof_data)
         return profissionais
     except Exception as e:
