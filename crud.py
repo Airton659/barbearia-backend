@@ -338,6 +338,10 @@ def admin_listar_clientes_por_negocio(db: firestore.client, negocio_id: str, sta
 
             if status_no_negocio == status:
                 cliente_data['id'] = doc.id
+                # --- INÍCIO DA CORREÇÃO ---
+                # Mapeia o enfermeiro_id para o campo profissional_id, que é o esperado pelo app.
+                cliente_data['profissional_id'] = cliente_data.get('enfermeiro_id', None)
+                # --- FIM DA CORREÇÃO ---
                 clientes.append(cliente_data)
 
         return clientes
