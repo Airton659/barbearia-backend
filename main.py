@@ -235,7 +235,7 @@ def desvincular_paciente(
 # ENDPOINTS DA FICHA DO PACIENTE (Módulo Clínico)
 # =================================================================================
 
-@app.post("/pacientes/{paciente_id}/consultas", response_model=schemas.ConsultaResponse, tags=["Ficha do Paciente"])
+@app.post("/pacientes/{paciente_id}/consultas", response_model=schemas.ConsultaResponse, status_code=status.HTTP_201_CREATED, tags=["Ficha do Paciente"])
 def adicionar_consulta(
     paciente_id: str,
     consulta_data: schemas.ConsultaCreate,
@@ -246,7 +246,7 @@ def adicionar_consulta(
     consulta_data.paciente_id = paciente_id
     return crud.criar_consulta(db, consulta_data)
 
-@app.post("/pacientes/{paciente_id}/exames", response_model=schemas.ExameResponse, tags=["Ficha do Paciente"])
+@app.post("/pacientes/{paciente_id}/exames", response_model=schemas.ExameResponse, status_code=status.HTTP_201_CREATED, tags=["Ficha do Paciente"])
 def adicionar_exame(
     paciente_id: str,
     exame_data: schemas.ExameCreate,
@@ -257,7 +257,7 @@ def adicionar_exame(
     exame_data.paciente_id = paciente_id
     return crud.adicionar_exame(db, exame_data)
 
-@app.post("/pacientes/{paciente_id}/medicacoes", response_model=schemas.MedicacaoResponse, tags=["Ficha do Paciente"])
+@app.post("/pacientes/{paciente_id}/medicacoes", response_model=schemas.MedicacaoResponse, status_code=status.HTTP_201_CREATED, tags=["Ficha do Paciente"])
 def adicionar_medicacao(
     paciente_id: str,
     medicacao_data: schemas.MedicacaoCreate,
@@ -268,7 +268,7 @@ def adicionar_medicacao(
     medicacao_data.paciente_id = paciente_id
     return crud.prescrever_medicacao(db, medicacao_data)
 
-@app.post("/pacientes/{paciente_id}/checklist-itens", response_model=schemas.ChecklistItemResponse, tags=["Ficha do Paciente"])
+@app.post("/pacientes/{paciente_id}/checklist-itens", response_model=schemas.ChecklistItemResponse, status_code=status.HTTP_201_CREATED, tags=["Ficha do Paciente"])
 def adicionar_checklist_item(
     paciente_id: str,
     item_data: schemas.ChecklistItemCreate,
@@ -279,7 +279,7 @@ def adicionar_checklist_item(
     item_data.paciente_id = paciente_id
     return crud.adicionar_item_checklist(db, item_data)
 
-@app.post("/pacientes/{paciente_id}/orientacoes", response_model=schemas.OrientacaoResponse, tags=["Ficha do Paciente"])
+@app.post("/pacientes/{paciente_id}/orientacoes", response_model=schemas.OrientacaoResponse, status_code=status.HTTP_201_CREATED, tags=["Ficha do Paciente"])
 def adicionar_orientacao(
     paciente_id: str,
     orientacao_data: schemas.OrientacaoCreate,
@@ -393,7 +393,7 @@ def delete_exame(
 ):
     """(Autorizado) Deleta um exame da ficha do paciente."""
     if not crud.delete_exame(db, paciente_id, exame_id):
-        raise HTTPException(status_code=404, detail="Exame não encontrado.")
+        raise HTTPException(status_code=404, detail="Exame não encontrada.")
     return
 
 @app.patch("/pacientes/{paciente_id}/medicacoes/{medicacao_id}", response_model=schemas.MedicacaoResponse, tags=["Ficha do Paciente"])
@@ -1128,4 +1128,3 @@ async def upload_file_endpoint(
     except Exception as e:
         logger.error(f"ERRO CRÍTICO NO UPLOAD DE ARQUIVO: {e}")
         raise HTTPException(status_code=500, detail=f"Ocorreu um erro interno no servidor: {e}")
-
