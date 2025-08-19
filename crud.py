@@ -1344,13 +1344,29 @@ def _notificar_cliente_cancelamento(db: firestore.client, agendamento: Dict, age
 # FUNÇÕES DO MÓDULO CLÍNICO
 # =================================================================================
 
+# Correção na função para garantir que o ID do documento 'usuarios' seja sempre usado
 def vincular_paciente_enfermeiro(db: firestore.client, negocio_id: str, paciente_id: str, enfermeiro_id: str, autor_uid: str) -> Optional[Dict]:
     """Vincula um paciente a um enfermeiro (profissional) em uma clínica."""
     try:
+        # 1. Obter o perfil profissional do enfermeiro para encontrar o UID do usuário
+        perfil_enfermeiro = buscar_profissional_por_id(db, enfermeiro_id)
+        if not perfil_enfermeiro:
+            logger.warning(f"Tentativa de vincular a um enfermeiro inexistente com ID de profissional: {enfermeiro_id}")
+            return None
+            
+        # 2. Encontrar o ID do documento de usuário (usuarios collection) do enfermeiro
+        usuario_enfermeiro = buscar_usuario_por_firebase_uid(db, perfil_enfermeiro['usuario_uid'])
+        if not usuario_enfermeiro:
+             logger.warning(f"Usuário associado ao perfil profissional {enfermeiro_id} não encontrado.")
+             return None
+             
+        # O ID a ser salvo é o ID do documento do usuário, não o ID do documento profissional.
+        usuario_enfermeiro_id_para_salvar = usuario_enfermeiro['id']
+
         paciente_ref = db.collection('usuarios').document(paciente_id)
         # Adiciona/atualiza o campo enfermeiro_id no documento do paciente
         paciente_ref.update({
-            'enfermeiro_id': enfermeiro_id
+            'enfermeiro_id': usuario_enfermeiro_id_para_salvar
         })
 
         criar_log_auditoria(
@@ -1358,10 +1374,10 @@ def vincular_paciente_enfermeiro(db: firestore.client, negocio_id: str, paciente
             autor_uid=autor_uid,
             negocio_id=negocio_id,
             acao="VINCULO_PACIENTE_ENFERMEIRO",
-            detalhes={"paciente_id": paciente_id, "enfermeiro_id": enfermeiro_id}
+            detalhes={"paciente_id": paciente_id, "enfermeiro_id": usuario_enfermeiro_id_para_salvar}
         )
 
-        logger.info(f"Paciente {paciente_id} vinculado ao enfermeiro {enfermeiro_id} no negócio {negocio_id}.")
+        logger.info(f"Paciente {paciente_id} vinculado ao enfermeiro {usuario_enfermeiro_id_para_salvar} no negócio {negocio_id}.")
         doc = paciente_ref.get()
         if doc.exists:
             # Retorna o documento atualizado do paciente
