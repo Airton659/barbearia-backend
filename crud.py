@@ -326,6 +326,7 @@ def admin_criar_paciente(db: firestore.client, negocio_id: str, paciente_data: s
             logger.critical(f"FALHA CRÍTICA NA REVERSÃO: não foi possível deletar o usuário {firebase_user.uid} do Auth. {delete_e}")
         raise e
 
+# Correção na função para garantir que o ID do documento 'usuarios' seja sempre usado
 def admin_listar_clientes_por_negocio(db: firestore.client, negocio_id: str, status: str = 'ativo') -> List[Dict]:
     """Lista todos os usuários com o papel de 'cliente' para um negócio, com filtro de status."""
     clientes = []
@@ -338,10 +339,25 @@ def admin_listar_clientes_por_negocio(db: firestore.client, negocio_id: str, sta
 
             if status_no_negocio == status:
                 cliente_data['id'] = doc.id
-                # --- INÍCIO DA CORREÇÃO ---
-                # Mapeia o enfermeiro_id para o campo profissional_id, que é o esperado pelo app.
-                cliente_data['profissional_id'] = cliente_data.get('enfermeiro_id', None)
-                # --- FIM DA CORREÇÃO ---
+                
+                # CORREÇÃO: Busca o ID do perfil profissional a partir do ID do usuário (enfermeiro)
+                enfermeiro_user_id = cliente_data.get('enfermeiro_id')
+                if enfermeiro_user_id:
+                    # Busca o documento do usuário para obter o firebase_uid
+                    enfermeiro_doc = db.collection('usuarios').document(enfermeiro_user_id).get()
+                    if enfermeiro_doc.exists:
+                        firebase_uid = enfermeiro_doc.to_dict().get('firebase_uid')
+                        # Usa o firebase_uid para encontrar o perfil profissional correspondente
+                        perfil_profissional = buscar_profissional_por_uid(db, negocio_id, firebase_uid)
+                        if perfil_profissional:
+                            cliente_data['profissional_id'] = perfil_profissional.get('id')
+                        else:
+                            cliente_data['profissional_id'] = None
+                    else:
+                         cliente_data['profissional_id'] = None
+                else:
+                    cliente_data['profissional_id'] = None
+                
                 clientes.append(cliente_data)
 
         return clientes
