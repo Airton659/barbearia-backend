@@ -1077,3 +1077,55 @@ async def upload_foto(
     except Exception as e:
         logger.error(f"ERRO CRÍTICO NO UPLOAD: {e}")
         raise HTTPException(status_code=500, detail=f"Ocorreu um erro interno no servidor: {e}")
+
+
+
+# =================================================================================
+# FUNÇÃO AUXILIAR PARA UPLOAD DE ARQUIVOS GENÉRICOS
+# =================================================================================
+
+async def upload_generic_file(
+    file_content: bytes,
+    filename: str,
+    bucket_name: str,
+    content_type: str
+) -> str:
+    """Função auxiliar para upload de arquivos genéricos no Cloud Storage."""
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    
+    # Gera um nome de arquivo único para evitar conflitos
+    unique_filename = f"uploads/anexos/{uuid.uuid4()}-{filename}"
+    
+    blob = bucket.blob(unique_filename)
+    blob.upload_from_string(file_content, content_type=content_type)
+    
+    return blob.public_url
+
+# =================================================================================
+# NOVO ENDPOINT DE UPLOAD GENÉRICO
+# =================================================================================
+
+@app.post("/upload-file", tags=["Utilitários"])
+async def upload_file_endpoint(
+    file: UploadFile = File(...),
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase)
+):
+    """(Autenticado) Faz o upload de um arquivo genérico (PDF, DOCX, etc.) e retorna a URL."""
+    if not CLOUD_STORAGE_BUCKET_NAME_GLOBAL:
+        raise HTTPException(status_code=500, detail="Bucket do Cloud Storage não configurado.")
+    
+    try:
+        file_content = await file.read()
+        
+        uploaded_url = await upload_generic_file(
+            file_content=file_content,
+            filename=file.filename,
+            bucket_name=CLOUD_STORAGE_BUCKET_NAME_GLOBAL,
+            content_type=file.content_type
+        )
+        return JSONResponse(content={"url": uploaded_url})
+    except Exception as e:
+        logger.error(f"ERRO CRÍTICO NO UPLOAD DE ARQUIVO: {e}")
+        raise HTTPException(status_code=500, detail=f"Ocorreu um erro interno no servidor: {e}")
+
