@@ -1,6 +1,6 @@
 # barbearia-backend/schemas.py (Versão para Firestore Multi-Tenant)
 
-from pydantic import BaseModel, EmailStr, Field
+from pantic import BaseModel, EmailStr, Field
 from datetime import datetime, time
 from typing import Optional, List, Dict
 
@@ -409,6 +409,32 @@ class DiarioTecnicoUpdate(BaseModel):
     atividades: Optional[str] = None
     intercorrencias: Optional[str] = None
     # --- FIM DO NOVO BLOCO DE CÓDIGO ---
+
+# --- NOVO BLOCO DE CÓDIGO AQUI ---
+# =================================================================================
+# SCHEMAS DA PESQUISA DE SATISFAÇÃO
+# =================================================================================
+
+class RespostaItem(BaseModel):
+    pergunta_id: str
+    pergunta_texto: str # Desnormalizado para facilitar a exibição
+    resposta: str # Pode ser uma nota de 1 a 5, ou um texto, dependendo do tipo da pergunta
+
+class PesquisaEnviadaCreate(BaseModel):
+    negocio_id: str
+    paciente_id: str
+    modelo_pesquisa_id: str # ID do modelo de pesquisa que está sendo respondido
+
+class PesquisaEnviadaResponse(PesquisaEnviadaCreate):
+    id: str
+    data_envio: datetime
+    data_resposta: Optional[datetime] = None
+    status: str = Field("pendente", description="Status da pesquisa: 'pendente' ou 'respondida'.")
+    respostas: List[RespostaItem] = []
+
+class SubmeterPesquisaRequest(BaseModel):
+    respostas: List[RespostaItem]
+# --- FIM DO NOVO BLOCO DE CÓDIGO ---
 
 
 # CORREÇÃO: Usa o método model_rebuild() do Pydantic V2 para resolver as referências

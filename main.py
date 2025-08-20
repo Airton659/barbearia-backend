@@ -26,7 +26,7 @@ class PromoteRequest(BaseModel):
 app = FastAPI(
     title="API de Agendamento Multi-Tenant",
     description="Backend para múltiplos negócios de agendamento, usando Firebase e Firestore.",
-    version="2.0.0"
+    version="2.1.0" # Atualizando a versão
 )
 
 # Adicionar um logger para ajudar no debug
@@ -45,7 +45,7 @@ def startup_event():
 # --- Endpoint Raiz ---
 @app.get("/")
 def root():
-    return {"mensagem": "API de Agendamento Multi-Tenant funcionando", "versao": "2.0.0"}
+    return {"mensagem": "API de Agendamento Multi-Tenant funcionando", "versao": "2.1.0"}
 
 # =================================================================================
 # ENDPOINTS DE ADMINISTRAÇÃO DA PLATAFORMA (SUPER-ADMIN)
@@ -82,7 +82,7 @@ def listar_usuarios_do_negocio(
     admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
     db: firestore.client = Depends(get_db)
 ):
-    """(Admin de Negócio) Lista todos os usuários (clientes e profissionais) do seu negócio."""
+    """(Admin de Negócio) Lista todos os usuários (clientes, técnicos e profissionais) do seu negócio."""
     return crud.admin_listar_usuarios_por_negocio(db, negocio_id, status)
 
 @app.get("/negocios/{negocio_id}/clientes", response_model=List[schemas.UsuarioProfile], tags=["Admin - Gestão do Negócio"])
@@ -118,9 +118,7 @@ def set_paciente_status(
 def criar_paciente_por_admin(
     paciente_data: schemas.PacienteCreateByAdmin,
     negocio_id: str = Depends(validate_path_negocio_id),
-    # --- ALTERAÇÃO AQUI: Trocando a dependência de segurança ---
     current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
-    # --- FIM DA ALTERAÇÃO ---
     db: firestore.client = Depends(get_db)
 ):
     """(Admin de Negócio ou Enfermeiro) Cria um novo paciente, registrando-o no sistema."""
@@ -141,7 +139,7 @@ def atualizar_role_usuario(
     admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
     db: firestore.client = Depends(get_db)
 ):
-    """(Admin de Negócio) Atualiza o papel de um usuário (para 'cliente' ou 'profissional')."""
+    """(Admin de Negócio) Atualiza o papel de um usuário (para 'cliente', 'profissional', 'tecnico', etc.)."""
     try:
         usuario_atualizado = crud.admin_atualizar_role_usuario(
             db, negocio_id, user_id, role_update.role, admin.firebase_uid
@@ -491,9 +489,8 @@ def criar_registro_diario(
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Adiciona um novo registro de acompanhamento ao diário do paciente."""
-    # Validação para garantir que o técnico pertence ao mesmo negócio do paciente
-    if registro_data.negocio_id not in tecnico.roles:
-        raise HTTPException(status_code=403, detail="Acesso negado: você não pertence a este negócio.")
+    if registro_data.negocio_id not in tecnico.roles or tecnico.roles.get(registro_data.negocio_id) != 'tecnico':
+        raise HTTPException(status_code=403, detail="Acesso negado: você não é um técnico deste negócio.")
     
     registro_data.paciente_id = paciente_id
     return crud.criar_registro_diario(db, registro_data, tecnico)
@@ -501,14 +498,50 @@ def criar_registro_diario(
 @app.get("/pacientes/{paciente_id}/diario", response_model=List[schemas.DiarioTecnicoResponse], tags=["Diário do Técnico"])
 def listar_registros_diario(
     paciente_id: str,
-    # A dependência get_paciente_autorizado já garante que apenas pessoal autorizado (admin, enfermeiro) veja a ficha
     current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """(Clínico Autorizado) Lista os registros de acompanhamento do diário do paciente."""
     return crud.listar_registros_diario(db, paciente_id)
-# --- FIM DO NOVO BLOCO DE CÓDIGO ---
 
+@app.patch("/pacientes/{paciente_id}/diario/{registro_id}", response_model=schemas.DiarioTecnicoResponse, tags=["Diário do Técnico"])
+def update_registro_diario(
+    paciente_id: str,
+    registro_id: str,
+    update_data: schemas.DiarioTecnicoUpdate,
+    tecnico: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Técnico) Atualiza um de seus registros de acompanhamento."""
+    try:
+        registro_atualizado = crud.update_registro_diario(db, paciente_id, registro_id, update_data, tecnico.id)
+        if not registro_atualizado:
+            raise HTTPException(status_code=404, detail="Registro não encontrado.")
+        return registro_atualizado
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        logger.error(f"Erro inesperado ao atualizar registro do diário: {e}")
+        raise HTTPException(status_code=500, detail="Ocorreu um erro interno.")
+
+@app.delete("/pacientes/{paciente_id}/diario/{registro_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Diário do Técnico"])
+def delete_registro_diario(
+    paciente_id: str,
+    registro_id: str,
+    tecnico: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Técnico) Deleta um de seus registros de acompanhamento."""
+    try:
+        if not crud.delete_registro_diario(db, paciente_id, registro_id, tecnico.id):
+            raise HTTPException(status_code=404, detail="Registro não encontrado.")
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        logger.error(f"Erro inesperado ao deletar registro do diário: {e}")
+        raise HTTPException(status_code=500, detail="Ocorreu um erro interno.")
+    return
+# --- FIM DO NOVO BLOCO DE CÓDIGO ---
 
 # =================================================================================
 # ENDPOINTS DE AUTOGESTÃO DO PROFISSIONAL
@@ -1164,3 +1197,52 @@ async def upload_file_endpoint(
     except Exception as e:
         logger.error(f"ERRO CRÍTICO NO UPLOAD DE ARQUIVO: {e}")
         raise HTTPException(status_code=500, detail=f"Ocorreu um erro interno no servidor: {e}")
+
+# --- NOVO BLOCO DE CÓDIGO AQUI ---
+# =================================================================================
+# ENDPOINTS DA PESQUISA DE SATISFAÇÃO
+# =================================================================================
+
+@app.post("/negocios/{negocio_id}/pesquisas/enviar", response_model=schemas.PesquisaEnviadaResponse, tags=["Pesquisa de Satisfação"])
+def enviar_pesquisa(
+    negocio_id: str,
+    envio_data: schemas.PesquisaEnviadaCreate,
+    admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin) Envia uma pesquisa de satisfação para um paciente."""
+    envio_data.negocio_id = negocio_id
+    return crud.enviar_pesquisa_satisfacao(db, envio_data)
+
+@app.get("/me/pesquisas", response_model=List[schemas.PesquisaEnviadaResponse], tags=["Pesquisa de Satisfação"])
+def listar_minhas_pesquisas(
+    negocio_id: str = Header(..., description="ID do Negócio para filtrar as pesquisas."),
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db: firestore.client = Depends(get_db)
+):
+    """(Paciente) Lista todas as pesquisas de satisfação recebidas."""
+    return crud.listar_pesquisas_por_paciente(db, negocio_id, current_user.id)
+
+@app.post("/me/pesquisas/{pesquisa_id}/submeter", response_model=schemas.PesquisaEnviadaResponse, tags=["Pesquisa de Satisfação"])
+def submeter_respostas(
+    pesquisa_id: str,
+    respostas_data: schemas.SubmeterPesquisaRequest,
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db: firestore.client = Depends(get_db)
+):
+    """(Paciente) Submete as respostas para uma pesquisa de satisfação."""
+    pesquisa_atualizada = crud.submeter_respostas_pesquisa(db, pesquisa_id, respostas_data, current_user.id)
+    if not pesquisa_atualizada:
+        raise HTTPException(status_code=404, detail="Pesquisa não encontrada ou não pertence a este paciente.")
+    return pesquisa_atualizada
+
+@app.get("/negocios/{negocio_id}/pesquisas/resultados", response_model=List[schemas.PesquisaEnviadaResponse], tags=["Pesquisa de Satisfação"])
+def get_resultados_pesquisas(
+    negocio_id: str,
+    modelo_pesquisa_id: Optional[str] = Query(None, description="Filtre os resultados por um modelo de pesquisa específico."),
+    admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin) Lista todos os resultados das pesquisas de satisfação respondidas."""
+    return crud.listar_resultados_pesquisas(db, negocio_id, modelo_pesquisa_id)
+# --- FIM DO NOVO BLOCO DE CÓDIGO ---

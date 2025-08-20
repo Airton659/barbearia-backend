@@ -47,9 +47,9 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
                 "roles": {"platform": "super_admin"}, "fcm_tokens": []
             }
             # --- CORREÇÃO: Adicionando os novos campos opcionais ---
-            if user_data.telefone:
+            if hasattr(user_data, 'telefone') and user_data.telefone:
                 user_dict['telefone'] = user_data.telefone
-            if user_data.endereco:
+            if hasattr(user_data, 'endereco') and user_data.endereco:
                 user_dict['endereco'] = user_data.endereco
             # --- FIM DA CORREÇÃO ---
             doc_ref = db.collection('usuarios').document()
@@ -75,10 +75,10 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
                 logger.info(f"Usuário existente {user_data.email} vinculado como cliente ao negócio {negocio_id}.")
             
             # Atualiza telefone e endereço se fornecidos
-            if user_data.telefone and user_existente.get('telefone') != user_data.telefone:
+            if hasattr(user_data, 'telefone') and user_data.telefone and user_existente.get('telefone') != user_data.telefone:
                 update_data['telefone'] = user_data.telefone
                 user_existente['telefone'] = user_data.telefone
-            if user_data.endereco and user_existente.get('endereco') != user_data.endereco:
+            if hasattr(user_data, 'endereco') and user_data.endereco and user_existente.get('endereco') != user_data.endereco:
                 update_data['endereco'] = user_data.endereco
                 user_existente['endereco'] = user_data.endereco
 
@@ -107,9 +107,9 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
             "roles": {negocio_id: role}, "fcm_tokens": []
         }
         # Adiciona os campos opcionais se existirem
-        if user_data.telefone:
+        if hasattr(user_data, 'telefone') and user_data.telefone:
             user_dict['telefone'] = user_data.telefone
-        if user_data.endereco:
+        if hasattr(user_data, 'endereco') and user_data.endereco:
             user_dict['endereco'] = user_data.endereco
         
         new_user_ref = db.collection('usuarios').document()
@@ -1741,11 +1741,145 @@ def listar_registros_diario(db: firestore.client, paciente_id: str) -> List[Dict
         logger.error(f"Erro ao listar o diário do paciente {paciente_id}: {e}")
     return registros
 
-def update_registro_diario(db: firestore.client, paciente_id: str, registro_id: str, update_data: schemas.DiarioTecnicoUpdate) -> Optional[Dict]:
-    """Atualiza um registro no diário do técnico."""
-    return _update_subcollection_item(db, paciente_id, "diario_tecnico", registro_id, update_data)
+def update_registro_diario(db: firestore.client, paciente_id: str, registro_id: str, update_data: schemas.DiarioTecnicoUpdate, tecnico_id: str) -> Optional[Dict]:
+    """Atualiza um registro no diário do técnico, verificando a autoria."""
+    try:
+        item_ref = db.collection('usuarios').document(paciente_id).collection('diario_tecnico').document(registro_id)
+        doc = item_ref.get()
+        if not doc.exists:
+            logger.warning(f"Registro do diário {registro_id} não encontrado.")
+            return None
+        
+        if doc.to_dict().get('tecnico_id') != tecnico_id:
+            logger.error(f"Técnico {tecnico_id} tentou editar registro de outro técnico.")
+            raise PermissionError("Você só pode editar seus próprios registros.")
 
-def delete_registro_diario(db: firestore.client, paciente_id: str, registro_id: str) -> bool:
-    """Deleta um registro do diário do técnico."""
-    return _delete_subcollection_item(db, paciente_id, "diario_tecnico", registro_id)
+        update_dict = update_data.model_dump(exclude_unset=True)
+        if not update_dict:
+            data = doc.to_dict()
+            data['id'] = doc.id
+            return data
+
+        item_ref.update(update_dict)
+        updated_doc = item_ref.get()
+        data = updated_doc.to_dict()
+        data['id'] = updated_doc.id
+        logger.info(f"Registro {registro_id} do paciente {paciente_id} atualizado pelo técnico {tecnico_id}.")
+        return data
+    except Exception as e:
+        logger.error(f"Erro ao atualizar registro {registro_id} do paciente {paciente_id}: {e}")
+        # Re-lança a exceção para ser tratada no endpoint
+        raise e
+
+
+def delete_registro_diario(db: firestore.client, paciente_id: str, registro_id: str, tecnico_id: str) -> bool:
+    """Deleta um registro do diário do técnico, verificando a autoria."""
+    try:
+        item_ref = db.collection('usuarios').document(paciente_id).collection('diario_tecnico').document(registro_id)
+        doc = item_ref.get()
+        if not doc.exists:
+            return False
+        
+        if doc.to_dict().get('tecnico_id') != tecnico_id:
+            raise PermissionError("Você só pode deletar seus próprios registros.")
+            
+        item_ref.delete()
+        logger.info(f"Registro {registro_id} do paciente {paciente_id} deletado pelo técnico {tecnico_id}.")
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao deletar registro {registro_id} do paciente {paciente_id}: {e}")
+        raise e
+# --- FIM DO NOVO BLOCO DE CÓDIGO ---
+
+# --- NOVO BLOCO DE CÓDIGO AQUI ---
+# =================================================================================
+# FUNÇÕES DA PESQUISA DE SATISFAÇÃO
+# =================================================================================
+
+def enviar_pesquisa_satisfacao(db: firestore.client, envio_data: schemas.PesquisaEnviadaCreate) -> Dict:
+    """Cria um registro de pesquisa enviada para um paciente."""
+    pesquisa_dict = envio_data.model_dump()
+    pesquisa_dict.update({
+        "data_envio": datetime.utcnow(),
+        "status": "pendente",
+        "respostas": []
+    })
+    
+    doc_ref = db.collection('pesquisas_enviadas').document()
+    doc_ref.set(pesquisa_dict)
+    
+    pesquisa_dict['id'] = doc_ref.id
+    logger.info(f"Pesquisa {envio_data.modelo_pesquisa_id} enviada para o paciente {envio_data.paciente_id}.")
+    
+    # Aqui, você pode adicionar a lógica para enviar uma notificação FCM para o paciente
+    
+    return pesquisa_dict
+
+def submeter_respostas_pesquisa(db: firestore.client, pesquisa_enviada_id: str, respostas_data: schemas.SubmeterPesquisaRequest, paciente_id: str) -> Optional[Dict]:
+    """Salva as respostas de um paciente para uma pesquisa e atualiza o status."""
+    pesquisa_ref = db.collection('pesquisas_enviadas').document(pesquisa_enviada_id)
+    pesquisa_doc = pesquisa_ref.get()
+
+    if not pesquisa_doc.exists or pesquisa_doc.to_dict().get('paciente_id') != paciente_id:
+        logger.error(f"Paciente {paciente_id} tentou responder pesquisa {pesquisa_enviada_id} que não lhe pertence ou não existe.")
+        return None
+
+    if pesquisa_doc.to_dict().get('status') == 'respondida':
+        logger.warning(f"Paciente {paciente_id} tentou responder a pesquisa {pesquisa_enviada_id} novamente.")
+        # Retorna o documento como está, sem erro
+        data = pesquisa_doc.to_dict()
+        data['id'] = pesquisa_doc.id
+        return data
+
+    update_dict = {
+        "status": "respondida",
+        "data_resposta": datetime.utcnow(),
+        "respostas": [item.model_dump() for item in respostas_data.respostas]
+    }
+    
+    pesquisa_ref.update(update_dict)
+    
+    updated_doc = pesquisa_ref.get()
+    data = updated_doc.to_dict()
+    data['id'] = updated_doc.id
+    return data
+
+def listar_pesquisas_por_paciente(db: firestore.client, negocio_id: str, paciente_id: str) -> List[Dict]:
+    """Lista todas as pesquisas (pendentes e respondidas) de um paciente."""
+    pesquisas = []
+    try:
+        query = db.collection('pesquisas_enviadas')\
+            .where('negocio_id', '==', negocio_id)\
+            .where('paciente_id', '==', paciente_id)\
+            .order_by('data_envio', direction=firestore.Query.DESCENDING)
+        
+        for doc in query.stream():
+            data = doc.to_dict()
+            data['id'] = doc.id
+            pesquisas.append(data)
+    except Exception as e:
+        logger.error(f"Erro ao listar pesquisas do paciente {paciente_id}: {e}")
+    return pesquisas
+
+def listar_resultados_pesquisas(db: firestore.client, negocio_id: str, modelo_pesquisa_id: Optional[str] = None) -> List[Dict]:
+    """(Admin) Lista todas as pesquisas respondidas de um negócio, opcionalmente filtrando por modelo."""
+    resultados = []
+    try:
+        query = db.collection('pesquisas_enviadas')\
+            .where('negocio_id', '==', negocio_id)\
+            .where('status', '==', 'respondida')
+
+        if modelo_pesquisa_id:
+            query = query.where('modelo_pesquisa_id', '==', modelo_pesquisa_id)
+        
+        # Como não podemos usar '!=' ou 'not-in', a ordenação ajuda a agrupar
+        query = query.order_by('data_resposta', direction=firestore.Query.DESCENDING)
+
+        for doc in query.stream():
+            data = doc.to_dict()
+            data['id'] = doc.id
+            resultados.append(data)
+    except Exception as e:
+        logger.error(f"Erro ao listar resultados de pesquisas para o negócio {negocio_id}: {e}")
+    return resultados
 # --- FIM DO NOVO BLOCO DE CÓDIGO ---

@@ -1,4 +1,4 @@
-# 📘 API Multi-Tenant para Agendamentos e Gestão Clínica (v2.1)
+# 📘 API Multi-Tenant para Agendamentos e Gestão Clínica (v2.2)
 
 Bem-vindo ao repositório da API. Este projeto serve como um backend robusto, escalável e genérico, construído com uma arquitetura moderna e multi-tenant, capaz de atender tanto aplicações de agendamento de serviços quanto sistemas de gestão clínica.
 
@@ -57,8 +57,11 @@ Este módulo expande a API para atender às necessidades de uma clínica no acom
     * CRUD completo para médicos de referência (sem login) nos endpoints `.../medicos`.
 * **Vínculo Paciente-Enfermeiro:**
     * Endpoints para vincular (`POST`) e desvincular (`DELETE`) um paciente a um enfermeiro em `.../vincular-paciente`.
+* **Pesquisa de Satisfação:**
+    * Envio de pesquisas para pacientes via `POST /negocios/{id}/pesquisas/enviar`.
+    * Visualização dos resultados consolidados via `GET /negocios/{id}/pesquisas/resultados`.
 
-#### Atendimento ao Paciente (Perfis: Enfermeiro e Técnico)
+#### Atendimento ao Paciente (Perfis: Enfermeiro, Técnico e Paciente)
 * **Plano de Cuidado (Enfermeiro):**
     * O Enfermeiro é o ponto de entrada, responsável por criar e editar o plano de cuidado inicial do paciente (evolução) através do endpoint `POST /pacientes/{paciente_id}/consultas`.
 * **Diário de Acompanhamento (Técnico):**
@@ -71,6 +74,9 @@ Este módulo expande a API para atender às necessidades de uma clínica no acom
     * Endpoint otimizado para carregar a ficha inteira de uma vez: `GET /pacientes/{paciente_id}/ficha-completa`.
 * **Notificações:**
     * Agendamento de notificações futuras para pacientes vinculados via `POST /notificacoes/agendar`.
+* **Pesquisa de Satisfação (Paciente):**
+    * O paciente pode visualizar suas pesquisas pendentes via `GET /me/pesquisas`.
+    * Ele pode submeter suas respostas através de `POST /me/pesquisas/{id}/submeter`.
 
 #### Segurança e Privacidade
 * O acesso à ficha de um paciente é estritamente controlado. Apenas o **próprio paciente**, o **enfermeiro vinculado**, o **técnico vinculado** ou o **gestor da clínica** podem visualizar os dados.
