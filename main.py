@@ -6,7 +6,9 @@ import schemas, crud
 import logging
 from datetime import date
 from database import initialize_firebase_app, get_db
-from auth import get_current_user_firebase, get_super_admin_user, get_current_admin_user, get_current_profissional_user, get_optional_current_user_firebase, validate_negocio_id, validate_path_negocio_id, get_paciente_autorizado
+# --- ALTERAÇÃO AQUI: Importando a nova função de segurança ---
+from auth import get_current_user_firebase, get_super_admin_user, get_current_admin_user, get_current_profissional_user, get_optional_current_user_firebase, validate_negocio_id, validate_path_negocio_id, get_paciente_autorizado, get_current_admin_or_profissional_user, get_current_tecnico_user
+# --- FIM DA ALTERAÇÃO ---
 from firebase_admin import firestore
 from pydantic import BaseModel
 from google.cloud import storage
@@ -116,10 +118,12 @@ def set_paciente_status(
 def criar_paciente_por_admin(
     paciente_data: schemas.PacienteCreateByAdmin,
     negocio_id: str = Depends(validate_path_negocio_id),
-    admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+    # --- ALTERAÇÃO AQUI: Trocando a dependência de segurança ---
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    # --- FIM DA ALTERAÇÃO ---
     db: firestore.client = Depends(get_db)
 ):
-    """(Admin de Negócio) Cria um novo paciente, registrando-o no sistema."""
+    """(Admin de Negócio ou Enfermeiro) Cria um novo paciente, registrando-o no sistema."""
     try:
         novo_paciente = crud.admin_criar_paciente(db, negocio_id, paciente_data)
         return novo_paciente
@@ -473,6 +477,38 @@ def delete_orientacao(
     if not crud.delete_orientacao(db, paciente_id, orientacao_id):
         raise HTTPException(status_code=404, detail="Orientação não encontrada.")
     return
+
+# --- NOVO BLOCO DE CÓDIGO AQUI ---
+# =================================================================================
+# ENDPOINTS DO DIÁRIO DO TÉCNICO
+# =================================================================================
+
+@app.post("/pacientes/{paciente_id}/diario", response_model=schemas.DiarioTecnicoResponse, status_code=status.HTTP_201_CREATED, tags=["Diário do Técnico"])
+def criar_registro_diario(
+    paciente_id: str,
+    registro_data: schemas.DiarioTecnicoCreate,
+    tecnico: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Técnico) Adiciona um novo registro de acompanhamento ao diário do paciente."""
+    # Validação para garantir que o técnico pertence ao mesmo negócio do paciente
+    if registro_data.negocio_id not in tecnico.roles:
+        raise HTTPException(status_code=403, detail="Acesso negado: você não pertence a este negócio.")
+    
+    registro_data.paciente_id = paciente_id
+    return crud.criar_registro_diario(db, registro_data, tecnico)
+
+@app.get("/pacientes/{paciente_id}/diario", response_model=List[schemas.DiarioTecnicoResponse], tags=["Diário do Técnico"])
+def listar_registros_diario(
+    paciente_id: str,
+    # A dependência get_paciente_autorizado já garante que apenas pessoal autorizado (admin, enfermeiro) veja a ficha
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    db: firestore.client = Depends(get_db)
+):
+    """(Clínico Autorizado) Lista os registros de acompanhamento do diário do paciente."""
+    return crud.listar_registros_diario(db, paciente_id)
+# --- FIM DO NOVO BLOCO DE CÓDIGO ---
+
 
 # =================================================================================
 # ENDPOINTS DE AUTOGESTÃO DO PROFISSIONAL

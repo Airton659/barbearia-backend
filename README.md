@@ -52,13 +52,18 @@ Este módulo expande a API para atender às necessidades de uma clínica no acom
     * Listagem de pacientes com filtros por status (`ativo` ou `arquivado`) via `GET /negocios/{id}/usuarios`.
     * Arquivamento e reativação de pacientes via `PATCH /negocios/{id}/pacientes/{id}/status`.
 * **Gestão de Equipe:**
-    * Atualização de papéis de usuários para `cliente` (Paciente) ou `profissional` (Enfermeiro) via `PATCH /negocios/{id}/usuarios/{id}/role`.
+    * Atualização de papéis de usuários para `cliente` (Paciente), `profissional` (Enfermeiro) ou `tecnico` via `PATCH /negocios/{id}/usuarios/{id}/role`.
 * **Gestão de Médicos:**
     * CRUD completo para médicos de referência (sem login) nos endpoints `.../medicos`.
 * **Vínculo Paciente-Enfermeiro:**
     * Endpoints para vincular (`POST`) e desvincular (`DELETE`) um paciente a um enfermeiro em `.../vincular-paciente`.
 
-#### Atendimento ao Paciente (Perfil: Enfermeiro)
+#### Atendimento ao Paciente (Perfis: Enfermeiro e Técnico)
+* **Plano de Cuidado (Enfermeiro):**
+    * O Enfermeiro é o ponto de entrada, responsável por criar e editar o plano de cuidado inicial do paciente (evolução) através do endpoint `POST /pacientes/{paciente_id}/consultas`.
+* **Diário de Acompanhamento (Técnico):**
+    * O Técnico executa o plano e registra suas atividades no diário.
+    * Ele pode visualizar o plano do enfermeiro, mas só pode criar e editar seus próprios registros via `POST /pacientes/{paciente_id}/diario`.
 * **Listagem de Pacientes:**
     * Um enfermeiro pode listar todos os pacientes que estão sob sua responsabilidade via `GET /me/pacientes`.
 * **Gestão da Ficha Clínica:**
@@ -68,5 +73,6 @@ Este módulo expande a API para atender às necessidades de uma clínica no acom
     * Agendamento de notificações futuras para pacientes vinculados via `POST /notificacoes/agendar`.
 
 #### Segurança e Privacidade
-* O acesso à ficha de um paciente é estritamente controlado. Apenas o **próprio paciente**, o **enfermeiro vinculado** ou o **gestor da clínica** podem visualizar ou modificar os dados, garantido pela dependência `get_paciente_autorizado`.
+* O acesso à ficha de um paciente é estritamente controlado. Apenas o **próprio paciente**, o **enfermeiro vinculado**, o **técnico vinculado** ou o **gestor da clínica** podem visualizar os dados.
+* A edição de registros clínicos é restrita: Enfermeiros só editam seus planos de cuidado, e técnicos só editam seus próprios diários de acompanhamento. O gestor pode atuar como enfermeiro, mas não edita os registros do técnico.
 * Ações administrativas críticas, como mudança de status de paciente ou vínculo, são registradas em uma trilha de auditoria.

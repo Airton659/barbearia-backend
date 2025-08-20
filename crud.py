@@ -46,6 +46,12 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
                 "nome": user_data.nome, "email": user_data.email, "firebase_uid": user_data.firebase_uid,
                 "roles": {"platform": "super_admin"}, "fcm_tokens": []
             }
+            # --- CORREÇÃO: Adicionando os novos campos opcionais ---
+            if user_data.telefone:
+                user_dict['telefone'] = user_data.telefone
+            if user_data.endereco:
+                user_dict['endereco'] = user_data.endereco
+            # --- FIM DA CORREÇÃO ---
             doc_ref = db.collection('usuarios').document()
             doc_ref.set(user_dict)
             user_dict['id'] = doc_ref.id
@@ -61,11 +67,24 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
         
         # Se o usuário já existe
         if user_existente:
+            user_ref = db.collection('usuarios').document(user_existente['id'])
+            update_data = {}
             if negocio_id not in user_existente.get("roles", {}):
-                user_ref = db.collection('usuarios').document(user_existente['id'])
-                transaction.update(user_ref, {f'roles.{negocio_id}': 'cliente'})
+                update_data[f'roles.{negocio_id}'] = 'cliente'
                 user_existente["roles"][negocio_id] = "cliente"
                 logger.info(f"Usuário existente {user_data.email} vinculado como cliente ao negócio {negocio_id}.")
+            
+            # Atualiza telefone e endereço se fornecidos
+            if user_data.telefone and user_existente.get('telefone') != user_data.telefone:
+                update_data['telefone'] = user_data.telefone
+                user_existente['telefone'] = user_data.telefone
+            if user_data.endereco and user_existente.get('endereco') != user_data.endereco:
+                update_data['endereco'] = user_data.endereco
+                user_existente['endereco'] = user_data.endereco
+
+            if update_data:
+                transaction.update(user_ref, update_data)
+
             return user_existente
 
         # Se é um novo usuário
@@ -87,6 +106,11 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
             "nome": user_data.nome, "email": user_data.email, "firebase_uid": user_data.firebase_uid,
             "roles": {negocio_id: role}, "fcm_tokens": []
         }
+        # Adiciona os campos opcionais se existirem
+        if user_data.telefone:
+            user_dict['telefone'] = user_data.telefone
+        if user_data.endereco:
+            user_dict['endereco'] = user_data.endereco
         
         new_user_ref = db.collection('usuarios').document()
         transaction.set(new_user_ref, user_dict)
@@ -175,7 +199,9 @@ def admin_listar_usuarios_por_negocio(db: firestore.client, negocio_id: str, sta
     """Lista todos os usuários (clientes e profissionais) de um negócio, com filtro de status."""
     usuarios = []
     try:
-        query = db.collection('usuarios').where(f'roles.{negocio_id}', 'in', ['cliente', 'profissional', 'admin'])
+        # --- ALTERAÇÃO AQUI: Incluindo 'tecnico' e 'admin' na consulta de usuários ---
+        query = db.collection('usuarios').where(f'roles.{negocio_id}', 'in', ['cliente', 'profissional', 'admin', 'tecnico'])
+        # --- FIM DA ALTERAÇÃO ---
 
         for doc in query.stream():
             usuario_data = doc.to_dict()
@@ -221,8 +247,10 @@ def admin_atualizar_role_usuario(db: firestore.client, negocio_id: str, user_id:
     Atualiza a role de um usuário dentro de um negócio específico.
     Cria/desativa o perfil profissional conforme necessário.
     """
-    if novo_role not in ['cliente', 'profissional', 'admin']:
-        raise ValueError("Role inválida. As roles permitidas são 'cliente', 'profissional' e 'admin'.")
+    # --- ALTERAÇÃO AQUI: Adicionando 'tecnico' à lista de roles válidas ---
+    if novo_role not in ['cliente', 'profissional', 'admin', 'tecnico']:
+        raise ValueError("Role inválida. As roles permitidas são 'cliente', 'profissional', 'admin' e 'tecnico'.")
+    # --- FIM DA ALTERAÇÃO ---
 
     user_ref = db.collection('usuarios').document(user_id)
     user_doc = user_ref.get()
@@ -272,7 +300,7 @@ def admin_atualizar_role_usuario(db: firestore.client, negocio_id: str, user_id:
             prof_ref.update({"ativo": True})
             logger.info(f"Perfil profissional reativado para o usuário {user_data['email']} no negócio {negocio_id}.")
 
-    elif novo_role == 'cliente':
+    elif novo_role == 'cliente' or novo_role == 'tecnico': # Desativa perfil se virar cliente OU tecnico
         if perfil_profissional and perfil_profissional.get('ativo'):
             # Desativa o perfil profissional se existir e estiver ativo
             prof_ref = db.collection('profissionais').document(perfil_profissional['id'])
@@ -1678,3 +1706,46 @@ def criar_log_auditoria(db: firestore.client, autor_uid: str, negocio_id: str, a
     except Exception as e:
         # Loga o erro mas não interrompe a operação principal
         logger.error(f"Falha ao criar log de auditoria: {e}")
+
+# --- NOVO BLOCO DE CÓDIGO AQUI ---
+# =================================================================================
+# FUNÇÕES DO DIÁRIO DO TÉCNICO
+# =================================================================================
+
+def criar_registro_diario(db: firestore.client, registro_data: schemas.DiarioTecnicoCreate, tecnico: schemas.UsuarioProfile) -> Dict:
+    """Salva um novo registro do técnico na subcoleção de um paciente."""
+    registro_dict = registro_data.model_dump()
+    registro_dict.update({
+        "data_ocorrencia": datetime.utcnow(),
+        "tecnico_id": tecnico.id,
+        "tecnico_nome": tecnico.nome,
+    })
+    
+    paciente_ref = db.collection('usuarios').document(registro_data.paciente_id)
+    doc_ref = paciente_ref.collection('diario_tecnico').document()
+    doc_ref.set(registro_dict)
+    
+    registro_dict['id'] = doc_ref.id
+    return registro_dict
+
+def listar_registros_diario(db: firestore.client, paciente_id: str) -> List[Dict]:
+    """Lista todos os registros do diário de um paciente."""
+    registros = []
+    try:
+        query = db.collection('usuarios').document(paciente_id).collection('diario_tecnico').order_by('data_ocorrencia', direction=firestore.Query.DESCENDING)
+        for doc in query.stream():
+            registro_data = doc.to_dict()
+            registro_data['id'] = doc.id
+            registros.append(registro_data)
+    except Exception as e:
+        logger.error(f"Erro ao listar o diário do paciente {paciente_id}: {e}")
+    return registros
+
+def update_registro_diario(db: firestore.client, paciente_id: str, registro_id: str, update_data: schemas.DiarioTecnicoUpdate) -> Optional[Dict]:
+    """Atualiza um registro no diário do técnico."""
+    return _update_subcollection_item(db, paciente_id, "diario_tecnico", registro_id, update_data)
+
+def delete_registro_diario(db: firestore.client, paciente_id: str, registro_id: str) -> bool:
+    """Deleta um registro do diário do técnico."""
+    return _delete_subcollection_item(db, paciente_id, "diario_tecnico", registro_id)
+# --- FIM DO NOVO BLOCO DE CÓDIGO ---

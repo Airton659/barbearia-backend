@@ -105,6 +105,25 @@ def get_current_admin_user(
     return current_user
 
 
+# --- NOVO BLOCO DE CÓDIGO AQUI ---
+def get_current_admin_or_profissional_user(
+    negocio_id: str,
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase)
+) -> schemas.UsuarioProfile:
+    """
+    Verifica se o usuário atual é um administrador ('admin') ou um profissional ('profissional')
+    do negócio especificado na URL. Usado para ações clínicas como cadastrar paciente.
+    """
+    user_role = current_user.roles.get(negocio_id)
+    if user_role not in ["admin", "profissional"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado: você não tem permissão de Gestor ou Enfermeiro para esta operação."
+        )
+    return current_user
+# --- FIM DO NOVO BLOCO DE CÓDIGO ---
+
+
 def get_super_admin_user(current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase)) -> schemas.UsuarioProfile:
     """
     Verifica se o usuário atual tem a permissão de super_admin da plataforma.
@@ -130,7 +149,7 @@ def get_current_profissional_user(
             detail="O header 'negocio-id' é obrigatório para esta operação."
         )
 
-    # Verifica se o usuário tem a role 'profissional' OU 'admin' (pois um admin também é um profissional)
+    # Verifica se o usuário tem la role 'profissional' OU 'admin' (pois um admin também é um profissional)
     user_role_for_negocio = current_user.roles.get(negocio_id)
     if user_role_for_negocio not in ["profissional", "admin"]:
         raise HTTPException(
@@ -211,3 +230,24 @@ def get_paciente_autorizado(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Acesso negado: você não tem permissão para visualizar ou modificar os dados deste paciente."
     )
+
+# --- NOVO BLOCO DE CÓDIGO AQUI ---
+def get_current_tecnico_user(
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase)
+) -> schemas.UsuarioProfile:
+    """
+    Verifica se o usuário atual tem a role 'tecnico' em algum dos negócios.
+    Esta é uma verificação genérica; a lógica do endpoint deve validar o negócio específico.
+    """
+    # Extrai a primeira role 'tecnico' que encontrar para validação.
+    # A validação de negócio específico acontecerá no endpoint.
+    user_roles = current_user.roles
+    is_tecnico_in_any_negocio = any(role == 'tecnico' for role in user_roles.values())
+
+    if not is_tecnico_in_any_negocio:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado: você não tem a permissão de Técnico."
+        )
+    return current_user
+# --- FIM DO NOVO BLOCO DE CÓDIGO ---

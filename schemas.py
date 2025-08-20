@@ -29,6 +29,11 @@ class UsuarioBase(BaseModel):
     nome: str
     email: EmailStr
     firebase_uid: str
+    # --- ALTERAÇÃO AQUI: Adicionando campos opcionais para o app clínico ---
+    telefone: Optional[str] = None
+    endereco: Optional[Dict[str, str]] = Field(None, description="Dicionário com dados de endereço. Ex: {'rua': 'Av. Exemplo', 'numero': '123', 'cidade': 'São Paulo'}")
+    # --- FIM DA ALTERAÇÃO ---
+
 
 class UsuarioCreate(UsuarioBase):
     # No Firestore, o usuário é criado via Firebase Auth, então o backend só sincroniza.
@@ -61,7 +66,9 @@ class PacienteProfile(UsuarioProfile):
     pass
 
 class RoleUpdateRequest(BaseModel):
-    role: str = Field(..., description="O novo papel do usuário (ex: 'cliente', 'profissional').")
+    # --- ALTERAÇÃO AQUI: Adicionando 'tecnico' como um papel válido ---
+    role: str = Field(..., description="O novo papel do usuário (ex: 'cliente', 'profissional', 'admin', 'tecnico').")
+    # --- FIM DA ALTERAÇÃO ---
 
 class PacienteCreateByAdmin(BaseModel):
     email: EmailStr
@@ -371,6 +378,38 @@ class FichaCompletaResponse(BaseModel):
     medicacoes: List[MedicacaoResponse]
     checklist: List[ChecklistItemResponse]
     orientacoes: List[OrientacaoResponse]
+
+
+# --- NOVO BLOCO DE CÓDIGO AQUI ---
+# =================================================================================
+# SCHEMAS DO DIÁRIO DO TÉCNICO
+# =================================================================================
+
+class DiarioTecnicoBase(BaseModel):
+    negocio_id: str
+    paciente_id: str
+    anotacao_geral: str = Field(..., description="Anotação principal sobre o acompanhamento.")
+    medicamentos: Optional[str] = Field(None, description="Observações sobre medicamentos.")
+    atividades: Optional[str] = Field(None, description="Observações sobre atividades realizadas.")
+    intercorrencias: Optional[str] = Field(None, description="Registro de qualquer intercorrência.")
+    # Adicione outros campos que julgar necessário
+
+class DiarioTecnicoCreate(DiarioTecnicoBase):
+    pass
+
+class DiarioTecnicoResponse(DiarioTecnicoBase):
+    id: str
+    data_ocorrencia: datetime = Field(..., description="Data e hora em que o registro foi feito.")
+    tecnico_id: str = Field(..., description="ID do usuário técnico que fez o registro.")
+    tecnico_nome: str = Field(..., description="Nome do técnico que fez o registro (desnormalizado).")
+
+class DiarioTecnicoUpdate(BaseModel):
+    anotacao_geral: Optional[str] = None
+    medicamentos: Optional[str] = None
+    atividades: Optional[str] = None
+    intercorrencias: Optional[str] = None
+    # --- FIM DO NOVO BLOCO DE CÓDIGO ---
+
 
 # CORREÇÃO: Usa o método model_rebuild() do Pydantic V2 para resolver as referências
 ProfissionalResponse.model_rebuild()
