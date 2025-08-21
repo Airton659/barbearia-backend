@@ -46,6 +46,7 @@ class UsuarioProfile(UsuarioBase):
     fcm_tokens: List[str] = []
     profissional_id: Optional[str] = Field(None, description="ID do perfil profissional, se o usuário for um profissional ou admin.")
 
+
 # Schema usado pelo endpoint de sync, agora com o negocio_id opcional
 class UsuarioSync(BaseModel):
     nome: str
@@ -53,6 +54,8 @@ class UsuarioSync(BaseModel):
     firebase_uid: str
     negocio_id: Optional[str] = Field(None, description="ID do negócio ao qual o usuário (cliente) está se cadastrando.")
     codigo_convite: Optional[str] = Field(None, description="Código de convite para se tornar admin de um negócio.")
+    telefone: Optional[str] = None
+    endereco: Optional[Dict[str, str]] = None
 
 # Schema para registrar o token de notificação
 class FCMTokenUpdate(BaseModel):
@@ -74,6 +77,8 @@ class PacienteCreateByAdmin(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=6, description="Senha para o novo paciente. Deve ser forte.")
     nome: str
+    telefone: Optional[str] = None
+    endereco: Optional[Dict[str, str]] = Field(None, description="Dicionário com dados de endereço.")
 
 class StatusUpdateRequest(BaseModel):
     status: str = Field(..., description="O novo status do paciente (ex: 'ativo', 'arquivado').")

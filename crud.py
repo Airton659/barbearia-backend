@@ -310,7 +310,7 @@ def admin_atualizar_role_usuario(db: firestore.client, negocio_id: str, user_id:
 
 def admin_criar_paciente(db: firestore.client, negocio_id: str, paciente_data: schemas.PacienteCreateByAdmin) -> Dict:
     """
-    (Admin) Cria um novo usuário de paciente no Firebase Auth e o sincroniza no Firestore.
+    (Admin ou Enfermeiro) Cria um novo usuário de paciente no Firebase Auth e o sincroniza no Firestore.
     """
     # 1. Criar usuário no Firebase Auth
     try:
@@ -327,12 +327,14 @@ def admin_criar_paciente(db: firestore.client, negocio_id: str, paciente_data: s
         logger.error(f"Erro ao criar usuário paciente no Firebase Auth: {e}")
         raise
 
-    # 2. Sincronizar o usuário no Firestore
+    # 2. Sincronizar o usuário no Firestore, passando todos os dados
     sync_data = schemas.UsuarioSync(
         nome=paciente_data.nome,
         email=paciente_data.email,
         firebase_uid=firebase_user.uid,
-        negocio_id=negocio_id
+        negocio_id=negocio_id,
+        telefone=paciente_data.telefone,
+        endereco=paciente_data.endereco
     )
 
     try:
