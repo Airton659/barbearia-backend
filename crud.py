@@ -46,12 +46,10 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
                 "nome": user_data.nome, "email": user_data.email, "firebase_uid": user_data.firebase_uid,
                 "roles": {"platform": "super_admin"}, "fcm_tokens": []
             }
-            # --- CORREÇÃO: Adicionando os novos campos opcionais ---
             if hasattr(user_data, 'telefone') and user_data.telefone:
                 user_dict['telefone'] = user_data.telefone
             if hasattr(user_data, 'endereco') and user_data.endereco:
                 user_dict['endereco'] = user_data.endereco
-            # --- FIM DA CORREÇÃO ---
             doc_ref = db.collection('usuarios').document()
             doc_ref.set(user_dict)
             user_dict['id'] = doc_ref.id
@@ -65,29 +63,6 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
     def transaction_sync_user(transaction):
         user_existente = buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
         
-        # Se o usuário já existe
-        if user_existente:
-            user_ref = db.collection('usuarios').document(user_existente['id'])
-            update_data = {}
-            if negocio_id not in user_existente.get("roles", {}):
-                update_data[f'roles.{negocio_id}'] = 'cliente'
-                user_existente["roles"][negocio_id] = "cliente"
-                logger.info(f"Usuário existente {user_data.email} vinculado como cliente ao negócio {negocio_id}.")
-            
-            # Atualiza telefone e endereço se fornecidos
-            if hasattr(user_data, 'telefone') and user_data.telefone and user_existente.get('telefone') != user_data.telefone:
-                update_data['telefone'] = user_data.telefone
-                user_existente['telefone'] = user_data.telefone
-            if hasattr(user_data, 'endereco') and user_data.endereco and user_existente.get('endereco') != user_data.endereco:
-                update_data['endereco'] = user_data.endereco
-                user_existente['endereco'] = user_data.endereco
-
-            if update_data:
-                transaction.update(user_ref, update_data)
-
-            return user_existente
-
-        # Se é um novo usuário
         negocio_doc_ref = db.collection('negocios').document(negocio_id)
         negocio_doc = negocio_doc_ref.get(transaction=transaction)
 
@@ -96,17 +71,36 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
 
         negocio_data = negocio_doc.to_dict()
         has_admin = negocio_data.get('admin_uid') is not None
+        
+        # --- LÓGICA DE PROMOÇÃO CORRIGIDA ---
         role = "cliente"
-
-        # Lógica para o primeiro admin do negócio
         if not has_admin and user_data.codigo_convite and user_data.codigo_convite == negocio_data.get('codigo_convite'):
             role = "admin"
+        # --- FIM DA CORREÇÃO ---
         
+        # Se o usuário já existe
+        if user_existente:
+            user_ref = db.collection('usuarios').document(user_existente['id'])
+            
+            # Atualiza a role apenas se ele não tiver uma para este negócio
+            if negocio_id not in user_existente.get("roles", {}):
+                transaction.update(user_ref, {f'roles.{negocio_id}': role})
+                user_existente["roles"][negocio_id] = role
+                
+                # Se foi promovido a admin, atualiza o negócio
+                if role == "admin":
+                    transaction.update(negocio_doc_ref, {'admin_uid': user_data.firebase_uid})
+                    logger.info(f"Usuário existente {user_data.email} promovido a ADMIN do negócio {negocio_id}.")
+                else:
+                    logger.info(f"Usuário existente {user_data.email} vinculado como CLIENTE ao negócio {negocio_id}.")
+            
+            return user_existente
+
+        # Se é um novo usuário
         user_dict = {
             "nome": user_data.nome, "email": user_data.email, "firebase_uid": user_data.firebase_uid,
             "roles": {negocio_id: role}, "fcm_tokens": []
         }
-        # Adiciona os campos opcionais se existirem
         if hasattr(user_data, 'telefone') and user_data.telefone:
             user_dict['telefone'] = user_data.telefone
         if hasattr(user_data, 'endereco') and user_data.endereco:
@@ -118,9 +112,9 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
 
         if role == "admin":
             transaction.update(negocio_doc_ref, {'admin_uid': user_data.firebase_uid})
-            logger.info(f"Novo usuário {user_data.email} criado como admin do negócio {negocio_id}.")
+            logger.info(f"Novo usuário {user_data.email} criado como ADMIN do negócio {negocio_id}.")
         else:
-            logger.info(f"Novo usuário {user_data.email} criado como cliente do negócio {negocio_id}.")
+            logger.info(f"Novo usuário {user_data.email} criado como CLIENTE do negócio {negocio_id}.")
         
         return user_dict
     
