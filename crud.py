@@ -1457,20 +1457,118 @@ def desvincular_paciente_enfermeiro(db: firestore.client, negocio_id: str, pacie
         logger.error(f"Erro ao desvincular paciente {paciente_id}: {e}")
         return None
 
-def listar_pacientes_por_enfermeiro(db: firestore.client, negocio_id: str, enfermeiro_id: str) -> List[Dict]:
-    """Lista todos os pacientes vinculados a um enfermeiro específico em um negócio."""
+# --- NOVA FUNÇÃO AQUI ---
+def vincular_tecnicos_paciente(db: firestore.client, paciente_id: str, tecnicos_ids: List[str], autor_uid: str) -> Optional[Dict]:
+    """
+    Vincula uma lista de técnicos a um paciente.
+    O campo `tecnicos_ids` no documento do paciente será substituído pela lista fornecida.
+    """
+    try:
+        paciente_ref = db.collection('usuarios').document(paciente_id)
+        
+        # Validar se os IDs dos técnicos existem
+        for tecnico_id in tecnicos_ids:
+            tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
+            if not tecnico_doc.exists:
+                raise ValueError(f"Técnico com ID '{tecnico_id}' não encontrado.")
+            # Opcional: validar se o papel do usuário é realmente 'tecnico'
+        
+        paciente_ref.update({
+            'tecnicos_ids': tecnicos_ids
+        })
+
+        criar_log_auditoria(
+            db,
+            autor_uid=autor_uid,
+            negocio_id=paciente_ref.get().to_dict().get('roles', {}).keys()[0], # Assumindo um único negócio
+            acao="VINCULO_PACIENTE_TECNICO",
+            detalhes={"paciente_id": paciente_id, "tecnicos_vinculados_ids": tecnicos_ids}
+        )
+
+        logger.info(f"Técnicos {tecnicos_ids} vinculados ao paciente {paciente_id}.")
+        doc = paciente_ref.get()
+        if doc.exists:
+            updated_doc = doc.to_dict()
+            updated_doc['id'] = doc.id
+            return updated_doc
+        return None
+    except Exception as e:
+        logger.error(f"Erro ao vincular técnicos ao paciente {paciente_id}: {e}")
+        raise e # Re-lança para o endpoint
+
+# --- FIM DA NOVA FUNÇÃO ---
+
+# --- NOVA FUNÇÃO AQUI ---
+def vincular_supervisor_tecnico(db: firestore.client, tecnico_id: str, supervisor_id: str, autor_uid: str) -> Optional[Dict]:
+    """
+    Vincula um enfermeiro supervisor a um técnico.
+    """
+    try:
+        tecnico_ref = db.collection('usuarios').document(tecnico_id)
+        tecnico_doc = tecnico_ref.get()
+        if not tecnico_doc.exists:
+            raise ValueError(f"Técnico com ID '{tecnico_id}' não encontrado.")
+            
+        supervisor_ref = db.collection('usuarios').document(supervisor_id)
+        if not supervisor_ref.get().exists:
+            raise ValueError(f"Supervisor com ID '{supervisor_id}' não encontrado.")
+            
+        # Opcional: validar se o papel do supervisor é 'profissional' ou 'admin'
+        
+        tecnico_ref.update({
+            'supervisor_id': supervisor_id
+        })
+        
+        criar_log_auditoria(
+            db,
+            autor_uid=autor_uid,
+            negocio_id=list(tecnico_doc.to_dict().get('roles', {}).keys())[0], # Assumindo um único negócio
+            acao="VINCULO_SUPERVISOR_TECNICO",
+            detalhes={"tecnico_id": tecnico_id, "supervisor_id": supervisor_id}
+        )
+
+        logger.info(f"Supervisor {supervisor_id} vinculado ao técnico {tecnico_id}.")
+        doc = tecnico_ref.get()
+        if doc.exists:
+            updated_doc = doc.to_dict()
+            updated_doc['id'] = doc.id
+            return updated_doc
+        return None
+    except Exception as e:
+        logger.error(f"Erro ao vincular supervisor ao técnico {tecnico_id}: {e}")
+        raise e # Re-lança para o endpoint
+# --- FIM DA NOVA FUNÇÃO ---
+
+# --- FUNÇÃO MODIFICADA AQUI ---
+def listar_pacientes_por_profissional_ou_tecnico(db: firestore.client, negocio_id: str, usuario_id: str, role: str) -> List[Dict]:
+    """
+    Lista todos os pacientes vinculados a um enfermeiro ou a um técnico,
+    com base no papel do usuário logado.
+    """
     pacientes = []
     try:
-        # Esta query assume que o enfermeiro_id está no documento do usuário/paciente
-        query = db.collection('usuarios').where(f'roles.{negocio_id}', '==', 'cliente').where('enfermeiro_id', '==', enfermeiro_id)
+        query = db.collection('usuarios').where(f'roles.{negocio_id}', '==', 'cliente')
+        
+        if role == 'profissional':
+            # Se for enfermeiro, busca pacientes que têm o enfermeiro_id correspondente
+            query = query.where('enfermeiro_id', '==', usuario_id)
+        elif role == 'tecnico':
+            # Se for técnico, busca pacientes onde o ID do técnico está na lista tecnicos_ids
+            query = query.where('tecnicos_ids', 'array_contains', usuario_id)
+        else:
+            # Caso contrário, não retorna nada
+            return []
+
         for doc in query.stream():
             paciente_data = doc.to_dict()
             paciente_data['id'] = doc.id
             pacientes.append(paciente_data)
+        
         return pacientes
     except Exception as e:
-        logger.error(f"Erro ao listar pacientes para o enfermeiro {enfermeiro_id}: {e}")
+        logger.error(f"Erro ao listar pacientes para o usuário {usuario_id} com role '{role}': {e}")
         return []
+# --- FIM DA FUNÇÃO MODIFICADA ---
 
 def criar_consulta(db: firestore.client, consulta_data: schemas.ConsultaCreate) -> Dict:
     """Salva uma nova consulta na subcoleção de um paciente."""

@@ -233,6 +233,55 @@ def desvincular_paciente(
         raise HTTPException(status_code=404, detail="Paciente não encontrado.")
     return paciente_atualizado
 
+# --- NOVO ENDPOINT AQUI ---
+@app.patch("/negocios/{negocio_id}/pacientes/{paciente_id}/vincular-tecnicos", response_model=schemas.UsuarioProfile, tags=["Admin - Gestão do Negócio"])
+def vincular_tecnicos_ao_paciente(
+    negocio_id: str = Depends(validate_path_negocio_id),
+    paciente_id: str = Path(..., description="ID do paciente a ser modificado."),
+    vinculo_data: schemas.TecnicosVincularRequest = ...,
+    admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin de Negócio) Vincula ou atualiza a lista de técnicos associados a um paciente."""
+    try:
+        paciente_atualizado = crud.vincular_tecnicos_paciente(
+            db, paciente_id, vinculo_data.tecnicos_ids, admin.firebase_uid
+        )
+        if not paciente_atualizado:
+            raise HTTPException(status_code=404, detail="Paciente não encontrado.")
+        return paciente_atualizado
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Erro inesperado ao vincular técnicos: {e}")
+        raise HTTPException(status_code=500, detail="Ocorreu um erro interno no servidor.")
+# --- FIM DO NOVO ENDPOINT ---
+
+# --- NOVO ENDPOINT AQUI ---
+@app.patch("/negocios/{negocio_id}/usuarios/{tecnico_id}/vincular-supervisor", response_model=schemas.UsuarioProfile, tags=["Admin - Gestão do Negócio"])
+def vincular_supervisor_ao_tecnico(
+    negocio_id: str = Depends(validate_path_negocio_id),
+    tecnico_id: str = Path(..., description="ID do usuário (documento) do técnico a ser modificado."),
+    vinculo_data: schemas.SupervisorVincularRequest = ...,
+    admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin de Negócio) Vincula um enfermeiro supervisor a um técnico."""
+    try:
+        tecnico_atualizado = crud.vincular_supervisor_tecnico(
+            db, tecnico_id, vinculo_data.supervisor_id, admin.firebase_uid
+        )
+        if not tecnico_atualizado:
+            raise HTTPException(status_code=404, detail="Técnico ou supervisor não encontrado.")
+        return tecnico_atualizado
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Erro inesperado ao vincular supervisor: {e}")
+        raise HTTPException(status_code=500, detail="Ocorreu um erro interno no servidor.")
+# --- FIM DO NOVO ENDPOINT ---
+
+
 # =================================================================================
 # ENDPOINTS DA FICHA DO PACIENTE (Módulo Clínico)
 # =================================================================================
@@ -702,13 +751,21 @@ def deletar_meu_bloqueio(
 @app.get("/me/pacientes", response_model=List[schemas.PacienteProfile], tags=["Profissional - Autogestão"])
 def listar_meus_pacientes(
     negocio_id: str = Depends(validate_negocio_id),
-    profissional_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
     db: firestore.client = Depends(get_db)
 ):
-    """(Profissional/Enfermeiro) Lista todos os pacientes vinculados a você."""
-    # O ID do enfermeiro é o ID do documento do próprio usuário logado.
-    enfermeiro_id = profissional_user.id
-    pacientes = crud.listar_pacientes_por_enfermeiro(db, negocio_id, enfermeiro_id)
+    """
+    (Profissional/Enfermeiro ou Técnico)
+    Lista todos os pacientes vinculados ao usuário logado, com base na sua role.
+    """
+    user_role = current_user.roles.get(negocio_id)
+    if user_role not in ["profissional", "tecnico"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado: esta operação é apenas para profissionais (enfermeiros) ou técnicos."
+        )
+
+    pacientes = crud.listar_pacientes_por_profissional_ou_tecnico(db, negocio_id, current_user.id, user_role)
     return pacientes
 
 # =================================================================================

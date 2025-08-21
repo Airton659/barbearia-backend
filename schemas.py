@@ -45,6 +45,8 @@ class UsuarioProfile(UsuarioBase):
     roles: dict[str, str] = Field({}, description="Dicionário de negocio_id para role (ex: {'negocio_A': 'admin', 'negocio_B': 'cliente'}).")
     fcm_tokens: List[str] = []
     profissional_id: Optional[str] = Field(None, description="ID do perfil profissional, se o usuário for um profissional ou admin.")
+    # Adicionando o campo supervisor_id para a nova funcionalidade
+    supervisor_id: Optional[str] = Field(None, description="ID do usuário (documento) do enfermeiro supervisor.")
 
 
 # Schema usado pelo endpoint de sync, agora com o negocio_id opcional
@@ -441,6 +443,13 @@ class SubmeterPesquisaRequest(BaseModel):
     respostas: List[RespostaItem]
 # --- FIM DO NOVO BLOCO DE CÓDIGO ---
 
+# --- NOVOS SCHEMAS AQUI ---
+class TecnicosVincularRequest(BaseModel):
+    tecnicos_ids: List[str] = Field(..., description="Lista de IDs de usuários dos técnicos a serem vinculados.")
+
+class SupervisorVincularRequest(BaseModel):
+    supervisor_id: str = Field(..., description="ID do usuário (documento) do enfermeiro supervisor.")
+# --- FIM DOS NOVOS SCHEMAS ---
 
 # CORREÇÃO: Usa o método model_rebuild() do Pydantic V2 para resolver as referências
 ProfissionalResponse.model_rebuild()
