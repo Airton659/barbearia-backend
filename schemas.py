@@ -1,6 +1,6 @@
 # barbearia-backend/schemas.py (Versão para Firestore Multi-Tenant)
 
-from pantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime, time
 from typing import Optional, List, Dict
 
