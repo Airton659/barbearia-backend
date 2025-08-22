@@ -2,7 +2,7 @@
 
 import schemas
 from datetime import datetime, date, time, timedelta
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Union
 
 from pydantic import BaseModel
 
@@ -1457,7 +1457,6 @@ def desvincular_paciente_enfermeiro(db: firestore.client, negocio_id: str, pacie
         logger.error(f"Erro ao desvincular paciente {paciente_id}: {e}")
         return None
 
-# --- NOVA FUNÇÃO AQUI ---
 def vincular_tecnicos_paciente(db: firestore.client, paciente_id: str, tecnicos_ids: List[str], autor_uid: str) -> Optional[Dict]:
     """
     Vincula uma lista de técnicos a um paciente.
@@ -1496,9 +1495,6 @@ def vincular_tecnicos_paciente(db: firestore.client, paciente_id: str, tecnicos_
         logger.error(f"Erro ao vincular técnicos ao paciente {paciente_id}: {e}")
         raise e # Re-lança para o endpoint
 
-# --- FIM DA NOVA FUNÇÃO ---
-
-# --- NOVA FUNÇÃO AQUI ---
 def vincular_supervisor_tecnico(db: firestore.client, tecnico_id: str, supervisor_id: str, autor_uid: str) -> Optional[Dict]:
     """
     Vincula um enfermeiro supervisor a um técnico.
@@ -1537,9 +1533,7 @@ def vincular_supervisor_tecnico(db: firestore.client, tecnico_id: str, superviso
     except Exception as e:
         logger.error(f"Erro ao vincular supervisor ao técnico {tecnico_id}: {e}")
         raise e # Re-lança para o endpoint
-# --- FIM DA NOVA FUNÇÃO ---
 
-# --- FUNÇÃO MODIFICADA AQUI ---
 def listar_pacientes_por_profissional_ou_tecnico(db: firestore.client, negocio_id: str, usuario_id: str, role: str) -> List[Dict]:
     """
     Lista todos os pacientes vinculados a um enfermeiro ou a um técnico,
@@ -1568,7 +1562,6 @@ def listar_pacientes_por_profissional_ou_tecnico(db: firestore.client, negocio_i
     except Exception as e:
         logger.error(f"Erro ao listar pacientes para o usuário {usuario_id} com role '{role}': {e}")
         return []
-# --- FIM DA FUNÇÃO MODIFICADA ---
 
 def criar_consulta(db: firestore.client, consulta_data: schemas.ConsultaCreate) -> Dict:
     """Salva uma nova consulta na subcoleção de um paciente."""
@@ -1956,7 +1949,7 @@ def listar_pesquisas_por_paciente(db: firestore.client, negocio_id: str, pacient
     return pesquisas
 
 def listar_resultados_pesquisas(db: firestore.client, negocio_id: str, modelo_pesquisa_id: Optional[str] = None) -> List[Dict]:
-    """(Admin) Lista todas as pesquisas respondidas de um negócio, opcionalmente filtrando por modelo."""
+    """(Admin) Lista todos os resultados das pesquisas de satisfação respondidas."""
     resultados = []
     try:
         query = db.collection('pesquisas_enviadas')\
@@ -1977,3 +1970,140 @@ def listar_resultados_pesquisas(db: firestore.client, negocio_id: str, modelo_pe
         logger.error(f"Erro ao listar resultados de pesquisas para o negócio {negocio_id}: {e}")
     return resultados
 # --- FIM DO NOVO BLOCO DE CÓDIGO ---
+
+# --- NOVAS FUNÇÕES AQUI ---
+# =================================================================================
+# FUNÇÕES DE PLANO DE CUIDADO E AUDITORIA
+# =================================================================================
+
+def registrar_confirmacao_leitura_plano(db: firestore.client, paciente_id: str, confirmacao: schemas.ConfirmacaoLeituraCreate) -> Dict:
+    """Registra a confirmação de leitura do plano de cuidado de um paciente por um técnico."""
+    confirmacao_dict = confirmacao.model_dump()
+    confirmacao_dict.update({
+        "paciente_id": paciente_id,
+        "data_confirmacao": datetime.utcnow()
+    })
+    
+    # Salva a confirmação em uma subcoleção do paciente, para facilitar a consulta
+    paciente_ref = db.collection('usuarios').document(paciente_id)
+    doc_ref = paciente_ref.collection('confirmacoes_leitura').document()
+    doc_ref.set(confirmacao_dict)
+
+    confirmacao_dict['id'] = doc_ref.id
+    return confirmacao_dict
+
+def verificar_leitura_plano_do_dia(db: firestore.client, paciente_id: str, tecnico_id: str, data: date) -> bool:
+    """Verifica se a leitura do plano de cuidado já foi confirmada pelo técnico em um dia específico."""
+    data_inicio_dia = datetime.combine(data, datetime.min.time())
+    data_fim_dia = datetime.combine(data, datetime.max.time())
+    
+    query = db.collection('usuarios').document(paciente_id).collection('confirmacoes_leitura')\
+        .where('usuario_id', '==', tecnico_id)\
+        .where('data_confirmacao', '>=', data_inicio_dia)\
+        .where('data_confirmacao', '<=', data_fim_dia)\
+        .limit(1)
+        
+    return len(list(query.stream())) > 0
+
+# =================================================================================
+# FUNÇÕES DO DIÁRIO DE ACOMPANHAMENTO ESTRUTURADO
+# =================================================================================
+
+def adicionar_registro_diario(db: firestore.client, paciente_id: str, registro: schemas.RegistroDiarioCreate, tecnico_id: str) -> Dict:
+    """Adiciona um novo registro estruturado ao diário de acompanhamento."""
+    registro_dict = registro.model_dump()
+    registro_dict.update({
+        "paciente_id": paciente_id,
+        "tecnico_id": tecnico_id,
+        "data_registro": datetime.utcnow()
+    })
+
+    paciente_ref = db.collection('usuarios').document(paciente_id)
+    doc_ref = paciente_ref.collection('registros_diarios_estruturados').document()
+    doc_ref.set(registro_dict)
+    
+    registro_dict['id'] = doc_ref.id
+    return registro_dict
+    
+# =================================================================================
+# FUNÇÕES DO CHECKLIST DIÁRIO
+# =================================================================================
+
+def listar_checklist_diario(db: firestore.client, paciente_id: str, data: date, negocio_id: str) -> List[Dict]:
+    """
+    Busca o checklist do dia para um paciente. Se não existir, gera um novo.
+    """
+    data_str = data.isoformat()
+    checklist_doc_ref = db.collection('usuarios').document(paciente_id).collection('checklists_diarios').document(data_str)
+    checklist_doc = checklist_doc_ref.get()
+
+    if checklist_doc.exists:
+        return checklist_doc.to_dict().get('itens', [])
+    else:
+        # Lógica para gerar o checklist do dia
+        # 1. Busca o Plano de Cuidado Ativo do paciente (implementação hipotética)
+        # Assumindo que o "Plano de Cuidado" tem um campo modelo_checklist_id
+        # plano_ativo = buscar_plano_de_cuidado_ativo(db, paciente_id)
+        # if not plano_ativo or not plano_ativo.get('modelo_checklist_id'):
+        #     return []
+        
+        # 2. Busca o Modelo de Checklist (implementação hipotética)
+        # modelo_checklist = buscar_modelo_checklist(db, plano_ativo['modelo_checklist_id'])
+        # if not modelo_checklist or not modelo_checklist.get('itens'):
+        #     return []
+        
+        # Como não temos os modelos, vamos usar um modelo genérico para demonstração
+        modelo_generico = [
+            {"id": "item1", "descricao": "Verificar sinais vitais", "concluido": False},
+            {"id": "item2", "descricao": "Administrar medicação", "concluido": False},
+            {"id": "item3", "descricao": "Auxiliar na higiene", "concluido": False},
+        ]
+        
+        # 3. Salva a nova instância do checklist para o dia
+        checklist_doc_ref.set({
+            "paciente_id": paciente_id,
+            "data": data,
+            "itens": modelo_generico
+        })
+        
+        return modelo_generico
+
+def atualizar_item_checklist_diario(db: firestore.client, paciente_id: str, data: date, item_id: str, update_data: schemas.ChecklistItemDiarioUpdate) -> Optional[Dict]:
+    """
+    Atualiza o status de um item do checklist diário.
+    """
+    data_str = data.isoformat()
+    checklist_doc_ref = db.collection('usuarios').document(paciente_id).collection('checklists_diarios').document(data_str)
+    
+    # Transação para garantir a atomicidade da atualização do array
+    @firestore.transactional
+    def update_in_transaction(transaction, doc_ref):
+        snapshot = doc_ref.get(transaction=transaction)
+        if not snapshot.exists:
+            raise ValueError("Checklist diário não encontrado para este dia.")
+
+        checklist = snapshot.to_dict()
+        itens = checklist.get('itens', [])
+        
+        item_encontrado = None
+        for item in itens:
+            if item.get('id') == item_id:
+                item_encontrado = item
+                break
+        
+        if not item_encontrado:
+            raise ValueError(f"Item do checklist com ID '{item_id}' não encontrado.")
+            
+        item_encontrado['concluido'] = update_data.concluido
+        
+        transaction.update(doc_ref, {'itens': itens})
+        return item_encontrado
+
+    try:
+        updated_item = update_in_transaction(db.transaction(), checklist_doc_ref)
+        return updated_item
+    except ValueError as e:
+        logger.error(f"Erro ao atualizar item do checklist {item_id}: {e}")
+        return None
+
+# --- FIM DAS NOVAS FUNÇÕES ---

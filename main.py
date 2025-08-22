@@ -1,7 +1,7 @@
 # barbearia-backend/main.py (Versão com Avaliações)
 
-from fastapi import FastAPI, Depends, HTTPException, status, Header, Path, Query, UploadFile, File
-from typing import List, Optional
+from fastapi import FastAPI, Depends, HTTPException, status, Header, Path, Query, UploadFile, File, Request
+from typing import List, Optional, Union
 import schemas, crud
 import logging
 from datetime import date
@@ -280,7 +280,6 @@ def vincular_supervisor_ao_tecnico(
         logger.error(f"Erro inesperado ao vincular supervisor: {e}")
         raise HTTPException(status_code=500, detail="Ocorreu um erro interno no servidor.")
 # --- FIM DO NOVO ENDPOINT ---
-
 
 # =================================================================================
 # ENDPOINTS DA FICHA DO PACIENTE (Módulo Clínico)
@@ -1303,3 +1302,65 @@ def get_resultados_pesquisas(
     """(Admin) Lista todos os resultados das pesquisas de satisfação respondidas."""
     return crud.listar_resultados_pesquisas(db, negocio_id, modelo_pesquisa_id)
 # --- FIM DO NOVO BLOCO DE CÓDIGO ---
+
+# --- NOVOS ENDPOINTS AQUI ---
+@app.post("/pacientes/{paciente_id}/confirmar-leitura-plano", response_model=schemas.ConfirmacaoLeituraResponse, tags=["Ficha do Paciente - Auditoria"])
+def confirmar_leitura_plano(
+    paciente_id: str,
+    confirmacao: schemas.ConfirmacaoLeituraCreate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Técnico) Confirma a leitura do plano de cuidado de um paciente."""
+    if confirmacao.usuario_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Acesso negado: a confirmação deve ser feita pelo técnico logado.")
+        
+    return crud.registrar_confirmacao_leitura_plano(db, paciente_id, confirmacao)
+
+@app.get("/pacientes/{paciente_id}/verificar-leitura-plano", tags=["Ficha do Paciente - Auditoria"])
+def verificar_leitura_plano(
+    paciente_id: str,
+    data: date = Query(..., description="Data para verificar a leitura (formato: YYYY-MM-DD)."),
+    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Técnico) Verifica se a leitura do plano de cuidado já foi confirmada para o dia."""
+    leitura_confirmada = crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, data)
+    return {"leitura_confirmada": leitura_confirmada}
+
+@app.post("/pacientes/{paciente_id}/registros-diarios", response_model=schemas.RegistroDiarioResponse, tags=["Diário do Técnico"])
+def adicionar_registro_diario(
+    paciente_id: str,
+    registro: schemas.RegistroDiarioCreate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Técnico) Adiciona um novo registro estruturado ao diário de acompanhamento do paciente."""
+    return crud.adicionar_registro_diario(db, paciente_id, registro, current_user.id)
+
+@app.get("/pacientes/{paciente_id}/checklist-diario", response_model=List[schemas.ChecklistItemDiarioResponse], tags=["Diário do Técnico"])
+def get_checklist_diario(
+    paciente_id: str,
+    data: date = Query(..., description="Data do checklist (formato: YYYY-MM-DD)."),
+    negocio_id: str = Header(..., description="ID do Negócio."),
+    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Técnico) Busca o checklist do dia para um paciente. Se não existir, gera um novo."""
+    return crud.listar_checklist_diario(db, paciente_id, data, negocio_id)
+
+@app.patch("/pacientes/{paciente_id}/checklist-diario/{item_id}", response_model=schemas.ChecklistItemDiarioResponse, tags=["Diário do Técnico"])
+def update_checklist_item_diario(
+    paciente_id: str,
+    item_id: str,
+    data: date = Query(..., description="Data do checklist (formato: YYYY-MM-DD)."),
+    update_data: schemas.ChecklistItemDiarioUpdate = ...,
+    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Técnico) Atualiza o status de um item no checklist diário do paciente."""
+    item_atualizado = crud.atualizar_item_checklist_diario(db, paciente_id, data, item_id, update_data)
+    if not item_atualizado:
+        raise HTTPException(status_code=404, detail="Item do checklist não encontrado.")
+    return item_atualizado
+# --- FIM DOS NOVOS ENDPOINTS ---

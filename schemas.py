@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime, time
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Union
 
 # =================================================================================
 # NOVOS SCHEMAS CENTRAIS (A BASE DA ARQUITETURA MULTI-TENANT)
@@ -449,6 +449,65 @@ class TecnicosVincularRequest(BaseModel):
 
 class SupervisorVincularRequest(BaseModel):
     supervisor_id: str = Field(..., description="ID do usuário (documento) do enfermeiro supervisor.")
+
+# Schemas para a nova funcionalidade de Auditoria de Leitura
+class ConfirmacaoLeituraCreate(BaseModel):
+    usuario_id: str = Field(..., description="ID do usuário técnico que está confirmando a leitura.")
+    ip_origem: Optional[str] = Field(None, description="Endereço IP do cliente, se disponível.")
+
+class ConfirmacaoLeituraResponse(ConfirmacaoLeituraCreate):
+    id: str
+    paciente_id: str
+    data_confirmacao: datetime
+
+# Schemas para a nova funcionalidade de Diário Estruturado
+class SinaisVitaisConteudo(BaseModel):
+    pressao_sistolica: Optional[int] = None
+    pressao_diastolica: Optional[int] = None
+    temperatura: Optional[float] = None
+    batimentos_cardiacos: Optional[int] = None
+    saturacao_oxigenio: Optional[float] = None
+
+class MedicacaoConteudo(BaseModel):
+    nome: str
+    dose: str
+    status: str = Field(..., description="Status da administração: 'administrado', 'recusado', 'pendente'.")
+    observacoes: Optional[str] = None
+
+class AnotacaoConteudo(BaseModel):
+    categoria: str = Field(..., description="Categoria da anotação (ex: 'Queixa do Paciente', 'Ocorrência', 'Evolução').")
+    descricao: str
+
+# Use Union para permitir diferentes tipos de conteúdo
+RegistroDiarioConteudo = Union[SinaisVitaisConteudo, MedicacaoConteudo, AnotacaoConteudo]
+
+class RegistroDiarioCreate(BaseModel):
+    tipo: str = Field(..., description="O tipo do registro (ex: 'sinais_vitais', 'medicacao', 'anotacao').")
+    conteudo: RegistroDiarioConteudo
+
+class RegistroDiarioResponse(RegistroDiarioCreate):
+    id: str
+    paciente_id: str
+    tecnico_id: str
+    data_registro: datetime
+
+# Schemas para a nova funcionalidade de Checklist Diário
+class ChecklistItemDiarioResponse(BaseModel):
+    id: str
+    descricao: str
+    concluido: bool
+
+class ChecklistItemDiarioUpdate(BaseModel):
+    concluido: bool
+
+# Schemas do Plano de Cuidado (modelo hipotético)
+# Note: o modelo real de um plano de cuidado teria que ser definido em conjunto
+class PlanoCuidado(BaseModel):
+    id: str
+    negocio_id: str
+    paciente_id: str
+    modelo_checklist_id: Optional[str] = Field(None, description="ID do modelo de checklist para geração diária.")
+
 # --- FIM DOS NOVOS SCHEMAS ---
 
 # CORREÇÃO: Usa o método model_rebuild() do Pydantic V2 para resolver as referências
