@@ -213,7 +213,7 @@ def vincular_paciente(
     )
     if not paciente_atualizado:
         raise HTTPException(status_code=404, detail="Paciente ou enfermeiro não encontrado.")
-    return paciente_atualizadoo
+    return paciente_atualizado
 
 @app.delete("/negocios/{negocio_id}/vincular-paciente", response_model=schemas.UsuarioProfile, tags=["Admin - Gestão do Negócio"])
 def desvincular_paciente(
