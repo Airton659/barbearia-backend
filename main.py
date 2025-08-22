@@ -961,21 +961,24 @@ def sync_user_profile(
         
         # Verifica se o usuário foi promovido a admin
         if user_data.codigo_convite and user_profile:
-            negocio_id = user_profile.get('roles', {}).keys()
-            if negocio_id:
-                negocio_id = list(negocio_id)[0]
-                if user_profile['roles'].get(negocio_id) == "admin":
-                    # Se for admin, cria o perfil de profissional
-                    profissional_data = schemas.ProfissionalCreate(
-                        negocio_id=negocio_id,
-                        usuario_uid=user_profile['firebase_uid'],
-                        nome=user_profile['nome'],
-                        especialidades="A definir",
-                        ativo=True,
-                        fotos={}
-                    )
-                    crud.criar_profissional(db, profissional_data)
-                    logger.info(f"Perfil profissional criado para o novo admin: {user_profile['email']}")
+            negocio_id = list(user_profile.get('roles', {}).keys())[0]
+            if user_profile['roles'].get(negocio_id) == "admin":
+                # Se for admin, cria o perfil de profissional
+                profissional_data = schemas.ProfissionalCreate(
+                    negocio_id=negocio_id,
+                    usuario_uid=user_profile['firebase_uid'],
+                    nome=user_profile['nome'],
+                    especialidades="A definir",
+                    ativo=True,
+                    fotos={}
+                )
+                perfil_profissional = crud.criar_profissional(db, profissional_data)
+                
+                # ADIÇÃO: Sincroniza o id do perfil profissional de volta para o perfil do usuário
+                if perfil_profissional:
+                    user_profile['profissional_id'] = perfil_profissional.get('id')
+                    
+                logger.info(f"Perfil profissional criado para o novo admin: {user_profile['email']}")
 
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
