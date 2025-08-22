@@ -959,26 +959,15 @@ def sync_user_profile(
     try:
         user_profile = crud.criar_ou_atualizar_usuario(db, user_data)
         
-        # Verifica se o usuário foi promovido a admin
-        if user_data.codigo_convite and user_profile:
-            negocio_id = list(user_profile.get('roles', {}).keys())[0]
-            if user_profile['roles'].get(negocio_id) == "admin":
-                # Se for admin, cria o perfil de profissional
-                profissional_data = schemas.ProfissionalCreate(
-                    negocio_id=negocio_id,
-                    usuario_uid=user_profile['firebase_uid'],
-                    nome=user_profile['nome'],
-                    especialidades="A definir",
-                    ativo=True,
-                    fotos={}
-                )
-                perfil_profissional = crud.criar_profissional(db, profissional_data)
-                
-                # ADIÇÃO: Sincroniza o id do perfil profissional de volta para o perfil do usuário
-                if perfil_profissional:
-                    user_profile['profissional_id'] = perfil_profissional.get('id')
-                    
-                logger.info(f"Perfil profissional criado para o novo admin: {user_profile['email']}")
+        # Lógica para garantir que o profissional_id seja incluído para todos os profissionais e admins
+        if user_profile and user_profile.get('roles'):
+            for negocio_id, role in user_profile['roles'].items():
+                if role in ['admin', 'profissional']:
+                    perfil_profissional = crud.buscar_profissional_por_uid(db, negocio_id, user_profile['firebase_uid'])
+                    if perfil_profissional:
+                        user_profile['profissional_id'] = perfil_profissional.get('id')
+                        # Encerra o loop assim que encontra o primeiro perfil profissional
+                        break
 
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
