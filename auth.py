@@ -149,7 +149,7 @@ def get_current_profissional_user(
             detail="O header 'negocio-id' é obrigatório para esta operação."
         )
 
-    # Verifica se o usuário tem la role 'profissional' OU 'admin' (pois um admin também é um profissional)
+    # Verifica se o usuário tem a role 'profissional' OU 'admin' (pois um admin também é um profissional)
     user_role_for_negocio = current_user.roles.get(negocio_id)
     if user_role_for_negocio not in ["profissional", "admin"]:
         raise HTTPException(
