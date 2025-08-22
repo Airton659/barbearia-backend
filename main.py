@@ -200,20 +200,20 @@ def delete_medico_endpoint(
 def vincular_paciente(
     vinculo_data: schemas.VinculoCreate,
     negocio_id: str = Depends(validate_path_negocio_id),
-    admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
-    """(Admin de Negócio) Vincula um paciente a um enfermeiro."""
+    """(Admin de Negócio ou Enfermeiro) Vincula um paciente a um enfermeiro."""
     paciente_atualizado = crud.vincular_paciente_enfermeiro(
         db,
         negocio_id=negocio_id,
         paciente_id=vinculo_data.paciente_id,
         enfermeiro_id=vinculo_data.enfermeiro_id,
-        autor_uid=admin.firebase_uid
+        autor_uid=current_user.firebase_uid
     )
     if not paciente_atualizado:
         raise HTTPException(status_code=404, detail="Paciente ou enfermeiro não encontrado.")
-    return paciente_atualizado
+    return paciente_atualizadoo
 
 @app.delete("/negocios/{negocio_id}/vincular-paciente", response_model=schemas.UsuarioProfile, tags=["Admin - Gestão do Negócio"])
 def desvincular_paciente(
