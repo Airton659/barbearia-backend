@@ -1336,22 +1336,26 @@ def confirmar_leitura_plano(
 # --- HOTFIX ACK POR DIA (não remove lógica existente; só dá fallback seguro) ---
 def _ack_lido(db, paciente_id: str, usuario_id: str, data) -> bool:
     try:
+        # 1) tenta via crud antigo
         try:
             if crud.verificar_leitura_plano_do_dia(db, paciente_id, usuario_id, data):
                 return True
         except Exception:
             pass
+
         alvo = data.isoformat() if hasattr(data, "isoformat") else str(data)[:10]
-        possiveis = (
+        colecoes = (
             "plano_ack",
             "confirmacoes_leitura_plano",
             "confirmacoes_plano",
             "leituras_plano",
             "ack_plano",
         )
-        for col in possiveis:
+
+        # 2) procura em coleções de primeiro nível
+        for col in colecoes:
             try:
-                q = db.collection(col).where("paciente_id", "==", paciente_id).where("usuario_id", "==", usuario_id).limit(12)
+                q = db.collection(col)                       .where("paciente_id", "==", paciente_id)                       .where("usuario_id", "==", usuario_id)                       .limit(12)
                 for doc in q.stream():
                     d = doc.to_dict() or {}
                     if d.get("ack_date") == alvo:
@@ -1360,11 +1364,26 @@ def _ack_lido(db, paciente_id: str, usuario_id: str, data) -> bool:
                     if ts and str(ts)[:10] == alvo:
                         return True
             except Exception:
-                continue
+                pass  # tenta a próxima
+
+        # 3) procura em subcoleções (collection group)
+        for col in colecoes:
+            try:
+                qg = db.collection_group(col)                        .where("paciente_id", "==", paciente_id)                        .where("usuario_id", "==", usuario_id)                        .limit(12)
+                for doc in qg.stream():
+                    d = doc.to_dict() or {}
+                    if d.get("ack_date") == alvo:
+                        return True
+                    ts = d.get("data_confirmacao") or d.get("ack_at") or d.get("created_at")
+                    if ts and str(ts)[:10] == alvo:
+                        return True
+            except Exception:
+                pass
     except Exception:
         pass
     return False
 # --- FIM HOTFIX ---
+
 
 @app.get("/pacientes/{paciente_id}/verificar-leitura-plano", tags=["Ficha do Paciente - Auditoria"])
 def verificar_leitura_plano(
