@@ -1337,10 +1337,10 @@ def confirmar_leitura_plano(
 @app.get("/pacientes/{paciente_id}/verificar-leitura-plano", tags=["Ficha do Paciente - Auditoria"])
 def verificar_leitura_plano(
     paciente_id: str,
+    negocio_id: str = Query(...),
     data: date = Query(..., description="Data para verificar a leitura (formato: YYYY-MM-DD)."),
     current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
-    db: firestore.client = Depends(get_db)
-):
+    db: firestore.client = Depends(get_db)):
     """(Técnico) Verifica se a leitura do plano de cuidado já foi confirmada para o dia."""
     try:
         leitura_confirmada = crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, data)
