@@ -1625,11 +1625,15 @@ def listar_consultas(db: firestore.client, paciente_id: str) -> List[Dict]:
         logger.error(f"Erro ao listar consultas do paciente {paciente_id}: {e}")
     return consultas
 
-def listar_exames(db: firestore.client, paciente_id: str) -> List[Dict]:
-    """Lista todos os exames de um paciente."""
+def listar_exames(db: firestore.client, paciente_id: str, data_inicio: Optional[datetime] = None) -> List[Dict]:
+    """Lista todos os exames de um paciente, opcionalmente filtrando por data de início."""
     exames = []
     try:
-        query = db.collection('usuarios').document(paciente_id).collection('exames').order_by('data_exame', direction=firestore.Query.DESCENDING)
+        query = db.collection('usuarios').document(paciente_id).collection('exames')
+        if data_inicio:
+            query = query.where('data_exame', '>=', data_inicio)
+        
+        query = query.order_by('data_exame', direction=firestore.Query.DESCENDING)
         for doc in query.stream():
             exame_data = doc.to_dict()
             exame_data['id'] = doc.id
@@ -1638,11 +1642,15 @@ def listar_exames(db: firestore.client, paciente_id: str) -> List[Dict]:
         logger.error(f"Erro ao listar exames do paciente {paciente_id}: {e}")
     return exames
 
-def listar_medicacoes(db: firestore.client, paciente_id: str) -> List[Dict]:
-    """Lista todas as medicações de um paciente."""
+def listar_medicacoes(db: firestore.client, paciente_id: str, data_inicio: Optional[datetime] = None) -> List[Dict]:
+    """Lista todas as medicações de um paciente, opcionalmente filtrando por data de início."""
     medicacoes = []
     try:
-        query = db.collection('usuarios').document(paciente_id).collection('medicacoes').order_by('nome_medicamento')
+        query = db.collection('usuarios').document(paciente_id).collection('medicacoes')
+        if data_inicio:
+            query = query.where('data_criacao', '>=', data_inicio)
+        
+        query = query.order_by('data_criacao', direction=firestore.Query.DESCENDING)
         for doc in query.stream():
             medicacao_data = doc.to_dict()
             medicacao_data['id'] = doc.id
@@ -1651,11 +1659,15 @@ def listar_medicacoes(db: firestore.client, paciente_id: str) -> List[Dict]:
         logger.error(f"Erro ao listar medicações do paciente {paciente_id}: {e}")
     return medicacoes
 
-def listar_checklist(db: firestore.client, paciente_id: str) -> List[Dict]:
-    """Lista todos os itens do checklist de um paciente."""
+def listar_checklist(db: firestore.client, paciente_id: str, data_inicio: Optional[datetime] = None) -> List[Dict]:
+    """Lista todos os itens do checklist de um paciente, opcionalmente filtrando por data de início."""
     checklist_itens = []
     try:
-        query = db.collection('usuarios').document(paciente_id).collection('checklist').order_by('descricao_item')
+        query = db.collection('usuarios').document(paciente_id).collection('checklist')
+        if data_inicio:
+            query = query.where('data_criacao', '>=', data_inicio)
+        
+        query = query.order_by('data_criacao', direction=firestore.Query.DESCENDING)
         for doc in query.stream():
             item_data = doc.to_dict()
             item_data['id'] = doc.id
@@ -1664,11 +1676,15 @@ def listar_checklist(db: firestore.client, paciente_id: str) -> List[Dict]:
         logger.error(f"Erro ao listar checklist do paciente {paciente_id}: {e}")
     return checklist_itens
 
-def listar_orientacoes(db: firestore.client, paciente_id: str) -> List[Dict]:
-    """Lista todas as orientações de um paciente."""
+def listar_orientacoes(db: firestore.client, paciente_id: str, data_inicio: Optional[datetime] = None) -> List[Dict]:
+    """Lista todas as orientações de um paciente, opcionalmente filtrando por data de início."""
     orientacoes = []
     try:
-        query = db.collection('usuarios').document(paciente_id).collection('orientacoes').order_by('titulo')
+        query = db.collection('usuarios').document(paciente_id).collection('orientacoes')
+        if data_inicio:
+            query = query.where('data_criacao', '>=', data_inicio)
+        
+        query = query.order_by('data_criacao', direction=firestore.Query.DESCENDING)
         for doc in query.stream():
             orientacao_data = doc.to_dict()
             orientacao_data['id'] = doc.id
@@ -1678,13 +1694,25 @@ def listar_orientacoes(db: firestore.client, paciente_id: str) -> List[Dict]:
     return orientacoes
 
 def get_ficha_completa_paciente(db: firestore.client, paciente_id: str) -> Dict:
-    """Retorna um dicionário com todos os dados da ficha de um paciente."""
+    """
+    Retorna um dicionário com todos os dados da ficha do paciente,
+    filtrando para mostrar apenas o "Plano Ativo" (o mais recente).
+    """
+    # 1. Encontra a data da consulta mais recente
+    consultas = listar_consultas(db, paciente_id)
+    if not consultas:
+        data_inicio = datetime.min
+    else:
+        # A consulta mais recente é o primeiro item, devido ao order_by
+        data_inicio = consultas[0]['data_consulta']
+
+    # 2. Busca todos os outros itens a partir dessa data
     ficha = {
-        "consultas": listar_consultas(db, paciente_id),
-        "exames": listar_exames(db, paciente_id),
-        "medicacoes": listar_medicacoes(db, paciente_id),
-        "checklist": listar_checklist(db, paciente_id),
-        "orientacoes": listar_orientacoes(db, paciente_id),
+        "consultas": consultas,
+        "exames": listar_exames(db, paciente_id, data_inicio=data_inicio),
+        "medicacoes": listar_medicacoes(db, paciente_id, data_inicio=data_inicio),
+        "checklist": listar_checklist(db, paciente_id, data_inicio=data_inicio),
+        "orientacoes": listar_orientacoes(db, paciente_id, data_inicio=data_inicio),
     }
     return ficha
 
