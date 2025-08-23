@@ -1623,7 +1623,8 @@ def listar_consultas(db: firestore.client, paciente_id: str) -> List[Dict]:
     """Lista todas as consultas de um paciente."""
     consultas = []
     try:
-        query = db.collection('usuarios').document(paciente_id).collection('consultas').order_by('data_consulta', direction=firestore.Query.DESCENDING)
+        col = db.collection('usuarios').document(paciente_id).collection('consultas')
+        query = col.order_by('created_at', direction=firestore.Query.DESCENDING).order_by('__name__', direction=firestore.Query.DESCENDING)
         for doc in query.stream():
             consulta_data = doc.to_dict()
             consulta_data['id'] = doc.id
