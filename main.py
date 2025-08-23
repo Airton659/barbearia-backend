@@ -558,7 +558,7 @@ def delete_orientacao(
 def criar_registro_diario(
     paciente_id: str,
     registro_data: schemas.DiarioTecnicoCreate,
-    tecnico: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    tecnico: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Adiciona um novo registro de acompanhamento ao diário do paciente."""
@@ -582,7 +582,7 @@ def update_registro_diario(
     paciente_id: str,
     registro_id: str,
     update_data: schemas.DiarioTecnicoUpdate,
-    tecnico: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    tecnico: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Atualiza um de seus registros de acompanhamento."""
@@ -601,7 +601,7 @@ def update_registro_diario(
 def delete_registro_diario(
     paciente_id: str,
     registro_id: str,
-    tecnico: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    tecnico: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Deleta um de seus registros de acompanhamento."""
@@ -1325,7 +1325,7 @@ def get_resultados_pesquisas(
 def confirmar_leitura_plano(
     paciente_id: str,
     confirmacao: schemas.ConfirmacaoLeituraCreate,
-    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    current_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Confirma a leitura do plano de cuidado de um paciente."""
@@ -1580,7 +1580,7 @@ def delete_orientacao(
 def criar_registro_diario(
     paciente_id: str,
     registro_data: schemas.DiarioTecnicoCreate,
-    tecnico: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    tecnico: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Adiciona um novo registro de acompanhamento ao diário do paciente."""
@@ -1604,7 +1604,7 @@ def update_registro_diario(
     paciente_id: str,
     registro_id: str,
     update_data: schemas.DiarioTecnicoUpdate,
-    tecnico: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    tecnico: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Atualiza um de seus registros de acompanhamento."""
@@ -1623,7 +1623,7 @@ def update_registro_diario(
 def delete_registro_diario(
     paciente_id: str,
     registro_id: str,
-    tecnico: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    tecnico: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Deleta um de seus registros de acompanhamento."""
@@ -2347,7 +2347,7 @@ def get_resultados_pesquisas(
 def confirmar_leitura_plano(
     paciente_id: str,
     confirmacao: schemas.ConfirmacaoLeituraCreate,
-    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    current_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Confirma a leitura do plano de cuidado de um paciente."""
