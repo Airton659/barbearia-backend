@@ -180,7 +180,7 @@ class PostagemCreate(BaseModel):
     profissional_id: str
     titulo: str
     descricao: Optional[str] = None
-    # Fotos também viram um mapa para flexibilidade
+    # Fotos agora são um mapa (dict) para flexibilidade
     fotos: dict[str, str] = Field(..., description="URLs da postagem em diferentes tamanhos.")
 
 class PostagemResponse(PostagemCreate):
@@ -317,12 +317,14 @@ class ExameBase(BaseModel):
     nome_exame: str
     data_exame: datetime
     url_anexo: Optional[str] = None
+    consulta_id: Optional[str] = Field(None, description="ID da consulta à qual o exame está vinculado.")
 
 class ExameCreate(ExameBase):
     pass
 
 class ExameResponse(ExameBase):
     id: str
+    consulta_id: Optional[str] = Field(None, description="ID da consulta à qual o exame está vinculado.")
 
 class ExameUpdate(BaseModel):
     nome_exame: Optional[str] = None
@@ -335,6 +337,7 @@ class MedicacaoBase(BaseModel):
     nome_medicamento: str
     dosagem: str
     instrucoes: str
+    consulta_id: Optional[str] = Field(None, description="ID da consulta à qual a medicação está vinculada.")
 
 class MedicacaoCreate(MedicacaoBase):
     data_criacao: datetime = Field(default_factory=datetime.utcnow) # Adicionado para filtro de plano ativo
@@ -343,6 +346,7 @@ class MedicacaoCreate(MedicacaoBase):
 class MedicacaoResponse(MedicacaoBase):
     id: str
     data_criacao: datetime # Adicionado para filtro de plano ativo
+    consulta_id: Optional[str] = Field(None, description="ID da consulta à qual a medicação está vinculada.")
 
 class MedicacaoUpdate(BaseModel):
     nome_medicamento: Optional[str] = None
@@ -354,6 +358,7 @@ class ChecklistItemBase(BaseModel):
     paciente_id: str
     descricao_item: str
     concluido: bool = False
+    consulta_id: Optional[str] = Field(None, description="ID da consulta à qual o item do checklist está vinculado.")
 
 class ChecklistItemCreate(ChecklistItemBase):
     data_criacao: datetime = Field(default_factory=datetime.utcnow) # Adicionado para filtro de plano ativo
@@ -362,6 +367,7 @@ class ChecklistItemCreate(ChecklistItemBase):
 class ChecklistItemResponse(ChecklistItemBase):
     id: str
     data_criacao: datetime # Adicionado para filtro de plano ativo
+    consulta_id: Optional[str] = Field(None, description="ID da consulta à qual o item do checklist está vinculado.")
 
 class ChecklistItemUpdate(BaseModel):
     descricao_item: Optional[str] = None
@@ -372,6 +378,7 @@ class OrientacaoBase(BaseModel):
     paciente_id: str
     titulo: str
     conteudo: str
+    consulta_id: Optional[str] = Field(None, description="ID da consulta à qual a orientação está vinculada.")
 
 class OrientacaoCreate(OrientacaoBase):
     data_criacao: datetime = Field(default_factory=datetime.utcnow) # Adicionado para filtro de plano ativo
@@ -380,6 +387,7 @@ class OrientacaoCreate(OrientacaoBase):
 class OrientacaoResponse(OrientacaoBase):
     id: str
     data_criacao: datetime # Adicionado para filtro de plano ativo
+    consulta_id: Optional[str] = Field(None, description="ID da consulta à qual a orientação está vinculada.")
 
 class OrientacaoUpdate(BaseModel):
     titulo: Optional[str] = None

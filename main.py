@@ -361,38 +361,42 @@ def get_consultas(
 @app.get("/pacientes/{paciente_id}/exames", response_model=List[schemas.ExameResponse], tags=["Ficha do Paciente"])
 def get_exames(
     paciente_id: str,
+    consulta_id: Optional[str] = Query(None, description="Filtra exames por ID da consulta."),
     current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Lista os exames da ficha do paciente."""
-    return crud.listar_exames(db, paciente_id)
+    return crud.listar_exames(db, paciente_id, consulta_id=consulta_id)
 
 @app.get("/pacientes/{paciente_id}/medicacoes", response_model=List[schemas.MedicacaoResponse], tags=["Ficha do Paciente"])
 def get_medicacoes(
     paciente_id: str,
+    consulta_id: Optional[str] = Query(None, description="Filtra medicações por ID da consulta."),
     current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Lista as medicações da ficha do paciente."""
-    return crud.listar_medicacoes(db, paciente_id)
+    return crud.listar_medicacoes(db, paciente_id, consulta_id=consulta_id)
 
 @app.get("/pacientes/{paciente_id}/checklist-itens", response_model=List[schemas.ChecklistItemResponse], tags=["Ficha do Paciente"])
 def get_checklist_itens(
     paciente_id: str,
+    consulta_id: Optional[str] = Query(None, description="Filtra itens do checklist por ID da consulta."),
     current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Lista os itens do checklist da ficha do paciente."""
-    return crud.listar_checklist(db, paciente_id)
+    return crud.listar_checklist(db, paciente_id, consulta_id=consulta_id)
 
 @app.get("/pacientes/{paciente_id}/orientacoes", response_model=List[schemas.OrientacaoResponse], tags=["Ficha do Paciente"])
 def get_orientacoes(
     paciente_id: str,
+    consulta_id: Optional[str] = Query(None, description="Filtra orientações por ID da consulta."),
     current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Lista as orientações da ficha do paciente."""
-    return crud.listar_orientacoes(db, paciente_id)
+    return crud.listar_orientacoes(db, paciente_id, consulta_id=consulta_id)
 
 @app.patch("/pacientes/{paciente_id}/consultas/{consulta_id}", response_model=schemas.ConsultaResponse, tags=["Ficha do Paciente"])
 def update_consulta(
@@ -1098,7 +1102,7 @@ def listar_meus_agendamentos_profissional(
     profissional_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
-    """(Profissional) Lista todos os agendamentos recebidos pelo profissional."""
+    """(Profissional) Lista todos os agendamentos recebidos."""
     perfil_profissional = crud.buscar_profissional_por_uid(db, negocio_id, profissional_user.firebase_uid)
     if not perfil_profissional:
         raise HTTPException(status_code=404, detail="Perfil profissional não encontrado.")
