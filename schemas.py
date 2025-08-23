@@ -337,10 +337,12 @@ class MedicacaoBase(BaseModel):
     instrucoes: str
 
 class MedicacaoCreate(MedicacaoBase):
+    data_criacao: datetime = Field(default_factory=datetime.utcnow) # Adicionado para filtro de plano ativo
     pass
 
 class MedicacaoResponse(MedicacaoBase):
     id: str
+    data_criacao: datetime # Adicionado para filtro de plano ativo
 
 class MedicacaoUpdate(BaseModel):
     nome_medicamento: Optional[str] = None
@@ -354,10 +356,12 @@ class ChecklistItemBase(BaseModel):
     concluido: bool = False
 
 class ChecklistItemCreate(ChecklistItemBase):
+    data_criacao: datetime = Field(default_factory=datetime.utcnow) # Adicionado para filtro de plano ativo
     pass
 
 class ChecklistItemResponse(ChecklistItemBase):
     id: str
+    data_criacao: datetime # Adicionado para filtro de plano ativo
 
 class ChecklistItemUpdate(BaseModel):
     descricao_item: Optional[str] = None
@@ -370,10 +374,12 @@ class OrientacaoBase(BaseModel):
     conteudo: str
 
 class OrientacaoCreate(OrientacaoBase):
+    data_criacao: datetime = Field(default_factory=datetime.utcnow) # Adicionado para filtro de plano ativo
     pass
 
 class OrientacaoResponse(OrientacaoBase):
     id: str
+    data_criacao: datetime # Adicionado para filtro de plano ativo
 
 class OrientacaoUpdate(BaseModel):
     titulo: Optional[str] = None

@@ -1584,6 +1584,7 @@ def adicionar_exame(db: firestore.client, exame_data: schemas.ExameCreate) -> Di
 def prescrever_medicacao(db: firestore.client, medicacao_data: schemas.MedicacaoCreate) -> Dict:
     """Salva uma nova medicação na subcoleção de um paciente."""
     medicacao_dict = medicacao_data.model_dump()
+    medicacao_dict['data_criacao'] = datetime.utcnow()
     paciente_ref = db.collection('usuarios').document(medicacao_data.paciente_id)
     doc_ref = paciente_ref.collection('medicacoes').document()
     doc_ref.set(medicacao_dict)
@@ -1593,6 +1594,7 @@ def prescrever_medicacao(db: firestore.client, medicacao_data: schemas.Medicacao
 def adicionar_item_checklist(db: firestore.client, item_data: schemas.ChecklistItemCreate) -> Dict:
     """Salva um novo item de checklist na subcoleção de um paciente."""
     item_dict = item_data.model_dump()
+    item_dict['data_criacao'] = datetime.utcnow()
     paciente_ref = db.collection('usuarios').document(item_data.paciente_id)
     doc_ref = paciente_ref.collection('checklist').document()
     doc_ref.set(item_dict)
@@ -1602,6 +1604,7 @@ def adicionar_item_checklist(db: firestore.client, item_data: schemas.ChecklistI
 def criar_orientacao(db: firestore.client, orientacao_data: schemas.OrientacaoCreate) -> Dict:
     """Salva uma nova orientação na subcoleção de um paciente."""
     orientacao_dict = orientacao_data.model_dump()
+    orientacao_dict['data_criacao'] = datetime.utcnow()
     paciente_ref = db.collection('usuarios').document(orientacao_data.paciente_id)
     doc_ref = paciente_ref.collection('orientacoes').document()
     doc_ref.set(orientacao_dict)
