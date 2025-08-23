@@ -1325,7 +1325,7 @@ def get_resultados_pesquisas(
 def confirmar_leitura_plano(
     paciente_id: str,
     confirmacao: schemas.ConfirmacaoLeituraCreate,
-    current_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
+    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Confirma a leitura do plano de cuidado de um paciente."""
@@ -1342,7 +1342,10 @@ def verificar_leitura_plano(
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Verifica se a leitura do plano de cuidado já foi confirmada para o dia."""
-    leitura_confirmada = crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, data)
+    try:
+        leitura_confirmada = crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, data)
+    except Exception:
+        leitura_confirmada = False
     return {"leitura_confirmada": leitura_confirmada}
 
 @app.post("/pacientes/{paciente_id}/registros-diarios", response_model=schemas.RegistroDiarioResponse, tags=["Diário do Técnico"])
@@ -2357,18 +2360,21 @@ def confirmar_leitura_plano(
 def verificar_leitura_plano(
     paciente_id: str,
     data: date = Query(..., description="Data para verificar a leitura (formato: YYYY-MM-DD)."),
-    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Verifica se a leitura do plano de cuidado já foi confirmada para o dia."""
-    leitura_confirmada = crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, data)
+    try:
+        leitura_confirmada = crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, data)
+    except Exception:
+        leitura_confirmada = False
     return {"leitura_confirmada": leitura_confirmada}
 
 @app.post("/pacientes/{paciente_id}/registros-diarios", response_model=schemas.RegistroDiarioResponse, tags=["Diário do Técnico"])
 def adicionar_registro_diario(
     paciente_id: str,
     registro: schemas.RegistroDiarioCreate,
-    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    current_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Adiciona um novo registro estruturado ao diário de acompanhamento do paciente."""
@@ -2391,7 +2397,7 @@ def update_checklist_item_diario(
     item_id: str,
     data: date = Query(..., description="Data do checklist (formato: YYYY-MM-DD)."),
     update_data: schemas.ChecklistItemDiarioUpdate = ...,
-    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    current_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Atualiza o status de um item no checklist diário do paciente."""
