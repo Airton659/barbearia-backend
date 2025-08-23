@@ -1566,6 +1566,12 @@ def listar_pacientes_por_profissional_ou_tecnico(db: firestore.client, negocio_i
 def criar_consulta(db: firestore.client, consulta_data: schemas.ConsultaCreate) -> Dict:
     """Salva uma nova consulta na subcoleção de um paciente."""
     consulta_dict = consulta_data.model_dump()
+    if 'created_at' not in consulta_dict:
+        try:
+            consulta_dict['created_at'] = firestore.SERVER_TIMESTAMP
+        except Exception:
+            # fallback in case firestore.SERVER_TIMESTAMP not imported
+            consulta_dict['created_at'] = datetime.utcnow()
     paciente_ref = db.collection('usuarios').document(consulta_data.paciente_id)
     doc_ref = paciente_ref.collection('consultas').document()
     doc_ref.set(consulta_dict)
@@ -1617,8 +1623,7 @@ def criar_orientacao(db: firestore.client, orientacao_data: schemas.OrientacaoCr
 
 # =================================================================================
 # FUNÇÕES DE LEITURA DA FICHA DO PACIENTE
-# =================================================================================
-
+        
 def listar_consultas(db: firestore.client, paciente_id: str) -> List[Dict]:
     """Lista todas as consultas de um paciente."""
     consultas = []
@@ -1629,6 +1634,13 @@ def listar_consultas(db: firestore.client, paciente_id: str) -> List[Dict]:
             consulta_data = doc.to_dict()
             consulta_data['id'] = doc.id
             consultas.append(consulta_data)
+        # Fallback: histórico antigo sem created_at → ordenar por ID do doc desc
+        if not consultas:
+            query2 = col.order_by('__name__', direction=firestore.Query.DESCENDING)
+            for doc in query2.stream():
+                consulta_data = doc.to_dict()
+                consulta_data['id'] = doc.id
+                consultas.append(consulta_data)
     except Exception as e:
         logger.error(f"Erro ao listar consultas do paciente {paciente_id}: {e}")
     return consultas
@@ -1685,28 +1697,29 @@ def listar_orientacoes(db: firestore.client, paciente_id: str, consulta_id: str)
         logger.error(f"Erro ao listar orientações do paciente {paciente_id}: {e}")
     return orientacoes
 
-def get_ficha_completa_paciente(db: firestore.client, paciente_id: str) -> Dict:
+def get_ficha_completa_paciente(db: firestore.client, paciente_id: str, consulta_id: Optional[str] = None) -> Dict:
     """
     Retorna um dicionário com todos os dados da ficha do paciente,
     filtrando para mostrar apenas o "Plano Ativo" (o mais recente).
     """
     # 1. Encontra a última consulta do paciente
     consultas = listar_consultas(db, paciente_id)
-    
-    if not consultas:
-        # Se não houver consultas, não há plano ativo.
-        return {
-            "consultas": [],
-            "exames": [],
-            "medicacoes": [],
-            "checklist": [],
-            "orientacoes": [],
-        }
+    # Se um consulta_id específico for informado (hotfix), usar direto
+    if consulta_id:
+        ultima_consulta_id = consulta_id
+    else:
+        if not consultas:
+            # Se não houver consultas, não há plano ativo.
+            return {
+                "consultas": [],
+                "exames": [],
+                "medicacoes": [],
+                "checklist": [],
+                "orientacoes": [],
+            }
+        # 2. Obtém o ID da última consulta
+        ultima_consulta_id = consultas[0]['id']
 
-    # 2. Obtém o ID da última consulta
-    ultima_consulta_id = consultas[0]['id']
-
-    # 3. Busca todos os outros itens usando o ID da última consulta como filtro
     ficha = {
         "consultas": consultas,
         "exames": listar_exames(db, paciente_id, consulta_id=ultima_consulta_id),
