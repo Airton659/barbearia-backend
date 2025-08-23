@@ -1335,8 +1335,14 @@ def confirmar_leitura_plano(
     return crud.registrar_confirmacao_leitura_plano(db, paciente_id, confirmacao)
 # --- HOTFIX ACK POR DIA (não remove lógica existente; só dá fallback seguro) ---
 def _ack_lido(db, paciente_id: str, usuario_id: str, data) -> bool:
+    """
+    Fallback robusto para confirmar leitura do plano por DIA.
+    - Tenta crud legado, coleções de topo e collection_group (subcoleções).
+    - Considera variações de campos de ID e de data.
+    - Suporta datas ISO, Timestamp e strings PT-BR ("23 de agosto de 2025 ...").
+    """
     try:
-        # 1) tenta via crud antigo
+        # 0) tenta via crud legado
         try:
             if crud.verificar_leitura_plano_do_dia(db, paciente_id, usuario_id, data):
                 return True
@@ -1344,45 +1350,150 @@ def _ack_lido(db, paciente_id: str, usuario_id: str, data) -> bool:
             pass
 
         alvo = data.isoformat() if hasattr(data, "isoformat") else str(data)[:10]
+
         colecoes = (
             "plano_ack",
+            "confirmacoes_leitura",
             "confirmacoes_leitura_plano",
+            "confirmacao_leitura_plano",
             "confirmacoes_plano",
+            "confirmacao_plano",
             "leituras_plano",
             "ack_plano",
+            "acks_plano",
+            "confirmacoes",
+            "confirmacao",
+            "acks",
+            "ack",
         )
 
-        # 2) procura em coleções de primeiro nível
-        for col in colecoes:
-            try:
-                q = db.collection(col)                       .where("paciente_id", "==", paciente_id)                       .where("usuario_id", "==", usuario_id)                       .limit(12)
-                for doc in q.stream():
-                    d = doc.to_dict() or {}
-                    if d.get("ack_date") == alvo:
-                        return True
-                    ts = d.get("data_confirmacao") or d.get("ack_at") or d.get("created_at")
-                    if ts and str(ts)[:10] == alvo:
-                        return True
-            except Exception:
-                pass  # tenta a próxima
+        id_pairs = (
+            ("usuario_id", "paciente_id"),
+            ("usuarioId", "pacienteId"),
+            ("tecnico_id", "paciente_id"),
+            ("profissional_id", "paciente_id"),
+            ("enfermeiro_id", "paciente_id"),
+            ("tecnicoId", "pacienteId"),
+            ("profissionalId", "pacienteId"),
+            ("enfermeiroId", "pacienteId"),
+        )
 
-        # 3) procura em subcoleções (collection group)
-        for col in colecoes:
+        date_keys = (
+            "ack_date",
+            "data_confirmacao",
+            "data",
+            "ack_at",
+            "created_at",
+            "timestamp",
+            "confirmado_em",
+            "confirmacao_data",
+        )
+
+        def _digits(s: str):
+            out, cur = [], ""
+            for ch in s:
+                if ch.isdigit():
+                    cur += ch
+                else:
+                    if cur:
+                        out.append(cur)
+                        cur = ""
+            if cur:
+                out.append(cur)
+            return out
+
+        def _yyyy_mm_dd_from_pt(texto: str):
+            # Extrai 'YYYY-MM-DD' de strings tipo '23 de agosto de 2025 ...'
             try:
-                qg = db.collection_group(col)                        .where("paciente_id", "==", paciente_id)                        .where("usuario_id", "==", usuario_id)                        .limit(12)
-                for doc in qg.stream():
-                    d = doc.to_dict() or {}
-                    if d.get("ack_date") == alvo:
-                        return True
-                    ts = d.get("data_confirmacao") or d.get("ack_at") or d.get("created_at")
-                    if ts and str(ts)[:10] == alvo:
-                        return True
+                s = (texto or "").strip().lower()
+                meses = {
+                    "janeiro": 1, "fevereiro": 2, "março": 3, "marco": 3, "abril": 4, "maio": 5, "junho": 6,
+                    "julho": 7, "agosto": 8, "setembro": 9, "outubro": 10, "novembro": 11, "dezembro": 12
+                }
+                mm = None
+                for nome, num in meses.items():
+                    if nome in s:
+                        mm = num
+                        break
+                if not mm:
+                    return None
+                nums = _digits(s)
+                if not nums:
+                    return None
+                # dia: primeiro número de 1-2 dígitos; ano: último número de 4 dígitos
+                dia = None
+                for n in nums:
+                    if 1 <= len(n) <= 2:
+                        dia = int(n)
+                        break
+                ano = None
+                for n in reversed(nums):
+                    if len(n) == 4:
+                        ano = int(n)
+                        break
+                if not (dia and ano):
+                    return None
+                return f"{ano:04d}-{mm:02d}-{dia:02d}"
             except Exception:
-                pass
+                return None
+
+        def _match_day(d: dict) -> bool:
+            v = d.get("ack_date")
+            if isinstance(v, str) and v[:10] == alvo:
+                return True
+            for k in date_keys:
+                v = d.get(k)
+                if not v:
+                    continue
+                s = str(v)
+                if s[:10] == alvo:
+                    return True
+                iso = _yyyy_mm_dd_from_pt(s)
+                if iso == alvo:
+                    return True
+            return False
+
+        # 1) coleções de primeiro nível
+        for col in colecoes:
+            for u_field, p_field in id_pairs:
+                try:
+                    q = (
+                        db.collection(col)
+                          .where(p_field, "==", paciente_id)
+                          .where(u_field, "==", usuario_id)
+                          .limit(20)
+                    )
+                    for doc in q.stream():
+                        d = doc.to_dict() or {}
+                        if _match_day(d):
+                            return True
+                except Exception:
+                    continue
+
+        # 2) subcoleções (collection group) — cobre 'usuarios/*/confirmacoes_leitura'
+        for col in colecoes:
+            for u_field, p_field in id_pairs:
+                try:
+                    qg = (
+                        db.collection_group(col)
+                          .where(p_field, "==", paciente_id)
+                          .where(u_field, "==", usuario_id)
+                          .limit(20)
+                    )
+                    for doc in qg.stream():
+                        d = doc.to_dict() or {}
+                        if _match_day(d):
+                            return True
+                except Exception:
+                    continue
+
     except Exception:
         pass
     return False
 # --- FIM HOTFIX ---
+
+
+
 
 
 @app.get("/pacientes/{paciente_id}/verificar-leitura-plano", tags=["Ficha do Paciente - Auditoria"])
