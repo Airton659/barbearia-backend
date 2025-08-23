@@ -1634,6 +1634,7 @@ def listar_exames(db: firestore.client, paciente_id: str, data_inicio: Optional[
     try:
         query = db.collection('usuarios').document(paciente_id).collection('exames')
         if data_inicio:
+            # CORREÇÃO: Usa a data de início como filtro
             query = query.where('data_exame', '>=', data_inicio)
         
         query = query.order_by('data_exame', direction=firestore.Query.DESCENDING)
@@ -1651,6 +1652,7 @@ def listar_medicacoes(db: firestore.client, paciente_id: str, data_inicio: Optio
     try:
         query = db.collection('usuarios').document(paciente_id).collection('medicacoes')
         if data_inicio:
+            # CORREÇÃO: Usa a data de início como filtro
             query = query.where('data_criacao', '>=', data_inicio)
         
         query = query.order_by('data_criacao', direction=firestore.Query.DESCENDING)
@@ -1668,6 +1670,7 @@ def listar_checklist(db: firestore.client, paciente_id: str, data_inicio: Option
     try:
         query = db.collection('usuarios').document(paciente_id).collection('checklist')
         if data_inicio:
+            # CORREÇÃO: Usa a data de início como filtro
             query = query.where('data_criacao', '>=', data_inicio)
         
         query = query.order_by('data_criacao', direction=firestore.Query.DESCENDING)
@@ -1685,6 +1688,7 @@ def listar_orientacoes(db: firestore.client, paciente_id: str, data_inicio: Opti
     try:
         query = db.collection('usuarios').document(paciente_id).collection('orientacoes')
         if data_inicio:
+            # CORREÇÃO: Usa a data de início como filtro
             query = query.where('data_criacao', '>=', data_inicio)
         
         query = query.order_by('data_criacao', direction=firestore.Query.DESCENDING)
@@ -1707,11 +1711,13 @@ def get_ficha_completa_paciente(db: firestore.client, paciente_id: str) -> Dict:
         data_inicio = datetime.min
     else:
         # A consulta mais recente é o primeiro item, devido ao order_by
+        # CORREÇÃO: Usa a data_consulta completa como o ponto de partida do filtro
         data_inicio = consultas[0]['data_consulta']
 
     # 2. Busca todos os outros itens a partir dessa data
     ficha = {
         "consultas": consultas,
+        # CORREÇÃO: Passa o parâmetro data_inicio para as funções de listagem
         "exames": listar_exames(db, paciente_id, data_inicio=data_inicio),
         "medicacoes": listar_medicacoes(db, paciente_id, data_inicio=data_inicio),
         "checklist": listar_checklist(db, paciente_id, data_inicio=data_inicio),
