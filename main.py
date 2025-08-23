@@ -305,7 +305,10 @@ def adicionar_exame(
 ):
     """(Autorizado) Adiciona um novo exame à ficha do paciente."""
     exame_data.paciente_id = paciente_id
-    return crud.adicionar_exame(db, exame_data)
+    # Obter o consulta_id do objeto de dados
+    consulta_id = exame_data.consulta_id
+    # Passar o consulta_id para a função de criação
+    return crud.adicionar_exame(db, exame_data, consulta_id)
 
 @app.post("/pacientes/{paciente_id}/medicacoes", response_model=schemas.MedicacaoResponse, status_code=status.HTTP_201_CREATED, tags=["Ficha do Paciente"])
 def adicionar_medicacao(
@@ -316,7 +319,10 @@ def adicionar_medicacao(
 ):
     """(Autorizado) Adiciona uma nova medicação à ficha do paciente."""
     medicacao_data.paciente_id = paciente_id
-    return crud.prescrever_medicacao(db, medicacao_data)
+    # Obter o consulta_id do objeto de dados
+    consulta_id = medicacao_data.consulta_id
+    # Passar o consulta_id para a função de criação
+    return crud.prescrever_medicacao(db, medicacao_data, consulta_id)
 
 @app.post("/pacientes/{paciente_id}/checklist-itens", response_model=schemas.ChecklistItemResponse, status_code=status.HTTP_201_CREATED, tags=["Ficha do Paciente"])
 def adicionar_checklist_item(
@@ -327,7 +333,10 @@ def adicionar_checklist_item(
 ):
     """(Autorizado) Adiciona um novo item ao checklist do paciente."""
     item_data.paciente_id = paciente_id
-    return crud.adicionar_item_checklist(db, item_data)
+    # Obter o consulta_id do objeto de dados
+    consulta_id = item_data.consulta_id
+    # Passar o consulta_id para a função de criação
+    return crud.adicionar_item_checklist(db, item_data, consulta_id)
 
 @app.post("/pacientes/{paciente_id}/orientacoes", response_model=schemas.OrientacaoResponse, status_code=status.HTTP_201_CREATED, tags=["Ficha do Paciente"])
 def adicionar_orientacao(
@@ -338,7 +347,10 @@ def adicionar_orientacao(
 ):
     """(Autorizado) Adiciona uma nova orientação à ficha do paciente."""
     orientacao_data.paciente_id = paciente_id
-    return crud.criar_orientacao(db, orientacao_data)
+    # Obter o consulta_id do objeto de dados
+    consulta_id = orientacao_data.consulta_id
+    # Passar o consulta_id para a função de criação
+    return crud.criar_orientacao(db, orientacao_data, consulta_id)
 
 @app.get("/pacientes/{paciente_id}/ficha-completa", response_model=schemas.FichaCompletaResponse, tags=["Ficha do Paciente"])
 def get_ficha_completa(
@@ -361,42 +373,42 @@ def get_consultas(
 @app.get("/pacientes/{paciente_id}/exames", response_model=List[schemas.ExameResponse], tags=["Ficha do Paciente"])
 def get_exames(
     paciente_id: str,
-    consulta_id: Optional[str] = Query(None, description="Filtra exames por ID da consulta."),
+    consulta_id: Optional[str] = Query(None, description="Filtre os exames por um ID de consulta específico."),
     current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Lista os exames da ficha do paciente."""
-    return crud.listar_exames(db, paciente_id, consulta_id=consulta_id)
+    return crud.listar_exames(db, paciente_id, consulta_id)
 
 @app.get("/pacientes/{paciente_id}/medicacoes", response_model=List[schemas.MedicacaoResponse], tags=["Ficha do Paciente"])
 def get_medicacoes(
     paciente_id: str,
-    consulta_id: Optional[str] = Query(None, description="Filtra medicações por ID da consulta."),
+    consulta_id: Optional[str] = Query(None, description="Filtre as medicações por um ID de consulta específico."),
     current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Lista as medicações da ficha do paciente."""
-    return crud.listar_medicacoes(db, paciente_id, consulta_id=consulta_id)
+    return crud.listar_medicacoes(db, paciente_id, consulta_id)
 
 @app.get("/pacientes/{paciente_id}/checklist-itens", response_model=List[schemas.ChecklistItemResponse], tags=["Ficha do Paciente"])
 def get_checklist_itens(
     paciente_id: str,
-    consulta_id: Optional[str] = Query(None, description="Filtra itens do checklist por ID da consulta."),
+    consulta_id: Optional[str] = Query(None, description="Filtre os itens do checklist por um ID de consulta específico."),
     current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Lista os itens do checklist da ficha do paciente."""
-    return crud.listar_checklist(db, paciente_id, consulta_id=consulta_id)
+    return crud.listar_checklist(db, paciente_id, consulta_id)
 
 @app.get("/pacientes/{paciente_id}/orientacoes", response_model=List[schemas.OrientacaoResponse], tags=["Ficha do Paciente"])
 def get_orientacoes(
     paciente_id: str,
-    consulta_id: Optional[str] = Query(None, description="Filtra orientações por ID da consulta."),
+    consulta_id: Optional[str] = Query(None, description="Filtre as orientações por um ID de consulta específico."),
     current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Lista as orientações da ficha do paciente."""
-    return crud.listar_orientacoes(db, paciente_id, consulta_id=consulta_id)
+    return crud.listar_orientacoes(db, paciente_id, consulta_id)
 
 @app.patch("/pacientes/{paciente_id}/consultas/{consulta_id}", response_model=schemas.ConsultaResponse, tags=["Ficha do Paciente"])
 def update_consulta(
