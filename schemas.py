@@ -1,7 +1,7 @@
 # barbearia-backend/schemas.py (Versão para Firestore Multi-Tenant)
 
-from pydantic import BaseModel, EmailStr, Field
-from datetime import datetime, time
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from datetime import datetime, time, date
 from typing import Optional, List, Dict, Union
 
 # =================================================================================
@@ -521,6 +521,26 @@ class PlanoCuidado(BaseModel):
     negocio_id: str
     paciente_id: str
     modelo_checklist_id: Optional[str] = Field(None, description="ID do modelo de checklist para geração diária.")
+
+class PlanoAckCreate(BaseModel):
+    paciente_id: int = Field(..., description="ID do paciente")
+    tecnico_id: int = Field(..., description="ID do técnico que confirma a leitura")
+    plano_version_id: str = Field(..., min_length=1, description="Identificador da versão publicada do plano")
+
+class PlanoAckRead(BaseModel):
+    id: int
+    paciente_id: int
+    tecnico_id: int
+    plano_version_id: str
+    ack_date: date
+    ack_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+class PlanoAckStatus(BaseModel):
+    """Resposta do GET /pacientes/{id}/plano-ativo/ack"""
+    ackHoje: bool = Field(..., description="Se já houve confirmação hoje para a versão atual do plano")
+    planoVersionId: Optional[str] = Field(None, description="Versão do plano considerada no status")
 
 # --- FIM DOS NOVOS SCHEMAS ---
 

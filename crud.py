@@ -3,6 +3,9 @@
 import schemas
 from datetime import datetime, date, time, timedelta
 from typing import Optional, List, Dict, Union
+from .crud_plano_ack import get_plano_ack, create_plano_ack
+
+
 
 from pydantic import BaseModel
 
@@ -1246,7 +1249,7 @@ def listar_notificacoes(db: firestore.client, usuario_id: str) -> List[Dict]:
         .order_by('data_criacao', direction=firestore.Query.DESCENDING)
     
     for doc in query.stream():
-        notificacao_data = doc.to_ict()
+        notificacao_data = doc.to_dict()
         notificacao_data['id'] = doc.id
         notificacoes.append(notificacao_data)
     return notificacoes
@@ -1750,7 +1753,7 @@ def _update_subcollection_item(db: firestore.client, paciente_id: str, collectio
         item_ref.update(update_dict)
         doc = item_ref.get()
         if doc.exists:
-            data = doc.to_ict()
+            data = doc.to_dict()
             data['id'] = doc.id
             logger.info(f"Item {item_id} na coleção {collection_name} do paciente {paciente_id} atualizado.")
             return data
@@ -1878,7 +1881,7 @@ def update_registro_diario(db: firestore.client, paciente_id: str, registro_id: 
             logger.warning(f"Registro do diário {registro_id} não encontrado.")
             return None
         
-        if doc.to_ict().get('tecnico_id') != tecnico_id:
+        if doc.to_dict().get('tecnico_id') != tecnico_id:
             logger.error(f"Técnico {tecnico_id} tentou editar registro de outro técnico.")
             raise PermissionError("Você só pode editar seus próprios registros.")
 
@@ -1952,7 +1955,7 @@ def submeter_respostas_pesquisa(db: firestore.client, pesquisa_enviada_id: str, 
         logger.error(f"Paciente {paciente_id} tentou responder pesquisa {pesquisa_enviada_id} que não lhe pertence ou não existe.")
         return None
 
-    if pesquisa_doc.to_ict().get('status') == 'respondida':
+    if pesquisa_doc.to_dict().get('status') == 'respondida':
         logger.warning(f"Paciente {paciente_id} tentou responder a pesquisa {pesquisa_enviada_id} novamente.")
         # Retorna o documento como está, sem erro
         data = pesquisa_doc.to_dict()
@@ -1982,7 +1985,7 @@ def listar_pesquisas_por_paciente(db: firestore.client, negocio_id: str, pacient
             .order_by('data_envio', direction=firestore.Query.DESCENDING)
         
         for doc in query.stream():
-            data = doc.to_ict()
+            data = doc.to_dict()
             data['id'] = doc.id
             pesquisas.append(data)
     except Exception as e:
@@ -2004,7 +2007,7 @@ def listar_resultados_pesquisas(db: firestore.client, negocio_id: str, modelo_pe
         query = query.order_by('data_resposta', direction=firestore.Query.DESCENDING)
 
         for doc in query.stream():
-            data = doc.to_ict()
+            data = doc.to_dict()
             data['id'] = doc.id
             resultados.append(data)
     except Exception as e:
@@ -2079,7 +2082,7 @@ def listar_checklist_diario(db: firestore.client, paciente_id: str, data: date, 
     checklist_doc = checklist_doc_ref.get()
 
     if checklist_doc.exists:
-        return checklist_doc.to_ict().get('itens', [])
+        return checklist_doc.to_dict().get('itens', [])
     else:
         # Lógica para gerar o checklist do dia
         # 1. Busca o Plano de Cuidado Ativo do paciente (implementação hipotética)
@@ -2123,7 +2126,7 @@ def atualizar_item_checklist_diario(db: firestore.client, paciente_id: str, data
         if not snapshot.exists:
             raise ValueError("Checklist diário não encontrado para este dia.")
 
-        checklist = snapshot.to_ict()
+        checklist = snapshot.to_dict()
         itens = checklist.get('itens', [])
         
         item_encontrado = None

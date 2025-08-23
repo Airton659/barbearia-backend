@@ -1325,7 +1325,7 @@ def get_resultados_pesquisas(
 def confirmar_leitura_plano(
     paciente_id: str,
     confirmacao: schemas.ConfirmacaoLeituraCreate,
-    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    current_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Confirma a leitura do plano de cuidado de um paciente."""
@@ -1338,7 +1338,7 @@ def confirmar_leitura_plano(
 def verificar_leitura_plano(
     paciente_id: str,
     data: date = Query(..., description="Data para verificar a leitura (formato: YYYY-MM-DD)."),
-    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Verifica se a leitura do plano de cuidado já foi confirmada para o dia."""
@@ -1349,10 +1349,13 @@ def verificar_leitura_plano(
 def adicionar_registro_diario(
     paciente_id: str,
     registro: schemas.RegistroDiarioCreate,
-    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    current_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Adiciona um novo registro estruturado ao diário de acompanhamento do paciente."""
+    # Gate: exige confirmação de leitura do plano do dia pelo técnico
+    if not crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, date.today()):
+        raise HTTPException(status_code=403, detail="Leitura do Plano Ativo pendente para hoje.")
     return crud.adicionar_registro_diario(db, paciente_id, registro, current_user.id)
 
 @app.get("/pacientes/{paciente_id}/checklist-diario", response_model=List[schemas.ChecklistItemDiarioResponse], tags=["Diário do Técnico"])
@@ -1360,10 +1363,13 @@ def get_checklist_diario(
     paciente_id: str,
     data: date = Query(..., description="Data do checklist (formato: YYYY-MM-DD)."),
     negocio_id: str = Header(..., description="ID do Negócio."),
-    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    current_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Busca o checklist do dia para um paciente. Se não existir, gera um novo."""
+    # Gate: exige confirmação de leitura do plano do dia pelo técnico antes de gerar/visualizar o checklist do dia
+    if not crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, data):
+        raise HTTPException(status_code=403, detail="Leitura do Plano Ativo pendente para hoje.")
     return crud.listar_checklist_diario(db, paciente_id, data, negocio_id)
 
 @app.patch("/pacientes/{paciente_id}/checklist-diario/{item_id}", response_model=schemas.ChecklistItemDiarioResponse, tags=["Diário do Técnico"])
@@ -1372,10 +1378,13 @@ def update_checklist_item_diario(
     item_id: str,
     data: date = Query(..., description="Data do checklist (formato: YYYY-MM-DD)."),
     update_data: schemas.ChecklistItemDiarioUpdate = ...,
-    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    current_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Atualiza o status de um item no checklist diário do paciente."""
+    # Gate: exige confirmação de leitura do plano do dia pelo técnico
+    if not crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, date.today()):
+        raise HTTPException(status_code=403, detail="Leitura do Plano Ativo pendente para hoje.")
     item_atualizado = crud.atualizar_item_checklist_diario(db, paciente_id, data, item_id, update_data)
     if not item_atualizado:
         raise HTTPException(status_code=404, detail="Item do checklist não encontrado.")
@@ -2370,7 +2379,7 @@ def get_checklist_diario(
     paciente_id: str,
     data: date = Query(..., description="Data do checklist (formato: YYYY-MM-DD)."),
     negocio_id: str = Header(..., description="ID do Negócio."),
-    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    current_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Busca o checklist do dia para um paciente. Se não existir, gera um novo."""
