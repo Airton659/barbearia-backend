@@ -1333,6 +1333,38 @@ def confirmar_leitura_plano(
         raise HTTPException(status_code=403, detail="Acesso negado: a confirmação deve ser feita pelo técnico logado.")
         
     return crud.registrar_confirmacao_leitura_plano(db, paciente_id, confirmacao)
+# --- HOTFIX ACK POR DIA (não remove lógica existente; só dá fallback seguro) ---
+def _ack_lido(db, paciente_id: str, usuario_id: str, data) -> bool:
+    try:
+        try:
+            if crud.verificar_leitura_plano_do_dia(db, paciente_id, usuario_id, data):
+                return True
+        except Exception:
+            pass
+        alvo = data.isoformat() if hasattr(data, "isoformat") else str(data)[:10]
+        possiveis = (
+            "plano_ack",
+            "confirmacoes_leitura_plano",
+            "confirmacoes_plano",
+            "leituras_plano",
+            "ack_plano",
+        )
+        for col in possiveis:
+            try:
+                q = db.collection(col).where("paciente_id", "==", paciente_id).where("usuario_id", "==", usuario_id).limit(12)
+                for doc in q.stream():
+                    d = doc.to_dict() or {}
+                    if d.get("ack_date") == alvo:
+                        return True
+                    ts = d.get("data_confirmacao") or d.get("ack_at") or d.get("created_at")
+                    if ts and str(ts)[:10] == alvo:
+                        return True
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return False
+# --- FIM HOTFIX ---
 
 @app.get("/pacientes/{paciente_id}/verificar-leitura-plano", tags=["Ficha do Paciente - Auditoria"])
 def verificar_leitura_plano(
@@ -1346,6 +1378,8 @@ def verificar_leitura_plano(
         leitura_confirmada = crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, data)
     except Exception:
         leitura_confirmada = False
+    if not leitura_confirmada:
+        leitura_confirmada = _ack_lido(db, paciente_id, current_user.id, data)
     return {"leitura_confirmada": leitura_confirmada}
 
 @app.post("/pacientes/{paciente_id}/registros-diarios", response_model=schemas.RegistroDiarioResponse, tags=["Diário do Técnico"])
@@ -1357,7 +1391,7 @@ def adicionar_registro_diario(
 ):
     """(Técnico) Adiciona um novo registro estruturado ao diário de acompanhamento do paciente."""
     # Gate: exige confirmação de leitura do plano do dia pelo técnico
-    if not crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, date.today()):
+    if not _ack_lido(db, paciente_id, current_user.id, date.today()):
         raise HTTPException(status_code=403, detail="Leitura do Plano Ativo pendente para hoje.")
     return crud.adicionar_registro_diario(db, paciente_id, registro, current_user.id)
 
@@ -1371,7 +1405,7 @@ def get_checklist_diario(
 ):
     """(Técnico) Busca o checklist do dia para um paciente. Se não existir, gera um novo."""
     # Gate: exige confirmação de leitura do plano do dia pelo técnico antes de gerar/visualizar o checklist do dia
-    if not crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, data):
+    if not _ack_lido(db, paciente_id, current_user.id, data):
         raise HTTPException(status_code=403, detail="Leitura do Plano Ativo pendente para hoje.")
     return crud.listar_checklist_diario(db, paciente_id, data, negocio_id)
 
@@ -1386,7 +1420,7 @@ def update_checklist_item_diario(
 ):
     """(Técnico) Atualiza o status de um item no checklist diário do paciente."""
     # Gate: exige confirmação de leitura do plano do dia pelo técnico
-    if not crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, date.today()):
+    if not _ack_lido(db, paciente_id, current_user.id, date.today()):
         raise HTTPException(status_code=403, detail="Leitura do Plano Ativo pendente para hoje.")
     item_atualizado = crud.atualizar_item_checklist_diario(db, paciente_id, data, item_id, update_data)
     if not item_atualizado:
