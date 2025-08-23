@@ -3,7 +3,7 @@
 import schemas
 from datetime import datetime, date, time, timedelta
 from typing import Optional, List, Dict, Union
-from .crud_plano_ack import get_plano_ack, create_plano_ack
+
 
 
 
@@ -12,6 +12,15 @@ from pydantic import BaseModel
 from firebase_admin import firestore, messaging, auth
 import logging
 import secrets
+
+# --- IMPORT DO ACK: compatível com pacote ou script ---
+try:
+    # quando o projeto for importado como pacote (ex.: app.crud)
+    from .crud_plano_ack import get_plano_ack, create_plano_ack
+except Exception:
+    # quando rodar como script (uvicorn main:app), sem pacote pai
+    from crud_plano_ack import get_plano_ack, create_plano_ack
+# ------------------------------------------------------
 
 # Setup do logger para este módulo
 logger = logging.getLogger(__name__)
