@@ -1469,6 +1469,8 @@ def desvincular_paciente_enfermeiro(db: firestore.client, negocio_id: str, pacie
         logger.error(f"Erro ao desvincular paciente {paciente_id}: {e}")
         return None
 
+# Em crud.py, substitua esta função inteira
+
 def vincular_tecnicos_paciente(db: firestore.client, paciente_id: str, tecnicos_ids: List[str], autor_uid: str) -> Optional[Dict]:
     """
     Vincula uma lista de técnicos a um paciente.
@@ -1488,21 +1490,34 @@ def vincular_tecnicos_paciente(db: firestore.client, paciente_id: str, tecnicos_
             'tecnicos_ids': tecnicos_ids
         })
 
+        # --- INÍCIO DA CORREÇÃO ---
+        # Pegamos o documento do paciente UMA VEZ para evitar múltiplas leituras
+        paciente_doc = paciente_ref.get()
+        if not paciente_doc.exists:
+            raise ValueError("Paciente não encontrado após a atualização.")
+            
+        paciente_data = paciente_doc.to_dict()
+        # Convertemos as chaves (dict_keys) para uma lista antes de pegar o primeiro item
+        negocio_id = list(paciente_data.get('roles', {}).keys())[0] if paciente_data.get('roles') else None
+        
+        if not negocio_id:
+            raise ValueError("Não foi possível determinar o negocio_id do paciente para o log de auditoria.")
+
         criar_log_auditoria(
             db,
             autor_uid=autor_uid,
-            negocio_id=paciente_ref.get().to_dict().get('roles', {}).keys()[0], # Assumindo um único negócio
+            negocio_id=negocio_id,
             acao="VINCULO_PACIENTE_TECNICO",
             detalhes={"paciente_id": paciente_id, "tecnicos_vinculados_ids": tecnicos_ids}
         )
+        # --- FIM DA CORREÇÃO ---
 
         logger.info(f"Técnicos {tecnicos_ids} vinculados ao paciente {paciente_id}.")
-        doc = paciente_ref.get()
-        if doc.exists:
-            updated_doc = doc.to_dict()
-            updated_doc['id'] = doc.id
-            return updated_doc
-        return None
+        
+        updated_doc = paciente_data
+        updated_doc['id'] = paciente_id
+        return updated_doc
+
     except Exception as e:
         logger.error(f"Erro ao vincular técnicos ao paciente {paciente_id}: {e}")
         raise e # Re-lança para o endpoint
