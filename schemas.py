@@ -41,7 +41,7 @@ class UsuarioCreate(UsuarioBase):
 
 # Em schemas.py, substitua a classe UsuarioProfile por esta
 
-class UsuarioProfile(UsuarioBase):
+class UsuarioProfile(BaseModel):
     id: str = Field(..., description="ID do documento do usuário no Firestore.")
     roles: dict[str, str] = Field({}, description="Dicionário de negocio_id para role (ex: {'negocio_A': 'admin', 'negocio_B': 'cliente'}).")
     fcm_tokens: List[str] = []
@@ -407,7 +407,15 @@ class FichaCompletaResponse(BaseModel):
     orientacoes: List[OrientacaoResponse]
 
 
-# --- NOVO BLOCO DE CÓDIGO AQUI ---
+# =================================================================================
+# SCHEMAS DE PERFIS REDUZIDOS (Para desnormalização e respostas otimizadas)
+# =================================================================================
+
+class TecnicoProfileReduzido(BaseModel):
+    id: str = Field(..., description="ID do documento do usuário técnico.")
+    nome: str = Field(..., description="Nome completo do técnico.")
+    email: EmailStr = Field(..., description="E-mail do técnico.")
+
 # =================================================================================
 # SCHEMAS DO DIÁRIO DO TÉCNICO
 # =================================================================================
@@ -427,8 +435,7 @@ class DiarioTecnicoCreate(DiarioTecnicoBase):
 class DiarioTecnicoResponse(DiarioTecnicoBase):
     id: str
     data_ocorrencia: datetime = Field(..., description="Data e hora em que o registro foi feito.")
-    tecnico_id: str = Field(..., description="ID do usuário técnico que fez o registro.")
-    tecnico_nome: str = Field(..., description="Nome do técnico que fez o registro (desnormalizado).")
+    tecnico: TecnicoProfileReduzido = Field(..., description="Dados do técnico que fez o registro.")
 
 class DiarioTecnicoUpdate(BaseModel):
     anotacao_geral: Optional[str] = None
@@ -473,6 +480,7 @@ class SupervisorVincularRequest(BaseModel):
 # Schemas para a nova funcionalidade de Auditoria de Leitura
 class ConfirmacaoLeituraCreate(BaseModel):
     usuario_id: str = Field(..., description="ID do usuário técnico que está confirmando a leitura.")
+    plano_version_id: str = Field(..., description="Identificador da versão do plano que está sendo confirmada.")
     ip_origem: Optional[str] = Field(None, description="Endereço IP do cliente, se disponível.")
 
 class ConfirmacaoLeituraResponse(ConfirmacaoLeituraCreate):
@@ -551,7 +559,7 @@ class PlanoAckStatus(BaseModel):
 
 # Em schemas.py, adicione este bloco no final do arquivo
 
-# [cite_start]Schemas para a "Confirmação de Leitura" [cite: 141]
+# Schemas para a "Confirmação de Leitura"
 class ConfirmacaoLeituraCreate(BaseModel):
     usuario_id: str = Field(..., description="ID do usuário técnico que está confirmando a leitura.")
     plano_version_id: str = Field(..., description="Identificador da versão do plano que está sendo confirmada.")
@@ -562,7 +570,7 @@ class ConfirmacaoLeituraResponse(ConfirmacaoLeituraCreate):
     paciente_id: str
     data_confirmacao: datetime
 
-# [cite_start]Schemas para o "Checklist Obrigatório" [cite: 146]
+# Schemas para o "Checklist Obrigatório"
 class ChecklistItemDiarioResponse(BaseModel):
     id: str
     descricao: str
@@ -575,3 +583,4 @@ class ChecklistItemDiarioUpdate(BaseModel):
 
 # CORREÇÃO: Usa o método model_rebuild() do Pydantic V2 para resolver as referências
 ProfissionalResponse.model_rebuild()
+DiarioTecnicoResponse.model_rebuild()

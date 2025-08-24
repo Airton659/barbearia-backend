@@ -1685,6 +1685,55 @@ def criar_orientacao(db: firestore.client, orientacao_data: schemas.OrientacaoCr
     return orientacao_dict
 
 # =================================================================================
+# FUNÇÕES DE SUPERVISÃO
+# =================================================================================
+
+def listar_tecnicos_supervisionados_por_paciente(db: firestore.client, paciente_id: str, enfermeiro_id: str) -> List[Dict]:
+    """
+    Lista todos os técnicos que estão sob a supervisão do enfermeiro logado
+    e que também estão vinculados ao paciente em questão.
+    """
+    try:
+        # 1. Busca os dados do paciente para obter a lista de técnicos vinculados
+        paciente_doc = db.collection('usuarios').document(paciente_id).get()
+        if not paciente_doc.exists:
+            logger.warning(f"Paciente com ID {paciente_id} não encontrado.")
+            return []
+            
+        paciente_data = paciente_doc.to_dict()
+        tecnicos_vinculados_ids = paciente_data.get('tecnicos_ids', [])
+        
+        # Se não há técnicos vinculados ao paciente, não há nada a retornar
+        if not tecnicos_vinculados_ids:
+            return []
+
+        # 2. Busca todos os usuários que são técnicos e são supervisionados pelo enfermeiro
+        tecnicos_supervisionados_query = db.collection('usuarios')\
+            .where('roles', '==', {'tecnico': 'tecnico'}) \
+            .where('supervisor_id', '==', enfermeiro_id)
+
+        tecnicos_supervisionados = []
+        for doc in tecnicos_supervisionados_query.stream():
+            tecnico_data = doc.to_dict()
+            tecnico_data['id'] = doc.id
+            tecnicos_supervisionados.append(tecnico_data)
+        
+        # 3. Filtra a lista de técnicos para retornar apenas os que estão em ambas as listas
+        tecnicos_finais = []
+        for tecnico in tecnicos_supervisionados:
+            if tecnico['id'] in tecnicos_vinculados_ids:
+                tecnicos_finais.append({
+                    "id": tecnico['id'],
+                    "nome": tecnico.get('nome', 'Nome não disponível'),
+                    "email": tecnico.get('email', 'Email não disponível')
+                })
+        
+        return tecnicos_finais
+    except Exception as e:
+        logger.error(f"Erro ao listar técnicos supervisionados para o paciente {paciente_id}: {e}")
+        return []
+
+# =================================================================================
 # FUNÇÕES DE LEITURA DA FICHA DO PACIENTE
         
 def listar_consultas(db: firestore.client, paciente_id: str) -> List[Dict]:
@@ -1920,16 +1969,58 @@ def criar_registro_diario(db: firestore.client, registro_data: schemas.DiarioTec
     return registro_dict
 
 def listar_registros_diario(db: firestore.client, paciente_id: str) -> List[Dict]:
-    """Lista todos os registros do diário de um paciente."""
+    """
+    Lista todos os registros do diário de um paciente,
+    incluindo um objeto aninhado com os dados do técnico.
+    """
     registros = []
     try:
         query = db.collection('usuarios').document(paciente_id).collection('diario_tecnico').order_by('data_ocorrencia', direction=firestore.Query.DESCENDING)
+        
+        # Cache para evitar múltiplas leituras do mesmo técnico
+        tecnicos_cache = {}
+
         for doc in query.stream():
             registro_data = doc.to_dict()
             registro_data['id'] = doc.id
+            tecnico_id = registro_data.get('tecnico_id')
+
+            if tecnico_id:
+                # Busca os dados do técnico, usando o cache se já buscou antes
+                if tecnico_id in tecnicos_cache:
+                    tecnico_perfil = tecnicos_cache[tecnico_id]
+                else:
+                    tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
+                    if tecnico_doc.exists:
+                        tecnico_perfil = {
+                            "id": tecnico_doc.id,
+                            "nome": tecnico_doc.to_dict().get('nome'),
+                            "email": tecnico_doc.to_dict().get('email')
+                        }
+                        tecnicos_cache[tecnico_id] = tecnico_perfil
+                    else:
+                        tecnico_perfil = None
+                
+                # Adiciona o objeto completo do técnico na resposta
+                if tecnico_perfil:
+                    registro_data['tecnico'] = tecnico_perfil
+                else:
+                    # Caso o técnico não seja encontrado, adiciona um objeto de fallback
+                    registro_data['tecnico'] = {
+                        "id": tecnico_id,
+                        "nome": "Técnico Desconhecido",
+                        "email": ""
+                    }
+            
+            # Remove os campos desnormalizados antigos, se existirem
+            registro_data.pop('tecnico_id', None)
+            registro_data.pop('tecnico_nome', None)
+
             registros.append(registro_data)
+
     except Exception as e:
         logger.error(f"Erro ao listar o diário do paciente {paciente_id}: {e}")
+    
     return registros
 
 def update_registro_diario(db: firestore.client, paciente_id: str, registro_id: str, update_data: schemas.DiarioTecnicoUpdate, tecnico_id: str) -> Optional[Dict]:

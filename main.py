@@ -564,7 +564,7 @@ def listar_registros_diario(
     current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
-    """(Clínico Autorizado) Lista os registros de acompanhamento do diário do paciente."""
+    """(Clínico Autorizado) Lista os registros de acompanhamento do diário do paciente, incluindo dados do técnico."""
     return crud.listar_registros_diario(db, paciente_id)
 
 @app.patch("/pacientes/{paciente_id}/diario/{registro_id}", response_model=schemas.DiarioTecnicoResponse, tags=["Diário do Técnico"])
@@ -604,6 +604,62 @@ def delete_registro_diario(
         logger.error(f"Erro inesperado ao deletar registro do diário: {e}")
         raise HTTPException(status_code=500, detail="Ocorreu um erro interno.")
     return
+
+
+# =================================================================================
+# ENDPOINTS DE SUPERVISÃO
+# =================================================================================
+
+@app.get("/pacientes/{paciente_id}/tecnicos-supervisionados", response_model=List[schemas.TecnicoProfileReduzido], tags=["Supervisão"])
+def listar_tecnicos_supervisionados_por_paciente_endpoint(
+    paciente_id: str,
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    db: firestore.client = Depends(get_db)
+):
+    """
+    (Gestor ou Enfermeiro) Lista os técnicos vinculados a um paciente
+    que estão sob a supervisão do enfermeiro logado.
+    Para gestores, lista todos os técnicos vinculados ao paciente.
+    """
+    
+    # Se o usuário é um gestor, ele pode ver todos os técnicos vinculados ao paciente.
+    # Se for enfermeiro, filtra pelos supervisionados.
+    is_admin = current_user.roles.get(current_user.negocio_id) == 'admin' # Assumindo que negocio_id está no current_user, ou passando via Header
+    
+    if is_admin:
+        # Lógica para admin ver todos os técnicos vinculados ao paciente
+        # Reutilizamos a função listar_admin_todos_tecnicos_vinculados se ela existir no crud
+        # Por enquanto, vamos buscar os técnicos do paciente e retornar.
+        paciente_doc = db.collection('usuarios').document(paciente_id).get()
+        if not paciente_doc.exists:
+            raise HTTPException(status_code=404, detail="Paciente não encontrado.")
+        
+        paciente_data = paciente_doc.to_dict()
+        tecnicos_vinculados_ids = paciente_data.get('tecnicos_ids', [])
+        
+        tecnicos_perfil = []
+        for tecnico_id in tecnicos_vinculados_ids:
+            tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
+            if tecnico_doc.exists:
+                tecnico_data = tecnico_doc.to_dict()
+                tecnicos_perfil.append(schemas.TecnicoProfileReduzido(
+                    id=tecnico_doc.id,
+                    nome=tecnico_data.get('nome', 'Nome não disponível'),
+                    email=tecnico_data.get('email', 'Email não disponível')
+                ))
+        return tecnicos_perfil
+    else:
+        # Se não é admin, é um enfermeiro, então aplicamos a lógica de supervisão
+        user_role = current_user.roles.get(current_user.negocio_id) # Obter o negocio_id do header ou do usuário
+        if user_role not in ["profissional", "admin"]: # Admin já tratado, então aqui é essencialmente profissional
+             raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Acesso negado: esta operação é apenas para Gestores ou Enfermeiros."
+            )
+        
+        # O ID do enfermeiro é o ID do documento do usuário logado
+        enfermeiro_id = current_user.id
+        return crud.listar_tecnicos_supervisionados_por_paciente(db, paciente_id, enfermeiro_id)
 
 # =================================================================================
 # ENDPOINTS DE AUTOGESTÃO DO PROFISSIONAL
