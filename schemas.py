@@ -542,6 +542,29 @@ class PlanoAckStatus(BaseModel):
     ackHoje: bool = Field(..., description="Se já houve confirmação hoje para a versão atual do plano")
     planoVersionId: Optional[str] = Field(None, description="Versão do plano considerada no status")
 
+
+# Em schemas.py, adicione este bloco no final do arquivo
+
+# [cite_start]Schemas para a "Confirmação de Leitura" [cite: 141]
+class ConfirmacaoLeituraCreate(BaseModel):
+    usuario_id: str = Field(..., description="ID do usuário técnico que está confirmando a leitura.")
+    plano_version_id: str = Field(..., description="Identificador da versão do plano que está sendo confirmada.")
+    ip_origem: Optional[str] = Field(None, description="Endereço IP do cliente, se disponível.")
+
+class ConfirmacaoLeituraResponse(ConfirmacaoLeituraCreate):
+    id: str
+    paciente_id: str
+    data_confirmacao: datetime
+
+# [cite_start]Schemas para o "Checklist Obrigatório" [cite: 146]
+class ChecklistItemDiarioResponse(BaseModel):
+    id: str
+    descricao: str
+    concluido: bool
+
+class ChecklistItemDiarioUpdate(BaseModel):
+    concluido: bool
+
 # --- FIM DOS NOVOS SCHEMAS ---
 
 # CORREÇÃO: Usa o método model_rebuild() do Pydantic V2 para resolver as referências

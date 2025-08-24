@@ -2163,5 +2163,80 @@ def atualizar_item_checklist_diario(db: firestore.client, paciente_id: str, data
     except ValueError as e:
         logger.error(f"Erro ao atualizar item do checklist {item_id}: {e}")
         return None
+    
+# Em crud.py, adicione este bloco no final do arquivo
+
+# =================================================================================
+# FUNÇÕES DO FLUXO DO TÉCNICO (BASEADO NO PDF ESTRATÉGIA)
+# =================================================================================
+
+def registrar_confirmacao_leitura_plano(db: firestore.client, paciente_id: str, confirmacao: schemas.ConfirmacaoLeituraCreate) -> Dict:
+    """Cria o registro de auditoria da confirmação de leitura."""
+    confirmacao_dict = confirmacao.model_dump()
+    confirmacao_dict.update({
+        "paciente_id": paciente_id,
+        "data_confirmacao": datetime.utcnow()
+    })
+    paciente_ref = db.collection('usuarios').document(paciente_id)
+    doc_ref = paciente_ref.collection('confirmacoes_leitura').document()
+    doc_ref.set(confirmacao_dict)
+    confirmacao_dict['id'] = doc_ref.id
+    return confirmacao_dict
+
+def verificar_leitura_plano_do_dia(db: firestore.client, paciente_id: str, tecnico_id: str, data: date) -> bool:
+    """Verifica se a confirmação de leitura já foi feita para bloquear/liberar as funções."""
+    data_inicio_dia = datetime.combine(data, datetime.min.time())
+    data_fim_dia = datetime.combine(data, datetime.max.time())
+    query = db.collection('usuarios').document(paciente_id).collection('confirmacoes_leitura')\
+        .where('usuario_id', '==', tecnico_id)\
+        .where('data_confirmacao', '>=', data_inicio_dia)\
+        .where('data_confirmacao', '<=', data_fim_dia).limit(1)
+    return len(list(query.stream())) > 0
+
+def listar_checklist_diario_com_replicacao(db: firestore.client, paciente_id: str, dia: date, negocio_id: str) -> List[Dict]:
+    """Busca o checklist do dia. Se não existir, replica o do dia anterior, como definido na estratégia."""
+    start_dt = datetime.combine(dia, time.min)
+    end_dt = datetime.combine(dia, time.max)
+    col_ref = db.collection('usuarios').document(paciente_id).collection('checklist')
+    query = col_ref.where('negocio_id', '==', negocio_id).where('data_criacao', '>=', start_dt).where('data_criacao', '<=', end_dt)
+    docs_hoje = list(query.stream())
+
+    if docs_hoje:
+        return [{'id': doc.id, 'descricao': doc.to_dict().get('descricao_item', ''), 'concluido': doc.to_dict().get('concluido', False)} for doc in docs_hoje]
+
+    query_anterior = col_ref.where('negocio_id', '==', negocio_id).where('data_criacao', '<', start_dt).order_by('data_criacao', direction=firestore.Query.DESCENDING).limit(1)
+    docs_anteriores = list(query_anterior.stream())
+    if not docs_anteriores: return []
+
+    ultimo_item_data = docs_anteriores[0].to_dict()['data_criacao'].date()
+    start_anterior = datetime.combine(ultimo_item_data, time.min)
+    end_anterior = datetime.combine(ultimo_item_data, time.max)
+    query_para_replicar = col_ref.where('negocio_id', '==', negocio_id).where('data_criacao', '>=', start_anterior).where('data_criacao', '<=', end_anterior)
+    docs_para_replicar = list(query_para_replicar.stream())
+
+    batch = db.batch()
+    novos_itens = []
+    for doc in docs_para_replicar:
+        dados_antigos = doc.to_dict()
+        novos_dados = {
+            "paciente_id": paciente_id, "negocio_id": negocio_id,
+            "descricao_item": dados_antigos.get("descricao_item", ""), "concluido": False,
+            "data_criacao": datetime.combine(dia, datetime.utcnow().time()),
+            "consulta_id": dados_antigos.get("consulta_id")
+        }
+        novo_doc_ref = col_ref.document()
+        batch.set(novo_doc_ref, novos_dados)
+        novos_itens.append({'id': novo_doc_ref.id, 'descricao': novos_dados['descricao_item'], 'concluido': novos_dados['concluido']})
+    batch.commit()
+    logger.info(f"Replicados {len(novos_itens)} itens de checklist para o paciente {paciente_id} no dia {dia.isoformat()}.")
+    return novos_itens
+
+def atualizar_item_checklist_diario(db: firestore.client, paciente_id: str, item_id: str, update_data: schemas.ChecklistItemDiarioUpdate) -> Optional[Dict]:
+    """Permite ao técnico marcar os itens ao longo do dia."""
+    item_ref = db.collection('usuarios').document(paciente_id).collection('checklist').document(item_id)
+    if not item_ref.get().exists: return None
+    item_ref.update(update_data.model_dump())
+    updated_doc = item_ref.get().to_dict()
+    return {'id': item_id, 'descricao': updated_doc.get('descricao_item', ''), 'concluido': updated_doc.get('concluido', False)}
 
 # --- FIM DAS NOVAS FUNÇÕES ---
