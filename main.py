@@ -1021,23 +1021,28 @@ def sync_user_profile(
     Cria um perfil de usuário no banco de dados na primeira vez que ele faz login.
     """
     try:
-        user_profile = crud.criar_ou_atualizar_usuario(db, user_data)
+        user_profile_data = crud.criar_ou_atualizar_usuario(db, user_data)
         
-        if user_profile and user_profile.get('roles'):
-            for negocio_id, role in user_profile['roles'].items():
+        # Garante que a resposta da API sempre corresponda ao schema de dados.
+        # Isso corrige problemas de campos ausentes ou com valores null.
+        user_profile_response = schemas.UsuarioProfile(**user_profile_data)
+        
+        # Adiciona o profissional_id ao perfil antes de retornar, se o perfil existir.
+        if user_profile_response.roles:
+            for negocio_id, role in user_profile_response.roles.items():
                 if role in ['admin', 'profissional']:
-                    perfil_profissional = crud.buscar_profissional_por_uid(db, negocio_id, user_profile['firebase_uid'])
+                    perfil_profissional = crud.buscar_profissional_por_uid(db, negocio_id, user_profile_response.firebase_uid)
                     if perfil_profissional:
-                        user_profile['profissional_id'] = perfil_profissional.get('id')
+                        user_profile_response.profissional_id = perfil_profissional.get('id')
                         break
+        
+        return user_profile_response
 
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(f"Erro inesperado ao sincronizar perfil do usuário: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Ocorreu um erro interno no servidor.")
-
-    return user_profile
 
 @app.get("/me/profile", response_model=schemas.UsuarioProfile, tags=["Usuários"])
 def get_me_profile(current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase)):
