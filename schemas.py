@@ -39,14 +39,20 @@ class UsuarioCreate(UsuarioBase):
     # No Firestore, o usuário é criado via Firebase Auth, então o backend só sincroniza.
     pass
 
+# Em schemas.py, substitua a classe UsuarioProfile por esta
+
 class UsuarioProfile(UsuarioBase):
     id: str = Field(..., description="ID do documento do usuário no Firestore.")
-    # Um usuário pode ser membro de múltiplos negócios (ex: admin de um, cliente de outro)
     roles: dict[str, str] = Field({}, description="Dicionário de negocio_id para role (ex: {'negocio_A': 'admin', 'negocio_B': 'cliente'}).")
     fcm_tokens: List[str] = []
     profissional_id: Optional[str] = Field(None, description="ID do perfil profissional, se o usuário for um profissional ou admin.")
-    # Adicionando o campo supervisor_id para a nova funcionalidade
     supervisor_id: Optional[str] = Field(None, description="ID do usuário (documento) do enfermeiro supervisor.")
+    
+    # --- INÍCIO DA CORREÇÃO ---
+    # Adiciona os campos de vínculo para serem retornados na lista de usuários
+    enfermeiro_vinculado_id: Optional[str] = Field(None, description="ID do documento do profissional (enfermeiro) vinculado ao paciente.")
+    tecnicos_vinculados_ids: Optional[List[str]] = Field(None, description="Lista de IDs de documento dos técnicos vinculados ao paciente.")
+    # --- FIM DA CORREÇÃO ---
 
 
 # Schema usado pelo endpoint de sync, agora com o negocio_id opcional

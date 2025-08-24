@@ -203,10 +203,12 @@ def admin_listar_negocios(db: firestore.client) -> List[Dict]:
 
 # Em crud.py, substitua a função inteira por esta versão
 
+# Em crud.py, substitua a função inteira por esta versão final e completa
+
 def admin_listar_usuarios_por_negocio(db: firestore.client, negocio_id: str, status: str = 'ativo') -> List[Dict]:
     """
-    Lista todos os usuários (clientes, profissionais, etc.) de um negócio,
-    incluindo o profissional_id para as roles aplicáveis.
+    Lista todos os usuários de um negócio, enriquecendo os dados com os IDs de
+    vínculos de profissionais, enfermeiros e técnicos quando aplicável.
     """
     usuarios = []
     try:
@@ -218,26 +220,36 @@ def admin_listar_usuarios_por_negocio(db: firestore.client, negocio_id: str, sta
 
             if status_no_negocio == status:
                 usuario_data['id'] = doc.id
-                
-                # --- INÍCIO DA CORREÇÃO ---
-                # Se o usuário é um profissional ou admin, buscamos seu perfil profissional
                 user_role = usuario_data.get("roles", {}).get(negocio_id)
+
+                # --- LÓGICA DE ENRIQUECIMENTO DE DADOS ---
+
+                # 1. Para Profissionais e Admins, adiciona o profissional_id
                 if user_role in ['profissional', 'admin']:
-                    # Usamos o firebase_uid do usuário para encontrar o perfil profissional correspondente
                     firebase_uid = usuario_data.get('firebase_uid')
                     if firebase_uid:
                         perfil_profissional = buscar_profissional_por_uid(db, negocio_id, firebase_uid)
-                        if perfil_profissional:
-                            usuario_data['profissional_id'] = perfil_profissional.get('id')
-                        else:
-                            # Garante que o campo exista, mesmo que nulo
-                            usuario_data['profissional_id'] = None
+                        usuario_data['profissional_id'] = perfil_profissional.get('id') if perfil_profissional else None
                     else:
                         usuario_data['profissional_id'] = None
-                else:
-                    # Garante que o campo exista para outros papéis
-                    usuario_data['profissional_id'] = None
-                # --- FIM DA CORREÇÃO ---
+                
+                # 2. Para Clientes (Pacientes), adiciona os IDs dos profissionais vinculados
+                elif user_role == 'cliente':
+                    # Adiciona o ID do enfermeiro vinculado (convertido para profissional_id)
+                    enfermeiro_user_id = usuario_data.get('enfermeiro_id')
+                    if enfermeiro_user_id:
+                        enfermeiro_doc = db.collection('usuarios').document(enfermeiro_user_id).get()
+                        if enfermeiro_doc.exists:
+                            firebase_uid_enfermeiro = enfermeiro_doc.to_dict().get('firebase_uid')
+                            perfil_enfermeiro = buscar_profissional_por_uid(db, negocio_id, firebase_uid_enfermeiro)
+                            usuario_data['enfermeiro_vinculado_id'] = perfil_enfermeiro.get('id') if perfil_enfermeiro else None
+                        else:
+                            usuario_data['enfermeiro_vinculado_id'] = None
+                    else:
+                        usuario_data['enfermeiro_vinculado_id'] = None
+
+                    # Adiciona a lista de IDs de técnicos vinculados
+                    usuario_data['tecnicos_vinculados_ids'] = usuario_data.get('tecnicos_ids', [])
 
                 usuarios.append(usuario_data)
 
