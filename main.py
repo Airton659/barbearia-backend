@@ -2566,8 +2566,8 @@ def update_checklist_item_diario(
 
 
 # ======================= CHECKLIST DO DIA =======================
-from typing import Optional, Dict, Any
-from datetime import date
+from typing import Optional, Dict, Any, List
+from datetime import date, datetime, timezone
 from fastapi import Body
 
 try:
@@ -2577,103 +2577,133 @@ except Exception:
 
 class ChecklistItemUpdate(schemas.BaseModel):
     concluido: bool
-    timestamp: Optional[str] = None
-    titulo: Optional[str] = None  # opcional, só para criar item inexistente
+    titulo: Optional[str] = None  # opcional: renomear item exibido
 
-def _check_tenant(negocio_id_q: Optional[str], negocio_id_h: Optional[str]):
-    # Mantém compat com query ou header; reusa onde já existir em outros handlers
-    return negocio_id_q or negocio_id_h
+def _tenant_from_checklist(negocio_id_q: Optional[str], negocio_id_h: Optional[str]) -> Optional[str]:
+    return (negocio_id_q or negocio_id_h)
 
-def _checklist_ref(db, paciente_id: str, dia: date):
-    return (
-        db.collection("usuarios")
-          .document(paciente_id)
-          .collection("checklist")
-          .document(dia.isoformat())
-    )
+def _to_local_date_checklist(v) -> Optional[date]:
+    """Converte Timestamp/string ISO para date local America/Sao_Paulo (quando disponível)."""
+    try:
+        if v is None:
+            return None
+        if isinstance(v, datetime):
+            dt = v
+        else:
+            s = str(v)
+            if s.endswith("Z"):
+                s = s.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        try:
+            from zoneinfo import ZoneInfo
+            dt = dt.astimezone(ZoneInfo("America/Sao_Paulo"))
+        except Exception:
+            pass
+        return dt.date()
+    except Exception:
+        return None
 
-def _ensure_checklist_doc(db, paciente_id: str, dia: date, current_user_id: str, negocio_id: Optional[str]) -> Dict[str, Any]:
-    doc_ref = _checklist_ref(db, paciente_id, dia)
-    snap = doc_ref.get()
-    if snap.exists:
-        return snap.to_dict() or {}
-    payload = {
-        "id": doc_ref.id,
-        "paciente_id": paciente_id,
-        "data": dia.isoformat(),
-        "negocio_id": negocio_id,
-        "criado_por": current_user_id,
-        "criado_em": SERVER_TIMESTAMP if SERVER_TIMESTAMP else None,
-        "itens": [],  # inicia vazio; front pode semear itens conforme plano/rotina
-    }
-    doc_ref.set(payload)
-    return doc_ref.get().to_dict() or payload
+def _listar_itens_do_dia(db, paciente_id: str, alvo: date, negocio_id_opt: Optional[str]) -> List[Dict[str, Any]]:
+    """
+    Lê itens em usuarios/{paciente}/checklist/* e filtra por data_criacao no dia alvo.
+    Campos conhecidos por item:
+      - paciente_id: str
+      - concluido: bool
+      - descricao_item: str (título)
+      - data_criacao: timestamp/iso
+      - negocio_id: str
+      - consulta_id: str (opcional)
+    """
+    col = (db.collection("usuarios")
+             .document(paciente_id)
+             .collection("checklist")
+             .where("paciente_id", "==", paciente_id)
+             .limit(500))
+    itens: List[Dict[str, Any]] = []
+    for doc in col.stream():
+        d = doc.to_dict() or {}
+        if negocio_id_opt and d.get("negocio_id") != negocio_id_opt:
+            continue
+        dia = _to_local_date_checklist(d.get("data_criacao") or d.get("created_at") or d.get("timestamp"))
+        if dia != alvo:
+            continue
+        itens.append({
+            "id": doc.id,
+            "titulo": d.get("descricao_item") or d.get("titulo") or "",
+            "concluido": bool(d.get("concluido", False)),
+            "consulta_id": d.get("consulta_id"),
+        })
+    itens.sort(key=lambda x: x.get("titulo",""))
+    return itens
 
 @app.get("/pacientes/{paciente_id}/checklist-diario", tags=["checklist"])
 def obter_checklist_do_dia(
     paciente_id: str,
-    data: date = Query(..., description="YYYY-MM-DD do dia"),
+    data: date = Query(..., description="Dia no formato YYYY-MM-DD"),
     negocio_id: Optional[str] = Query(None, alias="negocio_id"),
     negocio_id_header: Optional[str] = Header(None, alias="negocio-id"),
     current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
     db = Depends(get_db),
 ):
-    _ = _check_tenant(negocio_id, negocio_id_header)
-    # Gate: precisa ter lido o plano do dia
+    # Gate: exige leitura do plano no dia
     if not _ack_lido(db, paciente_id, current_user.id, data):
         raise HTTPException(status_code=403, detail="Leitura do plano pendente para este dia.")
-    # retorna (ou cria) o checklist do dia
-    doc = _ensure_checklist_doc(db, paciente_id, data, current_user.id, _)
-    return {"data": doc.get("data"), "itens": doc.get("itens", [])}
+    tenant = _tenant_from_checklist(negocio_id, negocio_id_header)
+    itens = _listar_itens_do_dia(db, paciente_id, data, tenant)
+    return {"data": data.isoformat(), "itens": itens}
 
 @app.patch("/pacientes/{paciente_id}/checklist-diario/{item_id}", tags=["checklist"])
 def marcar_item_checklist(
     paciente_id: str,
     item_id: str,
-    data: date = Query(..., description="YYYY-MM-DD do dia"),
+    data: date = Query(..., description="YYYY-MM-DD do dia (usado para validar ACK)"),
     negocio_id: Optional[str] = Query(None, alias="negocio_id"),
     negocio_id_header: Optional[str] = Header(None, alias="negocio-id"),
     body: ChecklistItemUpdate = Body(...),
     current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
     db = Depends(get_db),
 ):
-    _ = _check_tenant(negocio_id, negocio_id_header)
-    # Gate de leitura
+    # Gate: exige leitura do plano no dia
     if not _ack_lido(db, paciente_id, current_user.id, data):
         raise HTTPException(status_code=403, detail="Leitura do plano pendente para este dia.")
 
-    doc_ref = _checklist_ref(db, paciente_id, data)
-    doc = _ensure_checklist_doc(db, paciente_id, data, current_user.id, _)
-    itens = list(doc.get("itens", []))
+    doc_ref = (db.collection("usuarios")
+                 .document(paciente_id)
+                 .collection("checklist")
+                 .document(item_id))
+    snap = doc_ref.get()
 
-    # procura item
-    idx = next((i for i, it in enumerate(itens) if str(it.get("id")) == str(item_id)), None)
-    now_meta = {"atualizado_por": current_user.id}
-    if SERVER_TIMESTAMP:
-        now_meta["atualizado_em"] = SERVER_TIMESTAMP
-
-    if idx is None:
-        # cria item novo mínimo
-        novo = {
-            "id": item_id,
-            "titulo": body.titulo or "",
+    if not snap.exists:
+        # cria item novo conforme schema real
+        payload = {
+            "paciente_id": paciente_id,
             "concluido": bool(body.concluido),
-            **now_meta,
+            "descricao_item": body.titulo or "",
+            "negocio_id": _tenant_from_checklist(negocio_id, negocio_id_header),
+            "data_criacao": datetime.now(timezone.utc).isoformat().replace("+00:00","Z"),
+            "atualizado_por": current_user.id,
         }
-        itens.append(novo)
-    else:
-        itens[idx]["concluido"] = bool(body.concluido)
-        itens[idx].update(now_meta)
+        if SERVER_TIMESTAMP:
+            payload["atualizado_em"] = SERVER_TIMESTAMP
+        doc_ref.set(payload)
+        return {"ok": True, "item_id": item_id, "concluido": bool(body.concluido), "created": True}
 
-    # opcional: refletir timestamp vindo do app (se fornecido)
-    if body.timestamp:
-        if idx is None:
-            itens[-1]["timestamp"] = body.timestamp
-        else:
-            itens[idx]["timestamp"] = body.timestamp
+    d = snap.to_dict() or {}
+    if d.get("paciente_id") and d.get("paciente_id") != paciente_id:
+        raise HTTPException(status_code=403, detail="Item não pertence a este paciente.")
 
-    # grava
-    doc["itens"] = itens
-    doc_ref.set(doc, merge=True)
+    updates = {
+        "concluido": bool(body.concluido),
+        "atualizado_por": current_user.id,
+    }
+    if body.titulo is not None:
+        updates["descricao_item"] = body.titulo
+    if SERVER_TIMESTAMP:
+        updates["atualizado_em"] = SERVER_TIMESTAMP
+
+    doc_ref.set(updates, merge=True)
     return {"ok": True, "item_id": item_id, "concluido": bool(body.concluido)}
 # ===================== FIM CHECKLIST DO DIA =====================
+
