@@ -194,7 +194,7 @@ def get_paciente_autorizado(
         print("DEBUG: Acesso permitido. Usuário é o próprio paciente.")
         return current_user
 
-    # Busca o documento completo do paciente para obter o negocio_id e o enfermeiro_id
+    # Busca o documento completo do paciente para obter os vínculos
     paciente_doc_ref = db.collection('usuarios').document(paciente_id)
     paciente_doc = paciente_doc_ref.get()
     if not paciente_doc.exists:
@@ -203,9 +203,8 @@ def get_paciente_autorizado(
     paciente_data = paciente_doc.to_dict()
     print(f"Dados do Paciente no DB: {paciente_data}")
     
-    # Extrai o negocio_id do paciente (um paciente pode estar em vários, pegamos o primeiro por segurança)
+    # Extrai o negocio_id do paciente
     negocio_id_paciente = list(paciente_data.get('roles', {}).keys())[0] if paciente_data.get('roles') else None
-    print(f"Clínica (negocio_id) do Paciente: {negocio_id_paciente}")
     if not negocio_id_paciente:
          raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Paciente não está associado a uma clínica.")
 
@@ -215,14 +214,18 @@ def get_paciente_autorizado(
         return current_user
         
     # 3. O Enfermeiro vinculado ao paciente tem acesso.
-    user_role_na_clinica = current_user.roles.get(negocio_id_paciente)
-    print(f"Role do usuário na clínica do paciente: {user_role_na_clinica}")
-    if user_role_na_clinica in ["profissional", "admin"]:
-        enfermeiro_vinculado_id = paciente_data.get('enfermeiro_id')
-        print(f"ID do Enfermeiro vinculado no DB: {enfermeiro_vinculado_id}")
-        if enfermeiro_vinculado_id and current_user.id == enfermeiro_vinculado_id:
-            print("DEBUG: Acesso permitido. Usuário é o enfermeiro vinculado.")
-            return current_user
+    enfermeiro_vinculado_id = paciente_data.get('enfermeiro_id')
+    if enfermeiro_vinculado_id and current_user.id == enfermeiro_vinculado_id:
+        print("DEBUG: Acesso permitido. Usuário é o enfermeiro vinculado.")
+        return current_user
+
+    # --- INÍCIO DA CORREÇÃO ---
+    # 4. O Técnico vinculado ao paciente tem acesso.
+    tecnicos_vinculados_ids = paciente_data.get('tecnicos_ids', [])
+    if current_user.id in tecnicos_vinculados_ids:
+        print("DEBUG: Acesso permitido. Usuário é um técnico vinculado.")
+        return current_user
+    # --- FIM DA CORREÇÃO ---
 
     # Se nenhuma das condições for atendida, nega o acesso.
     print("--- ACESSO NEGADO. Nenhuma regra de permissão foi atendida. ---")
