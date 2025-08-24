@@ -1518,16 +1518,17 @@ def adicionar_registro_diario(
         raise HTTPException(status_code=403, detail="Leitura do Plano Ativo pendente para hoje.")
     return crud.adicionar_registro_diario(db, paciente_id, registro, current_user.id)
 
-@app.get("/pacientes/{paciente_id}/checklist-diario", response_model=List[schemas.ChecklistItemDiarioResponse], tags=["Diário do Técnico"])
+@app.get("/pacientes/{paciente_id}/checklist-diario",
+         response_model=List[schemas.ChecklistItemDiarioResponse],
+         tags=["Diário do Técnico"])
 def get_checklist_diario(
     paciente_id: str,
     data: date = Query(..., description="Data do checklist (formato: YYYY-MM-DD)."),
-    negocio_id: str = Header(..., description="ID do Negócio."),
+    negocio_id: str = Header(..., alias="negocio-id", description="ID do Negócio."),
     current_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
-    db: firestore.client = Depends(get_db)
+    db: firestore.client = Depends(get_db),
 ):
-    """(Técnico) Busca o checklist do dia para um paciente. Se não existir, gera um novo."""
-    # Gate: exige confirmação de leitura do plano do dia pelo técnico antes de gerar/visualizar o checklist do dia
+    # Gate: exige confirmação de leitura do plano do dia
     if not _ack_lido(db, paciente_id, current_user.id, data):
         raise HTTPException(status_code=403, detail="Leitura do Plano Ativo pendente para hoje.")
     return crud.listar_checklist_diario(db, paciente_id, data, negocio_id)
@@ -2537,16 +2538,6 @@ def adicionar_registro_diario(
     """(Técnico) Adiciona um novo registro estruturado ao diário de acompanhamento do paciente."""
     return crud.adicionar_registro_diario(db, paciente_id, registro, current_user.id)
 
-@app.get("/pacientes/{paciente_id}/checklist-diario", response_model=List[schemas.ChecklistItemDiarioResponse], tags=["Diário do Técnico"])
-def get_checklist_diario(
-    paciente_id: str,
-    data: date = Query(..., description="Data do checklist (formato: YYYY-MM-DD)."),
-    negocio_id: str = Header(..., description="ID do Negócio."),
-    current_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
-    db: firestore.client = Depends(get_db)
-):
-    """(Técnico) Busca o checklist do dia para um paciente. Se não existir, gera um novo."""
-    return crud.listar_checklist_diario(db, paciente_id, data, negocio_id)
 
 @app.patch("/pacientes/{paciente_id}/checklist-diario/{item_id}", response_model=schemas.ChecklistItemDiarioResponse, tags=["Diário do Técnico"])
 def update_checklist_item_diario(
@@ -2637,22 +2628,6 @@ def _listar_itens_do_dia(db, paciente_id: str, alvo: date, negocio_id_opt: Optio
         })
     itens.sort(key=lambda x: x.get("titulo",""))
     return itens
-
-@app.get("/pacientes/{paciente_id}/checklist-diario", tags=["checklist"])
-def obter_checklist_do_dia(
-    paciente_id: str,
-    data: date = Query(..., description="Dia no formato YYYY-MM-DD"),
-    negocio_id: Optional[str] = Query(None, alias="negocio_id"),
-    negocio_id_header: Optional[str] = Header(None, alias="negocio-id"),
-    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
-    db = Depends(get_db),
-):
-    # Gate: exige leitura do plano no dia
-    if not _ack_lido(db, paciente_id, current_user.id, data):
-        raise HTTPException(status_code=403, detail="Leitura do plano pendente para este dia.")
-    tenant = _tenant_from_checklist(negocio_id, negocio_id_header)
-    itens = _listar_itens_do_dia(db, paciente_id, data, tenant)
-    return {"data": data.isoformat(), "itens": itens}
 
 @app.patch("/pacientes/{paciente_id}/checklist-diario/{item_id}", tags=["checklist"])
 def marcar_item_checklist(
