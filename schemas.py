@@ -41,7 +41,7 @@ class UsuarioCreate(UsuarioBase):
 
 # Em schemas.py, substitua a classe UsuarioProfile por esta
 
-class UsuarioProfile(BaseModel):
+class UsuarioProfile(UsuarioBase):
     id: str = Field(..., description="ID do documento do usuário no Firestore.")
     roles: dict[str, str] = Field({}, description="Dicionário de negocio_id para role (ex: {'negocio_A': 'admin', 'negocio_B': 'cliente'}).")
     fcm_tokens: List[str] = []
@@ -583,4 +583,5 @@ class ChecklistItemDiarioUpdate(BaseModel):
 
 # CORREÇÃO: Usa o método model_rebuild() do Pydantic V2 para resolver as referências
 ProfissionalResponse.model_rebuild()
+UsuarioProfile.model_rebuild()
 DiarioTecnicoResponse.model_rebuild()
