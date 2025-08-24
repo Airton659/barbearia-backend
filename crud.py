@@ -201,13 +201,16 @@ def admin_listar_negocios(db: firestore.client) -> List[Dict]:
 # FUNÇÕES DE ADMINISTRAÇÃO DO NEGÓCIO (ADMIN DE NEGÓCIO)
 # =================================================================================
 
+# Em crud.py, substitua a função inteira por esta versão
+
 def admin_listar_usuarios_por_negocio(db: firestore.client, negocio_id: str, status: str = 'ativo') -> List[Dict]:
-    """Lista todos os usuários (clientes e profissionais) de um negócio, com filtro de status."""
+    """
+    Lista todos os usuários (clientes, profissionais, etc.) de um negócio,
+    incluindo o profissional_id para as roles aplicáveis.
+    """
     usuarios = []
     try:
-        # --- ALTERAÇÃO AQUI: Incluindo 'tecnico' e 'admin' na consulta de usuários ---
         query = db.collection('usuarios').where(f'roles.{negocio_id}', 'in', ['cliente', 'profissional', 'admin', 'tecnico'])
-        # --- FIM DA ALTERAÇÃO ---
 
         for doc in query.stream():
             usuario_data = doc.to_dict()
@@ -215,6 +218,27 @@ def admin_listar_usuarios_por_negocio(db: firestore.client, negocio_id: str, sta
 
             if status_no_negocio == status:
                 usuario_data['id'] = doc.id
+                
+                # --- INÍCIO DA CORREÇÃO ---
+                # Se o usuário é um profissional ou admin, buscamos seu perfil profissional
+                user_role = usuario_data.get("roles", {}).get(negocio_id)
+                if user_role in ['profissional', 'admin']:
+                    # Usamos o firebase_uid do usuário para encontrar o perfil profissional correspondente
+                    firebase_uid = usuario_data.get('firebase_uid')
+                    if firebase_uid:
+                        perfil_profissional = buscar_profissional_por_uid(db, negocio_id, firebase_uid)
+                        if perfil_profissional:
+                            usuario_data['profissional_id'] = perfil_profissional.get('id')
+                        else:
+                            # Garante que o campo exista, mesmo que nulo
+                            usuario_data['profissional_id'] = None
+                    else:
+                        usuario_data['profissional_id'] = None
+                else:
+                    # Garante que o campo exista para outros papéis
+                    usuario_data['profissional_id'] = None
+                # --- FIM DA CORREÇÃO ---
+
                 usuarios.append(usuario_data)
 
         return usuarios
