@@ -613,6 +613,7 @@ def delete_registro_diario(
 @app.get("/pacientes/{paciente_id}/tecnicos-supervisionados", response_model=List[schemas.TecnicoProfileReduzido], tags=["Supervisão"])
 def listar_tecnicos_supervisionados_por_paciente_endpoint(
     paciente_id: str,
+    negocio_id: str = Header(..., alias="negocio-id"),
     current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
@@ -622,14 +623,12 @@ def listar_tecnicos_supervisionados_por_paciente_endpoint(
     Para gestores, lista todos os técnicos vinculados ao paciente.
     """
     
-    # Se o usuário é um gestor, ele pode ver todos os técnicos vinculados ao paciente.
-    # Se for enfermeiro, filtra pelos supervisionados.
-    is_admin = current_user.roles.get(current_user.negocio_id) == 'admin' # Assumindo que negocio_id está no current_user, ou passando via Header
+    # Obtém a role do usuário a partir do dicionário roles, usando o negocio_id do Header.
+    user_role = current_user.roles.get(negocio_id)
+    is_admin = user_role == 'admin'
     
     if is_admin:
         # Lógica para admin ver todos os técnicos vinculados ao paciente
-        # Reutilizamos a função listar_admin_todos_tecnicos_vinculados se ela existir no crud
-        # Por enquanto, vamos buscar os técnicos do paciente e retornar.
         paciente_doc = db.collection('usuarios').document(paciente_id).get()
         if not paciente_doc.exists:
             raise HTTPException(status_code=404, detail="Paciente não encontrado.")
@@ -650,8 +649,7 @@ def listar_tecnicos_supervisionados_por_paciente_endpoint(
         return tecnicos_perfil
     else:
         # Se não é admin, é um enfermeiro, então aplicamos a lógica de supervisão
-        user_role = current_user.roles.get(current_user.negocio_id) # Obter o negocio_id do header ou do usuário
-        if user_role not in ["profissional", "admin"]: # Admin já tratado, então aqui é essencialmente profissional
+        if user_role not in ["profissional", "admin"]:
              raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Acesso negado: esta operação é apenas para Gestores ou Enfermeiros."
@@ -660,7 +658,7 @@ def listar_tecnicos_supervisionados_por_paciente_endpoint(
         # O ID do enfermeiro é o ID do documento do usuário logado
         enfermeiro_id = current_user.id
         return crud.listar_tecnicos_supervisionados_por_paciente(db, paciente_id, enfermeiro_id)
-
+    
 # =================================================================================
 # ENDPOINTS DE AUTOGESTÃO DO PROFISSIONAL
 # =================================================================================
