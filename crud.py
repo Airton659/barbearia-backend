@@ -2082,74 +2082,86 @@ def adicionar_registro_diario(db: firestore.client, paciente_id: str, registro: 
 # FUNÇÕES DO CHECKLIST DIÁRIO
 # =================================================================================
 
-def listar_checklist_diario(db: firestore.client, paciente_id: str, data: date, negocio_id: str) -> List[Dict]:
-    """
-    Lista os itens do checklist do dia a partir da subcoleção 'checklist' do paciente.
 
-    A consulta filtra por:
-      - paciente_id == {paciente_id}
-      - negocio_id == {negocio_id}
-      - data_criacao >= [data 00:00:00] e < [data+1 00:00:00]
-    e ordena por data_criacao (crescente).
 
-    Retorna uma lista de dicts no formato compatível com schemas.ChecklistItemDiarioResponse.
+def listar_checklist_diario(db: firestore.client, paciente_id: str, dia: date, negocio_id: str) -> List[Dict]:
+    """Busca os itens do checklist do *dia* para um paciente.
+
+    Lê da coleção ``usuarios/{paciente_id}/checklist`` filtrando:
+      - paciente_id == <paciente_id>
+      - negocio_id == <negocio_id>
+      - data_criacao >= {dia} 00:00:00  and  < {dia}+1 00:00:00
+    Retorna uma lista no formato esperado pelo schema ``ChecklistItemDiarioResponse``:
+      ``[{id, descricao, concluido}]``.
     """
-    inicio = datetime.combine(data, datetime.min.time()).replace(tzinfo=timezone.utc)
-    fim = (inicio + timedelta(days=1))
     try:
-        q = (db.collection('usuarios').document(paciente_id).collection('checklist')
-                .where('paciente_id', '==', paciente_id)
-                .where('negocio_id', '==', negocio_id)
-                .where('data_criacao', '>=', inicio)
-                .where('data_criacao', '<', fim)
-                .order_by('data_criacao'))
-        itens = []
-        for doc_snap in q.stream():
-            d = doc_snap.to_dict() or {}
-            itens.append({
-                'id': doc_snap.id,
-                'descricao_item': d.get('descricao_item'),
-                'concluido': d.get('concluido', False),
-                'consulta_id': d.get('consulta_id'),
-                'data_criacao': d.get('data_criacao'),
-            })
-        return itens
-    except Exception:
-        # Não vaza erro bruto pra API — deixa o handler superior padronizar a resposta
-        raise
+        # Faixa de horário do dia em UTC (naive -> interpretado como UTC pelo client)
+        start_dt = datetime.combine(dia, time(0, 0, 0))
+        end_dt = start_dt + timedelta(days=1)
 
+        col_ref = db.collection('usuarios').document(paciente_id).collection('checklist')
+
+        query = (
+            col_ref
+            .where('paciente_id', '==', paciente_id)
+            .where('negocio_id', '==', negocio_id)
+            .where('data_criacao', '>=', start_dt)
+            .where('data_criacao', '<', end_dt)
+            .order_by('data_criacao')
+        )
+
+        docs = list(query.stream())
+
+        itens: List[Dict] = []
+        for doc in docs:
+            d = doc.to_dict() or {}
+            itens.append({
+                'id': doc.id,
+                'descricao': d.get('descricao_item', d.get('descricao', '')),
+                'concluido': bool(d.get('concluido', False)),
+            })
+
+        return itens
+    except Exception as e:
+        logger.error(f"Erro ao listar checklist diário (paciente={paciente_id}, dia={dia}, negocio_id={negocio_id}): {e}")
+        raise
 
 def atualizar_item_checklist_diario(db: firestore.client, paciente_id: str, data: date, item_id: str, update_data: schemas.ChecklistItemDiarioUpdate) -> Optional[Dict]:
     """
-    Atualiza o campo 'concluido' de um item do checklist diário na subcoleção 'checklist'.
-    Valida (quando possível) se o item pertence ao dia informado.
+    Atualiza o status de um item do checklist diário.
     """
+    data_str = data.isoformat()
+    checklist_doc_ref = db.collection('usuarios').document(paciente_id).collection('checklists_diarios').document(data_str)
+    
+    # Transação para garantir a atomicidade da atualização do array
+    @firestore.transactional
+    def update_in_transaction(transaction, doc_ref):
+        snapshot = doc_ref.get(transaction=transaction)
+        if not snapshot.exists:
+            raise ValueError("Checklist diário não encontrado para este dia.")
+
+        checklist = snapshot.to_dict()
+        itens = checklist.get('itens', [])
+        
+        item_encontrado = None
+        for item in itens:
+            if item.get('id') == item_id:
+                item_encontrado = item
+                break
+        
+        if not item_encontrado:
+            raise ValueError(f"Item do checklist com ID '{item_id}' não encontrado.")
+            
+        item_encontrado['concluido'] = update_data.concluido
+        
+        transaction.update(doc_ref, {'itens': itens})
+        return item_encontrado
+
     try:
-        item_ref = db.collection('usuarios').document(paciente_id).collection('checklist').document(item_id)
-        snap = item_ref.get()
-        if not snap.exists:
-            return None
+        updated_item = update_in_transaction(db.transaction(), checklist_doc_ref)
+        return updated_item
+    except ValueError as e:
+        logger.error(f"Erro ao atualizar item do checklist {item_id}: {e}")
+        return None
 
-        # (Opcional) validar data_criacao pertence ao dia 'data'
-        d = snap.to_dict() or {}
-        dt = d.get('data_criacao')
-        if isinstance(dt, datetime):
-            inicio = datetime.combine(data, datetime.min.time()).replace(tzinfo=timezone.utc)
-            fim = inicio + timedelta(days=1)
-            if not (inicio <= dt < fim):
-                # Item não pertence ao dia solicitado
-                return None
-
-        item_ref.update({'concluido': bool(update_data.concluido)})
-        # retornar payload atualizado
-        d['concluido'] = bool(update_data.concluido)
-        d_out = {
-            'id': snap.id,
-            'descricao_item': d.get('descricao_item'),
-            'concluido': d.get('concluido', False),
-            'consulta_id': d.get('consulta_id'),
-            'data_criacao': d.get('data_criacao'),
-        }
-        return d_out
-    except Exception:
-        raise
+# --- FIM DAS NOVAS FUNÇÕES ---
