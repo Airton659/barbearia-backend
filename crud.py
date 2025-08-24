@@ -2253,7 +2253,7 @@ def listar_checklist_diario_com_replicacao(db: firestore.client, paciente_id: st
     docs_hoje = list(query.stream())
 
     if docs_hoje:
-        return [{'id': doc.id, 'descricao': doc.to_dict().get('descricao_item', ''), 'concluido': doc.to_dict().get('concluido', False)} for doc in docs_hoje]
+        return [{'id': doc.id, 'descricao': doc.to_dict().get('descricao_item', doc.to_dict().get('descricao', '')), 'concluido': doc.to_dict().get('concluido', False)} for doc in docs_hoje]
 
     query_anterior = col_ref.where('negocio_id', '==', negocio_id).where('data_criacao', '<', start_dt).order_by('data_criacao', direction=firestore.Query.DESCENDING).limit(1)
     docs_anteriores = list(query_anterior.stream())
@@ -2271,7 +2271,7 @@ def listar_checklist_diario_com_replicacao(db: firestore.client, paciente_id: st
         dados_antigos = doc.to_dict()
         novos_dados = {
             "paciente_id": paciente_id, "negocio_id": negocio_id,
-            "descricao_item": dados_antigos.get("descricao_item", ""), "concluido": False,
+            "descricao_item": dados_antigos.get("descricao_item", dados_antigos.get("descricao", "")), "concluido": False,
             "data_criacao": datetime.combine(dia, datetime.utcnow().time()),
             "consulta_id": dados_antigos.get("consulta_id")
         }
