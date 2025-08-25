@@ -2429,10 +2429,10 @@ def listar_registros_diario_estruturado(
     paciente_id: str,
     data: Optional[date] = None,
     tipo: Optional[str] = None
-) -> List[schemas.RegistroDiarioResponse]: # Retorna uma lista de modelos Pydantic
+) -> List[schemas.RegistroDiarioResponse]:
     """
-    Lista os registros diários estruturados de um paciente, com filtros opcionais.
-    Retorna uma lista de objetos Pydantic para garantir a serialização correta do campo 'conteudo'.
+    Lista os registros diários estruturados de um paciente, garantindo a correta
+    serialização do campo 'conteudo' com base no campo 'tipo'.
     """
     registros_pydantic = []
     try:
@@ -2451,44 +2451,57 @@ def listar_registros_diario_estruturado(
         tecnicos_cache = {}
 
         for doc in query.stream():
-            # 1. Pega o dicionário raw do Firestore
             registro_data = doc.to_dict()
-            registro_data['id'] = doc.id
-            tecnico_id = registro_data.get('tecnico_id')
+            if not registro_data: continue
 
-            # 2. Prepara o dicionário para corresponder ao schema de resposta
+            registro_data['id'] = doc.id
+            
+            # --- INÍCIO DA CORREÇÃO DEFINITIVA ---
+            
+            # 1. Resolve manualmente a estrutura do 'conteudo' com base no 'tipo'
+            tipo_registro = registro_data.get('tipo')
+            conteudo_bruto = registro_data.get('conteudo', {})
+            conteudo_validado = conteudo_bruto # Fallback
+
+            try:
+                if tipo_registro == 'sinais_vitais':
+                    conteudo_validado = schemas.SinaisVitaisConteudo.model_validate(conteudo_bruto)
+                elif tipo_registro == 'medicacao':
+                    conteudo_validado = schemas.MedicacaoConteudo.model_validate(conteudo_bruto)
+                elif tipo_registro == 'anotacao':
+                    conteudo_validado = schemas.AnotacaoConteudo.model_validate(conteudo_bruto)
+                # Adicione outras condições aqui se houver mais tipos com schemas diferentes
+                
+                registro_data['conteudo'] = conteudo_validado
+            except Exception as e:
+                logger.error(f"Falha ao validar 'conteudo' para o registro {doc.id} (tipo: {tipo_registro}): {e}")
+                continue # Pula para o próximo registro se este for inválido
+
+            # 2. Enriquece a resposta com os dados completos do técnico
+            tecnico_id = registro_data.pop('tecnico_id', None)
             if tecnico_id:
                 if tecnico_id in tecnicos_cache:
                     tecnico_perfil = tecnicos_cache[tecnico_id]
                 else:
                     tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
                     if tecnico_doc.exists:
-                        tecnico_perfil = {
-                            "id": tecnico_doc.id,
-                            "nome": tecnico_doc.to_dict().get('nome', 'Nome não disponível'),
-                            "email": tecnico_doc.to_dict().get('email', 'Email não disponível')
-                        }
+                        tecnico_perfil = schemas.TecnicoProfileReduzido.model_validate(tecnico_doc.to_dict()).model_dump()
                         tecnicos_cache[tecnico_id] = tecnico_perfil
                     else:
-                        tecnico_perfil = { "id": tecnico_id, "nome": "Técnico Desconhecido", "email": "" }
-                
+                        tecnico_perfil = {"id": tecnico_id, "nome": "Técnico Desconhecido", "email": ""}
                 registro_data['tecnico'] = tecnico_perfil
             
-            # Remove o campo 'tecnico_id' que não existe no schema de resposta final
-            if 'tecnico_id' in registro_data:
-                del registro_data['tecnico_id']
-            
-            # 3. Tenta criar o objeto Pydantic (aqui a "mágica" acontece)
+            # 3. Valida o objeto de resposta completo
             try:
-                # O Pydantic usará o campo 'tipo' para validar e estruturar o 'conteudo' corretamente
-                modelo_validado = schemas.RegistroDiarioResponse.model_validate(registro_data)
-                registros_pydantic.append(modelo_validado)
-            except Exception as validation_error:
-                logger.error(f"Falha ao validar o registro {doc.id} do Firestore: {validation_error}")
-                logger.debug(f"Dados problemáticos: {registro_data}")
+                modelo_final = schemas.RegistroDiarioResponse.model_validate(registro_data)
+                registros_pydantic.append(modelo_final)
+            except Exception as e:
+                logger.error(f"Falha ao montar o modelo de resposta final para o registro {doc.id}: {e}")
+
+            # --- FIM DA CORREÇÃO DEFINITIVA ---
 
     except Exception as e:
-        logger.error(f"Erro ao listar registros estruturados do paciente {paciente_id}: {e}")
+        logger.error(f"Erro ao listar registros estruturados para o paciente {paciente_id}: {e}")
     
     return registros_pydantic
 
