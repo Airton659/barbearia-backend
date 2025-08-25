@@ -2427,9 +2427,37 @@ def listar_registros_diario_estruturado(
 
         query = query.order_by('data_registro', direction=firestore.Query.DESCENDING)
 
+        # Cache para evitar múltiplas leituras do mesmo técnico
+        tecnicos_cache = {}
+
         for doc in query.stream():
             registro_data = doc.to_dict()
             registro_data['id'] = doc.id
+            tecnico_id = registro_data.get('tecnico_id')
+
+            if tecnico_id:
+                # Busca os dados do técnico, usando o cache se já buscou antes
+                if tecnico_id in tecnicos_cache:
+                    tecnico_perfil = tecnicos_cache[tecnico_id]
+                else:
+                    tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
+                    if tecnico_doc.exists:
+                        tecnico_perfil = {
+                            "id": tecnico_doc.id,
+                            "nome": tecnico_doc.to_dict().get('nome'),
+                            "email": tecnico_doc.to_dict().get('email')
+                        }
+                        tecnicos_cache[tecnico_id] = tecnico_perfil
+                    else:
+                        tecnico_perfil = {
+                            "id": tecnico_id,
+                            "nome": "Técnico Desconhecido",
+                            "email": ""
+                        }
+                
+                # Adiciona o objeto completo do técnico na resposta
+                registro_data['tecnico'] = schemas.TecnicoProfileReduzido(**tecnico_perfil)
+            
             registros.append(registro_data)
             
     except Exception as e:

@@ -416,6 +416,10 @@ class TecnicoProfileReduzido(BaseModel):
     nome: str = Field(..., description="Nome completo do técnico.")
     email: EmailStr = Field(..., description="E-mail do técnico.")
 
+# barbearia-backend/schemas.py
+
+# ... (código anterior) ...
+
 # =================================================================================
 # SCHEMAS DO DIÁRIO DO TÉCNICO
 # =================================================================================
@@ -427,7 +431,6 @@ class DiarioTecnicoBase(BaseModel):
     medicamentos: Optional[str] = Field(None, description="Observações sobre medicamentos.")
     atividades: Optional[str] = Field(None, description="Observações sobre atividades realizadas.")
     intercorrencias: Optional[str] = Field(None, description="Registro de qualquer intercorrência.")
-    # Adicione outros campos que julgar necessário
 
 class DiarioTecnicoCreate(DiarioTecnicoBase):
     pass
@@ -435,16 +438,53 @@ class DiarioTecnicoCreate(DiarioTecnicoBase):
 class DiarioTecnicoResponse(DiarioTecnicoBase):
     id: str
     data_ocorrencia: datetime = Field(..., description="Data e hora em que o registro foi feito.")
-    tecnico: TecnicoProfileReduzido = Field(..., description="Dados do técnico que fez o registro.")
+    tecnico: 'TecnicoProfileReduzido' = Field(..., description="Dados do técnico que fez o registro.")
 
 class DiarioTecnicoUpdate(BaseModel):
     anotacao_geral: Optional[str] = None
     medicamentos: Optional[str] = None
     atividades: Optional[str] = None
     intercorrencias: Optional[str] = None
-    # --- FIM DO NOVO BLOCO DE CÓDIGO ---
 
-# --- NOVO BLOCO DE CÓDIGO AQUI ---
+
+# =================================================================================
+# SCHEMAS DE REGISTROS DIÁRIOS ESTRUTURADOS
+# =================================================================================
+
+# Uso de Union para permitir diferentes tipos de conteúdo
+class SinaisVitaisConteudo(BaseModel):
+    pressao_sistolica: Optional[int] = None
+    pressao_diastolica: Optional[int] = None
+    temperatura: Optional[float] = None
+    batimentos_cardiacos: Optional[int] = None
+    saturacao_oxigenio: Optional[float] = None
+
+class MedicacaoConteudo(BaseModel):
+    nome: str
+    dose: str
+    status: str = Field(..., description="Status da administração: 'administrado', 'recusado', 'pendente'.")
+    observacoes: Optional[str] = None
+
+class AnotacaoConteudo(BaseModel):
+    categoria: str = Field(..., description="Categoria da anotação (ex: 'Queixa do Paciente', 'Ocorrência', 'Evolução').")
+    descricao: str
+
+RegistroDiarioConteudo = Union[SinaisVitaisConteudo, MedicacaoConteudo, AnotacaoConteudo]
+
+class RegistroDiarioCreate(BaseModel):
+    negocio_id: str
+    paciente_id: str
+    tipo: str = Field(..., description="O tipo do registro (ex: 'sinais_vitais', 'medicacao', 'anotacao').")
+    conteudo: RegistroDiarioConteudo
+
+class RegistroDiarioResponse(BaseModel):
+    id: str
+    negocio_id: str
+    paciente_id: str
+    tecnico: 'TecnicoProfileReduzido'
+    data_registro: datetime
+    tipo: str
+    conteudo: RegistroDiarioConteudo
 # =================================================================================
 # SCHEMAS DA PESQUISA DE SATISFAÇÃO
 # =================================================================================
