@@ -607,6 +607,74 @@ def delete_registro_diario(
 
 
 # =================================================================================
+# ENDPOINTS DE REGISTROS DIÁRIOS ESTRUTURADOS
+# =================================================================================
+
+@app.post("/pacientes/{paciente_id}/registros", response_model=schemas.RegistroDiarioResponse, status_code=status.HTTP_201_CREATED, tags=["Registros Estruturados"])
+def criar_registro_diario_estruturado_endpoint(
+    paciente_id: str,
+    registro_data: schemas.RegistroDiarioCreate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Técnico) Adiciona um novo registro estruturado ao diário de acompanhamento."""
+    registro_data.paciente_id = paciente_id
+    try:
+        novo_registro = crud.criar_registro_diario_estruturado(db, registro_data, current_user.id)
+        return novo_registro
+    except Exception as e:
+        logger.error(f"Erro inesperado ao criar registro diário estruturado: {e}")
+        raise HTTPException(status_code=500, detail="Ocorreu um erro interno no servidor.")
+
+@app.get("/pacientes/{paciente_id}/registros", response_model=List[schemas.RegistroDiarioResponse], tags=["Registros Estruturados"])
+def listar_registros_diario_estruturado_endpoint(
+    paciente_id: str,
+    data: Optional[date] = Query(None, description="Data para filtrar os registros (formato: AAAA-MM-DD)."),
+    tipo: Optional[str] = Query(None, description="Tipo de registro para filtrar."),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    db: firestore.client = Depends(get_db)
+):
+    """(Clínico Autorizado) Lista registros diários estruturados de um paciente com filtros opcionais."""
+    return crud.listar_registros_diario_estruturado(db, paciente_id, data=data, tipo=tipo)
+
+@app.patch("/pacientes/{paciente_id}/registros/{registro_id}", response_model=schemas.RegistroDiarioResponse, tags=["Registros Estruturados"])
+def atualizar_registro_diario_estruturado_endpoint(
+    paciente_id: str,
+    registro_id: str,
+    update_data: schemas.RegistroDiarioCreate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Técnico) Atualiza um de seus registros diários estruturados."""
+    try:
+        registro_atualizado = crud.atualizar_registro_diario_estruturado(db, paciente_id, registro_id, update_data, current_user.id)
+        if not registro_atualizado:
+            raise HTTPException(status_code=404, detail="Registro não encontrado.")
+        return registro_atualizado
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        logger.error(f"Erro inesperado ao atualizar registro estruturado: {e}")
+        raise HTTPException(status_code=500, detail="Ocorreu um erro interno.")
+
+@app.delete("/pacientes/{paciente_id}/registros/{registro_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Registros Estruturados"])
+def deletar_registro_diario_estruturado_endpoint(
+    paciente_id: str,
+    registro_id: str,
+    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Técnico) Deleta um de seus registros diários estruturados."""
+    try:
+        if not crud.deletar_registro_diario_estruturado(db, paciente_id, registro_id, current_user.id):
+            raise HTTPException(status_code=404, detail="Registro não encontrado.")
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        logger.error(f"Erro inesperado ao deletar registro estruturado: {e}")
+        raise HTTPException(status_code=500, detail="Ocorreu um erro interno.")
+
+# =================================================================================
 # ENDPOINTS DE SUPERVISÃO
 # =================================================================================
 

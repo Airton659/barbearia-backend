@@ -2381,4 +2381,117 @@ def atualizar_item_checklist_diario(db: firestore.client, paciente_id: str, item
     updated_doc = item_ref.get().to_dict()
     return {'id': item_id, 'descricao': updated_doc.get('descricao_item', ''), 'concluido': updated_doc.get('concluido', False)}
 
+# =================================================================================
+# FUNÇÕES DE REGISTROS DIÁRIOS ESTRUTURADOS
+# =================================================================================
+
+def criar_registro_diario_estruturado(db: firestore.client, registro_data: schemas.RegistroDiarioCreate, tecnico_id: str) -> Dict:
+    """Adiciona um novo registro estruturado ao diário de acompanhamento de um paciente."""
+    registro_dict = registro_data.model_dump()
+    registro_dict.update({
+        "paciente_id": registro_data.paciente_id,
+        "tecnico_id": tecnico_id,
+        "data_registro": datetime.utcnow()
+    })
+    
+    paciente_ref = db.collection('usuarios').document(registro_data.paciente_id)
+    doc_ref = paciente_ref.collection('registros_diarios_estruturados').document()
+    doc_ref.set(registro_dict)
+    
+    registro_dict['id'] = doc_ref.id
+    return registro_dict
+
+def listar_registros_diario_estruturado(
+    db: firestore.client, 
+    paciente_id: str, 
+    data: Optional[date] = None, 
+    tipo: Optional[str] = None
+) -> List[Dict]:
+    """
+    Lista os registros diários estruturados de um paciente, com filtros opcionais.
+    Filtra por data (apenas registros do dia) e/ou por tipo.
+    """
+    registros = []
+    try:
+        query = db.collection('usuarios').document(paciente_id).collection('registros_diarios_estruturados')
+        
+        # Filtro por tipo, se fornecido
+        if tipo:
+            query = query.where('tipo', '==', tipo)
+        
+        # Filtro por data, se fornecido
+        if data:
+            start_of_day = datetime.combine(data, datetime.min.time())
+            end_of_day = datetime.combine(data, datetime.max.time())
+            query = query.where('data_registro', '>=', start_of_day).where('data_registro', '<=', end_of_day)
+
+        query = query.order_by('data_registro', direction=firestore.Query.DESCENDING)
+
+        for doc in query.stream():
+            registro_data = doc.to_dict()
+            registro_data['id'] = doc.id
+            registros.append(registro_data)
+            
+    except Exception as e:
+        logger.error(f"Erro ao listar registros estruturados do paciente {paciente_id}: {e}")
+    
+    return registros
+
+def atualizar_registro_diario_estruturado(
+    db: firestore.client, 
+    paciente_id: str, 
+    registro_id: str, 
+    update_data: schemas.RegistroDiarioCreate,
+    tecnico_id: str
+) -> Optional[Dict]:
+    """Atualiza um registro estruturado, validando a autoria."""
+    try:
+        item_ref = db.collection('usuarios').document(paciente_id).collection('registros_diarios_estruturados').document(registro_id)
+        doc = item_ref.get()
+        if not doc.exists:
+            logger.warning(f"Registro estruturado {registro_id} não encontrado.")
+            return None
+        
+        if doc.to_dict().get('tecnico_id') != tecnico_id:
+            raise PermissionError("Você só pode editar seus próprios registros.")
+            
+        update_dict = update_data.model_dump(exclude_unset=True)
+        if not update_dict:
+            data = doc.to_dict()
+            data['id'] = doc.id
+            return data
+            
+        item_ref.update(update_dict)
+        updated_doc = item_ref.get()
+        data = updated_doc.to_dict()
+        data['id'] = updated_doc.id
+        logger.info(f"Registro estruturado {registro_id} do paciente {paciente_id} atualizado pelo técnico {tecnico_id}.")
+        return data
+    except Exception as e:
+        logger.error(f"Erro ao atualizar registro estruturado {registro_id} do paciente {paciente_id}: {e}")
+        raise e
+
+def deletar_registro_diario_estruturado(
+    db: firestore.client,
+    paciente_id: str,
+    registro_id: str,
+    tecnico_id: str
+) -> bool:
+    """Deleta um registro estruturado, validando a autoria."""
+    try:
+        item_ref = db.collection('usuarios').document(paciente_id).collection('registros_diarios_estruturados').document(registro_id)
+        doc = item_ref.get()
+        if not doc.exists:
+            return False
+            
+        if doc.to_dict().get('tecnico_id') != tecnico_id:
+            raise PermissionError("Você só pode deletar seus próprios registros.")
+            
+        item_ref.delete()
+        logger.info(f"Registro estruturado {registro_id} do paciente {paciente_id} deletado pelo técnico {tecnico_id}.")
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao deletar registro estruturado {registro_id} do paciente {paciente_id}: {e}")
+        raise e
+
 # --- FIM DAS NOVAS FUNÇÕES ---
