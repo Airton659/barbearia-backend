@@ -415,6 +415,14 @@ class AnotacaoConteudo(BaseModel):
     # Usado para tipos como 'anotacao' e 'atividade'
     descricao: str
 
+
+class AtividadeConteudo(BaseModel):
+    # Estrutura específica para o tipo 'atividade'
+    nome_atividade: str
+    descricao: Optional[str] = None
+    duracao_minutos: int
+    observacoes: Optional[str] = None
+
 class IntercorrenciaConteudo(BaseModel):
     # Estrutura específica para o tipo 'intercorrencia' conforme o log
     tipo: str  # e.g., 'grave'
@@ -425,6 +433,7 @@ class IntercorrenciaConteudo(BaseModel):
 # Pydantic tentará validar o payload contra os modelos nesta ordem.
 RegistroDiarioConteudo = Union[
     IntercorrenciaConteudo,
+    AtividadeConteudo,
     AnotacaoConteudo,
     MedicacaoConteudo,
     SinaisVitaisConteudo

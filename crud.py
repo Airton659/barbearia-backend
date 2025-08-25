@@ -2396,7 +2396,9 @@ def criar_registro_diario_estruturado(db: firestore.client, registro_data: schem
             conteudo_ok = schemas.SinaisVitaisConteudo.model_validate(bruto)
         elif tipo == 'medicacao':
             conteudo_ok = schemas.MedicacaoConteudo.model_validate(bruto)
-        elif tipo in ('anotacao', 'atividade'):
+        elif tipo == 'atividade':
+            conteudo_ok = schemas.AtividadeConteudo.model_validate(bruto)
+        elif tipo == 'anotacao':
             conteudo_ok = schemas.AnotacaoConteudo.model_validate(bruto)
         elif tipo == 'intercorrencia':
             conteudo_ok = schemas.IntercorrenciaConteudo.model_validate(bruto)
@@ -2495,7 +2497,16 @@ def listar_registros_diario_estruturado(
                                 status=str(bruto.get('status') or 'pendente'),
                                 observacoes=bruto.get('observacoes') or bruto.get('descricao')
                             )
-                    elif tipo_salvo in ('anotacao', 'atividade'):
+                    elif tipo_salvo == 'atividade':
+                        try:
+                            return schemas.AtividadeConteudo.model_validate(bruto)
+                        except Exception:
+                            return schemas.AtividadeConteudo(
+                                nome_atividade=bruto.get('nome_atividade'),
+                                duracao_minutos=bruto.get('duracao_minutos'),
+                                descricao=bruto.get('descricao')
+                            )
+                    elif tipo_salvo == 'anotacao':
                         try:
                             return schemas.AnotacaoConteudo.model_validate(bruto)
                         except Exception:
