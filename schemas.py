@@ -469,12 +469,20 @@ class AnotacaoConteudo(BaseModel):
     categoria: str = Field(..., description="Categoria da anotação (ex: 'Queixa do Paciente', 'Ocorrência', 'Evolução').")
     descricao: str
 
-RegistroDiarioConteudo = Union[SinaisVitaisConteudo, MedicacaoConteudo, AnotacaoConteudo]
+class AtividadeConteudo(BaseModel):
+    descricao: str = Field(..., description="Descrição da atividade.")
+
+class IntercorrenciaConteudo(BaseModel):
+    gravidade: str = Field(..., description="Gravidade da intercorrência: 'leve', 'moderada', 'grave'.")
+    descricao: str = Field(..., description="Descrição detalhada da intercorrência.")
+    comunicado_enfermeiro: bool = Field(False, description="Indica se o enfermeiro já foi comunicado.")
+
+RegistroDiarioConteudo = Union[SinaisVitaisConteudo, MedicacaoConteudo, AnotacaoConteudo, AtividadeConteudo, IntercorrenciaConteudo]
 
 class RegistroDiarioCreate(BaseModel):
     negocio_id: str
     paciente_id: str
-    tipo: str = Field(..., description="O tipo do registro (ex: 'sinais_vitais', 'medicacao', 'anotacao').")
+    tipo: str = Field(..., description="O tipo do registro (ex: 'sinais_vitais', 'medicacao', 'anotacao', 'atividade', 'intercorrencia').")
     conteudo: RegistroDiarioConteudo
 
 class RegistroDiarioResponse(BaseModel):
@@ -485,81 +493,8 @@ class RegistroDiarioResponse(BaseModel):
     data_registro: datetime
     tipo: str
     conteudo: RegistroDiarioConteudo
-# =================================================================================
-# SCHEMAS DA PESQUISA DE SATISFAÇÃO
-# =================================================================================
+    tecnico_id: str = Field(..., description="ID do usuário técnico que fez o registro.")
 
-class RespostaItem(BaseModel):
-    pergunta_id: str
-    pergunta_texto: str # Desnormalizado para facilitar a exibição
-    resposta: str # Pode ser uma nota de 1 a 5, ou um texto, dependendo do tipo da pergunta
-
-class PesquisaEnviadaCreate(BaseModel):
-    negocio_id: str
-    paciente_id: str
-    modelo_pesquisa_id: str # ID do modelo de pesquisa que está sendo respondido
-
-class PesquisaEnviadaResponse(PesquisaEnviadaCreate):
-    id: str
-    data_envio: datetime
-    data_resposta: Optional[datetime] = None
-    status: str = Field("pendente", description="Status da pesquisa: 'pendente' ou 'respondida'.")
-    respostas: List[RespostaItem] = []
-
-class SubmeterPesquisaRequest(BaseModel):
-    respostas: List[RespostaItem]
-# --- FIM DO NOVO BLOCO DE CÓDIGO ---
-
-# --- NOVOS SCHEMAS AQUI ---
-class TecnicosVincularRequest(BaseModel):
-    tecnicos_ids: List[str] = Field(..., description="Lista de IDs de usuários dos técnicos a serem vinculados.")
-
-class SupervisorVincularRequest(BaseModel):
-    supervisor_id: str = Field(..., description="ID do usuário (documento) do enfermeiro supervisor.")
-
-# Schemas para a nova funcionalidade de Auditoria de Leitura
-class ConfirmacaoLeituraCreate(BaseModel):
-    usuario_id: str = Field(..., description="ID do usuário técnico que está confirmando a leitura.")
-    plano_version_id: str = Field(..., description="Identificador da versão do plano que está sendo confirmada.")
-    ip_origem: Optional[str] = Field(None, description="Endereço IP do cliente, se disponível.")
-
-class ConfirmacaoLeituraResponse(ConfirmacaoLeituraCreate):
-    id: str
-    paciente_id: str
-    data_confirmacao: datetime
-
-# Schemas para a nova funcionalidade de Diário Estruturado
-class SinaisVitaisConteudo(BaseModel):
-    pressao_sistolica: Optional[int] = None
-    pressao_diastolica: Optional[int] = None
-    temperatura: Optional[float] = None
-    batimentos_cardiacos: Optional[int] = None
-    saturacao_oxigenio: Optional[float] = None
-
-class MedicacaoConteudo(BaseModel):
-    nome: str
-    dose: str
-    status: str = Field(..., description="Status da administração: 'administrado', 'recusado', 'pendente'.")
-    observacoes: Optional[str] = None
-
-class AnotacaoConteudo(BaseModel):
-    categoria: str = Field(..., description="Categoria da anotação (ex: 'Queixa do Paciente', 'Ocorrência', 'Evolução').")
-    descricao: str
-
-# Use Union para permitir diferentes tipos de conteúdo
-RegistroDiarioConteudo = Union[SinaisVitaisConteudo, MedicacaoConteudo, AnotacaoConteudo]
-
-class RegistroDiarioCreate(BaseModel):
-    negocio_id: str
-    paciente_id: str # Adicionado para corrigir o erro de validação
-    tipo: str = Field(..., description="O tipo do registro (ex: 'sinais_vitais', 'medicacao', 'anotacao').")
-    conteudo: RegistroDiarioConteudo
-
-class RegistroDiarioResponse(RegistroDiarioCreate):
-    id: str
-    paciente_id: str
-    tecnico_id: str
-    data_registro: datetime
 
 # Schemas para a nova funcionalidade de Checklist Diário
 class ChecklistItemDiarioResponse(BaseModel):
