@@ -1,4 +1,4 @@
-# barbearia-backend/schemas.py (Versão Corrigida e Limpa)
+# barbearia-backend/schemas.py (Versão Definitiva)
 
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from datetime import datetime, time, date
@@ -67,7 +67,7 @@ class StatusUpdateRequest(BaseModel):
 
 class PacienteProfile(UsuarioProfile):
     pass
-    
+
 # =================================================================================
 # SCHEMAS DE PROFISSIONAIS
 # =================================================================================
@@ -396,6 +396,8 @@ class DiarioTecnicoUpdate(BaseModel):
     atividades: Optional[str] = None
     intercorrencias: Optional[str] = None
 
+# --- Início da Correção de Registros Diários ---
+
 class SinaisVitaisConteudo(BaseModel):
     pressao_sistolica: Optional[int] = None
     pressao_diastolica: Optional[int] = None
@@ -410,15 +412,28 @@ class MedicacaoConteudo(BaseModel):
     observacoes: Optional[str] = None
 
 class AnotacaoConteudo(BaseModel):
-    categoria: str
+    # Usado para tipos como 'anotacao' e 'atividade'
     descricao: str
 
-RegistroDiarioConteudo = Union[SinaisVitaisConteudo, MedicacaoConteudo, AnotacaoConteudo]
+class IntercorrenciaConteudo(BaseModel):
+    # Estrutura específica para o tipo 'intercorrencia' conforme o log
+    tipo: str  # e.g., 'grave'
+    descricao: str
+    comunicado_enfermeiro: bool
+
+# Union atualizada para incluir os novos modelos de conteúdo.
+# Pydantic tentará validar o payload contra os modelos nesta ordem.
+RegistroDiarioConteudo = Union[
+    IntercorrenciaConteudo,
+    AnotacaoConteudo,
+    MedicacaoConteudo,
+    SinaisVitaisConteudo
+]
 
 class RegistroDiarioCreate(BaseModel):
     negocio_id: str
     paciente_id: str
-    tipo: str
+    tipo: str = Field(..., description="O tipo do registro (ex: 'sinais_vitais', 'medicacao', 'anotacao', 'intercorrencia', 'atividade').")
     conteudo: RegistroDiarioConteudo
 
 class RegistroDiarioResponse(BaseModel):
@@ -429,6 +444,8 @@ class RegistroDiarioResponse(BaseModel):
     data_registro: datetime
     tipo: str
     conteudo: RegistroDiarioConteudo
+
+# --- Fim da Correção de Registros Diários ---
 
 class ConfirmacaoLeituraCreate(BaseModel):
     usuario_id: str
