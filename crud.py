@@ -1968,16 +1968,15 @@ def criar_registro_diario(db: firestore.client, registro_data: schemas.DiarioTec
     registro_dict['id'] = doc_ref.id
     return registro_dict
 
-def listar_registros_diario(db: firestore.client, paciente_id: str) -> List[Dict]:
+def listar_registros_diario(db: firestore.client, paciente_id: str) -> List[schemas.DiarioTecnicoResponse]:
     """
     Lista todos os registros do diário de um paciente,
-    incluindo um objeto aninhado com os dados do técnico.
+    retornando uma lista de objetos Pydantic para garantir a serialização correta.
     """
-    registros = []
+    registros_pydantic = []
     try:
         query = db.collection('usuarios').document(paciente_id).collection('diario_tecnico').order_by('data_ocorrencia', direction=firestore.Query.DESCENDING)
         
-        # Cache para evitar múltiplas leituras do mesmo técnico
         tecnicos_cache = {}
 
         for doc in query.stream():
@@ -1986,7 +1985,6 @@ def listar_registros_diario(db: firestore.client, paciente_id: str) -> List[Dict
             tecnico_id = registro_data.get('tecnico_id')
 
             if tecnico_id:
-                # Busca os dados do técnico, usando o cache se já buscou antes
                 if tecnico_id in tecnicos_cache:
                     tecnico_perfil = tecnicos_cache[tecnico_id]
                 else:
@@ -1999,29 +1997,25 @@ def listar_registros_diario(db: firestore.client, paciente_id: str) -> List[Dict
                         }
                         tecnicos_cache[tecnico_id] = tecnico_perfil
                     else:
-                        tecnico_perfil = None
+                        tecnico_perfil = { "id": tecnico_id, "nome": "Técnico Desconhecido", "email": "" }
                 
-                # Adiciona o objeto completo do técnico na resposta
-                if tecnico_perfil:
-                    registro_data['tecnico'] = tecnico_perfil
-                else:
-                    # Caso o técnico não seja encontrado, adiciona um objeto de fallback
-                    registro_data['tecnico'] = {
-                        "id": tecnico_id,
-                        "nome": "Técnico Desconhecido",
-                        "email": ""
-                    }
+                registro_data['tecnico'] = tecnico_perfil
             
-            # Remove os campos desnormalizados antigos, se existirem
+            # Remove os campos desnormalizados antigos, que não fazem parte do schema de resposta
             registro_data.pop('tecnico_id', None)
             registro_data.pop('tecnico_nome', None)
 
-            registros.append(registro_data)
+            # Tenta validar e converter o dicionário para o modelo Pydantic
+            try:
+                modelo_validado = schemas.DiarioTecnicoResponse.model_validate(registro_data)
+                registros_pydantic.append(modelo_validado)
+            except Exception as validation_error:
+                logger.error(f"Falha ao validar o registro do diário {doc.id}: {validation_error}")
 
     except Exception as e:
         logger.error(f"Erro ao listar o diário do paciente {paciente_id}: {e}")
     
-    return registros
+    return registros_pydantic
 
 def update_registro_diario(db: firestore.client, paciente_id: str, registro_id: str, update_data: schemas.DiarioTecnicoUpdate, tecnico_id: str) -> Optional[Dict]:
     """Atualiza um registro no diário do técnico, verificando a autoria."""
@@ -2431,16 +2425,16 @@ def criar_registro_diario_estruturado(db: firestore.client, registro_data: schem
     # --- FIM DA CORREÇÃO ---
 
 def listar_registros_diario_estruturado(
-    db: firestore.client, 
-    paciente_id: str, 
-    data: Optional[date] = None, 
+    db: firestore.client,
+    paciente_id: str,
+    data: Optional[date] = None,
     tipo: Optional[str] = None
-) -> List[Dict]:
+) -> List[schemas.RegistroDiarioResponse]: # Retorna uma lista de modelos Pydantic
     """
     Lista os registros diários estruturados de um paciente, com filtros opcionais.
-    Filtra por data (apenas registros do dia) e/ou por tipo.
+    Retorna uma lista de objetos Pydantic para garantir a serialização correta do campo 'conteudo'.
     """
-    registros = []
+    registros_pydantic = []
     try:
         query = db.collection('usuarios').document(paciente_id).collection('registros_diarios_estruturados')
         
@@ -2457,10 +2451,12 @@ def listar_registros_diario_estruturado(
         tecnicos_cache = {}
 
         for doc in query.stream():
+            # 1. Pega o dicionário raw do Firestore
             registro_data = doc.to_dict()
             registro_data['id'] = doc.id
             tecnico_id = registro_data.get('tecnico_id')
 
+            # 2. Prepara o dicionário para corresponder ao schema de resposta
             if tecnico_id:
                 if tecnico_id in tecnicos_cache:
                     tecnico_perfil = tecnicos_cache[tecnico_id]
@@ -2474,23 +2470,27 @@ def listar_registros_diario_estruturado(
                         }
                         tecnicos_cache[tecnico_id] = tecnico_perfil
                     else:
-                        tecnico_perfil = {
-                            "id": tecnico_id,
-                            "nome": "Técnico Desconhecido",
-                            "email": ""
-                        }
+                        tecnico_perfil = { "id": tecnico_id, "nome": "Técnico Desconhecido", "email": "" }
                 
                 registro_data['tecnico'] = tecnico_perfil
             
-            # Remove os campos desnecessários para a resposta
-            registro_data.pop('tecnico_id', None)
-
-            registros.append(registro_data)
+            # Remove o campo 'tecnico_id' que não existe no schema de resposta final
+            if 'tecnico_id' in registro_data:
+                del registro_data['tecnico_id']
             
+            # 3. Tenta criar o objeto Pydantic (aqui a "mágica" acontece)
+            try:
+                # O Pydantic usará o campo 'tipo' para validar e estruturar o 'conteudo' corretamente
+                modelo_validado = schemas.RegistroDiarioResponse.model_validate(registro_data)
+                registros_pydantic.append(modelo_validado)
+            except Exception as validation_error:
+                logger.error(f"Falha ao validar o registro {doc.id} do Firestore: {validation_error}")
+                logger.debug(f"Dados problemáticos: {registro_data}")
+
     except Exception as e:
         logger.error(f"Erro ao listar registros estruturados do paciente {paciente_id}: {e}")
     
-    return registros
+    return registros_pydantic
 
 def atualizar_registro_diario_estruturado(
     db: firestore.client, 
