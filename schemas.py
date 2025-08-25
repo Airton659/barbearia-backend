@@ -1,89 +1,63 @@
-# barbearia-backend/schemas.py (Versão para Firestore Multi-Tenant)
+# barbearia-backend/schemas.py (Versão Corrigida e Limpa)
 
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from datetime import datetime, time, date
 from typing import Optional, List, Dict, Union
 
 # =================================================================================
-# NOVOS SCHEMAS CENTRAIS (A BASE DA ARQUITETURA MULTI-TENANT)
+# SCHEMAS CENTRAIS (ARQUITETURA MULTI-TENANT)
 # =================================================================================
 
 class NegocioBase(BaseModel):
-    nome: str = Field(..., description="Nome do negócio (ex: Barbearia do Zé, Confeitaria da Maria).")
-    tipo_negocio: str = Field(..., description="Tipo do negócio (ex: 'barbearia', 'confeitaria', 'salao_de_beleza').")
-    # Outros campos relevantes para um negócio: endereço, telefone, etc.
+    nome: str = Field(..., description="Nome do negócio.")
+    tipo_negocio: str = Field(..., description="Tipo do negócio (ex: 'barbearia', 'clinica').")
 
 class NegocioCreate(NegocioBase):
     pass
 
 class NegocioResponse(NegocioBase):
     id: str = Field(..., description="ID único do negócio no Firestore.")
-    owner_uid: str = Field(..., description="Firebase UID do usuário dono do negócio.")
-    codigo_convite: str = Field(..., description="Código de convite para o admin do negócio se registrar.")
+    owner_uid: str = Field(..., description="Firebase UID do dono do negócio.")
+    codigo_convite: str = Field(..., description="Código de convite para o admin do negócio.")
 
 # =================================================================================
-# SCHEMAS DE USUÁRIOS (Clientes e Administradores)
+# SCHEMAS DE USUÁRIOS
 # =================================================================================
 
 class UsuarioBase(BaseModel):
     nome: str
     email: EmailStr
     firebase_uid: str
-    # --- ALTERAÇÃO AQUI: Adicionando campos opcionais para o app clínico ---
     telefone: Optional[str] = None
-    endereco: Optional[Dict[str, str]] = Field(None, description="Dicionário com dados de endereço. Ex: {'rua': 'Av. Exemplo', 'numero': '123', 'cidade': 'São Paulo'}")
-    # --- FIM DA ALTERAÇÃO ---
-
-
-class UsuarioCreate(UsuarioBase):
-    # No Firestore, o usuário é criado via Firebase Auth, então o backend só sincroniza.
-    pass
-
-# Em schemas.py, substitua a classe UsuarioProfile por esta
+    endereco: Optional[Dict[str, str]] = Field(None, description="Dicionário com dados de endereço.")
 
 class UsuarioProfile(UsuarioBase):
     id: str = Field(..., description="ID do documento do usuário no Firestore.")
-    roles: dict[str, str] = Field({}, description="Dicionário de negocio_id para role (ex: {'negocio_A': 'admin', 'negocio_B': 'cliente'}).")
+    roles: dict[str, str] = Field({}, description="Dicionário de negocio_id para role (ex: {'negocio_A': 'admin'}).")
     fcm_tokens: List[str] = []
-    profissional_id: Optional[str] = Field(None, description="ID do perfil profissional, se o usuário for um profissional ou admin.")
-    supervisor_id: Optional[str] = Field(None, description="ID do usuário (documento) do enfermeiro supervisor.")
-    
-    # --- INÍCIO DA CORREÇÃO ---
-    # Adiciona os campos de vínculo para serem retornados na lista de usuários
-    enfermeiro_vinculado_id: Optional[str] = Field(None, description="ID do documento do profissional (enfermeiro) vinculado ao paciente.")
-    tecnicos_vinculados_ids: Optional[List[str]] = Field(None, description="Lista de IDs de documento dos técnicos vinculados ao paciente.")
-    # --- FIM DA CORREÇÃO ---
+    profissional_id: Optional[str] = Field(None, description="ID do perfil profissional, se aplicável.")
+    supervisor_id: Optional[str] = Field(None, description="ID do usuário supervisor.")
+    enfermeiro_vinculado_id: Optional[str] = Field(None, description="ID do profissional (enfermeiro) vinculado.")
+    tecnicos_vinculados_ids: Optional[List[str]] = Field(None, description="Lista de IDs dos técnicos vinculados.")
 
-
-# Schema usado pelo endpoint de sync, agora com o negocio_id opcional
 class UsuarioSync(BaseModel):
     nome: str
     email: EmailStr
     firebase_uid: str
-    negocio_id: Optional[str] = Field(None, description="ID do negócio ao qual o usuário (cliente) está se cadastrando.")
-    codigo_convite: Optional[str] = Field(None, description="Código de convite para se tornar admin de um negócio.")
+    negocio_id: Optional[str] = Field(None, description="ID do negócio ao qual o usuário está se cadastrando.")
+    codigo_convite: Optional[str] = Field(None, description="Código de convite para se tornar admin.")
     telefone: Optional[str] = None
     endereco: Optional[Dict[str, str]] = None
 
-# Schema para registrar o token de notificação
 class FCMTokenUpdate(BaseModel):
     fcm_token: str
 
-# Perfis para o módulo clínico, herdando do perfil base para compatibilidade
-class EnfermeiroProfile(UsuarioProfile):
-    pass
-
-class PacienteProfile(UsuarioProfile):
-    pass
-
 class RoleUpdateRequest(BaseModel):
-    # --- ALTERAÇÃO AQUI: Adicionando 'tecnico' como um papel válido ---
     role: str = Field(..., description="O novo papel do usuário (ex: 'cliente', 'profissional', 'admin', 'tecnico').")
-    # --- FIM DA ALTERAÇÃO ---
 
 class PacienteCreateByAdmin(BaseModel):
     email: EmailStr
-    password: str = Field(..., min_length=6, description="Senha para o novo paciente. Deve ser forte.")
+    password: str = Field(..., min_length=6, description="Senha para o novo paciente.")
     nome: str
     telefone: Optional[str] = None
     endereco: Optional[Dict[str, str]] = Field(None, description="Dicionário com dados de endereço.")
@@ -91,27 +65,27 @@ class PacienteCreateByAdmin(BaseModel):
 class StatusUpdateRequest(BaseModel):
     status: str = Field(..., description="O novo status do paciente (ex: 'ativo', 'arquivado').")
 
-
+class PacienteProfile(UsuarioProfile):
+    pass
+    
 # =================================================================================
-# SCHEMAS DE PROFISSIONAIS (Antigos Barbeiros)
+# SCHEMAS DE PROFISSIONAIS
 # =================================================================================
 
 class ProfissionalBase(BaseModel):
     negocio_id: str
-    usuario_uid: str # Firebase UID do usuário que é o profissional
-    nome: str # Desnormalizado para leituras rápidas
+    usuario_uid: str
+    nome: str
     especialidades: Optional[str] = None
     ativo: bool = True
-    # Fotos agora são um mapa (dict) para flexibilidade
-    fotos: dict[str, str] = Field({}, description="URLs das fotos em diferentes tamanhos (ex: {'original': 'url', 'thumbnail': 'url'}).")
+    fotos: dict[str, str] = Field({}, description="URLs das fotos em diferentes tamanhos.")
 
 class ProfissionalCreate(ProfissionalBase):
     pass
 
 class ProfissionalResponse(ProfissionalBase):
-    id: str = Field(..., description="ID do documento do profissional no Firestore.")
-    email: EmailStr = Field(..., description="E-mail do profissional (vinculado à sua conta de usuário).") # <-- ADICIONAR ESTA LINHA
-    # Adicionamos os serviços aqui para carregar o perfil completo de um profissional
+    id: str = Field(..., description="ID do documento do profissional.")
+    email: EmailStr = Field(..., description="E-mail do profissional.")
     servicos: List['ServicoResponse'] = []
     postagens: List['PostagemResponse'] = []
     avaliacoes: List['AvaliacaoResponse'] = []
@@ -120,7 +94,6 @@ class ProfissionalUpdate(BaseModel):
     especialidades: Optional[str] = None
     ativo: Optional[bool] = None
     fotos: Optional[dict[str, str]] = None
-
 
 # =================================================================================
 # SCHEMAS DE SERVIÇOS
@@ -138,7 +111,7 @@ class ServicoCreate(ServicoBase):
     pass
 
 class ServicoResponse(ServicoBase):
-    id: str = Field(..., description="ID do documento do serviço no Firestore.")
+    id: str = Field(..., description="ID do documento do serviço.")
 
 class ServicoUpdate(BaseModel):
     nome: Optional[str] = None
@@ -147,7 +120,7 @@ class ServicoUpdate(BaseModel):
     duracao_minutos: Optional[int] = None
 
 # =================================================================================
-# SCHEMAS DE AGENDAMENTOS (Fortemente Desnormalizado)
+# SCHEMAS DE AGENDAMENTOS
 # =================================================================================
 
 class AgendamentoCreate(BaseModel):
@@ -161,46 +134,36 @@ class AgendamentoResponse(BaseModel):
     negocio_id: str
     data_hora: datetime
     status: str
-    
-    # --- Dados Desnormalizados (para evitar múltiplas leituras) ---
     cliente_id: str
     cliente_nome: str
-    
     profissional_id: str
     profissional_nome: str
     profissional_foto_thumbnail: Optional[str] = None
-
     servico_id: str
     servico_nome: str
     servico_preco: float
     servico_duracao_minutos: int
 
-
 # =================================================================================
-# SCHEMAS DE INTERAÇÕES (Postagens, Comentários, etc.)
+# SCHEMAS DE INTERAÇÕES (FEED)
 # =================================================================================
 
-# --- Postagens (Antigo Feed) ---
 class PostagemCreate(BaseModel):
     negocio_id: str
     profissional_id: str
     titulo: str
     descricao: Optional[str] = None
-    # Fotos agora são um mapa (dict) para flexibilidade
-    fotos: dict[str, str] = Field(..., description="URLs da postagem em diferentes tamanhos.")
+    fotos: dict[str, str] = Field(..., description="URLs da postagem.")
 
 class PostagemResponse(PostagemCreate):
     id: str
     data_postagem: datetime
-    # Desnormalizado para exibir no feed sem consultas extras
     profissional_nome: str
     profissional_foto_thumbnail: Optional[str] = None
-    # Contadores podem ser atualizados via transações ou functions
     total_curtidas: int = 0
     total_comentarios: int = 0
-    curtido_pelo_usuario: bool = Field(False, description="Indica se o usuário autenticado curtiu esta postagem.")
+    curtido_pelo_usuario: bool = Field(False, description="Indica se o usuário autenticado curtiu.")
 
-# --- Comentários ---
 class ComentarioCreate(BaseModel):
     negocio_id: str
     postagem_id: str
@@ -209,11 +172,9 @@ class ComentarioCreate(BaseModel):
 class ComentarioResponse(ComentarioCreate):
     id: str
     data: datetime
-    # Desnormalizado
     cliente_id: str
     cliente_nome: str
 
-# --- Avaliações ---
 class AvaliacaoCreate(BaseModel):
     negocio_id: str
     profissional_id: str
@@ -223,12 +184,11 @@ class AvaliacaoCreate(BaseModel):
 class AvaliacaoResponse(AvaliacaoCreate):
     id: str
     data: datetime
-    # Desnormalizado
     cliente_id: str
     cliente_nome: str
 
 # =================================================================================
-# SCHEMAS DE MÉDICOS (Módulo Clínico)
+# SCHEMAS DE GESTÃO CLÍNICA
 # =================================================================================
 
 class MedicoBase(BaseModel):
@@ -245,59 +205,19 @@ class MedicoUpdate(BaseModel):
     especialidade: Optional[str] = None
     crm: Optional[str] = None
 
-# =================================================================================
-# SCHEMAS DE DISPONIBILIDADE (HORÁRIOS E BLOQUEIOS)
-# =================================================================================
-
-class HorarioTrabalho(BaseModel):
-    dia_semana: int # 0=Seg, 6=Dom
-    hora_inicio: time
-    hora_fim: time
-
-class Bloqueio(BaseModel):
-    inicio: datetime
-    fim: datetime
-    motivo: Optional[str] = None
-
-# =================================================================================
-# SCHEMAS DE NOTIFICAÇÕES
-# =================================================================================
-
-class NotificacaoResponse(BaseModel):
-    id: str
-    title: str
-    body: str
-    lida: bool
-    data_criacao: datetime
-    tipo: Optional[str] = None
-    relacionado: Optional[Dict[str, str]] = None
-
-class NotificacaoContagemResponse(BaseModel):
-    count: int
-
-class MarcarLidaRequest(BaseModel):
-    notificacao_id: str
-
-class NotificacaoAgendadaCreate(BaseModel):
-    paciente_id: str
-    negocio_id: str
-    titulo: str
-    mensagem: str
-    data_agendamento: datetime = Field(..., description="Data e hora em que a notificação deve ser enviada.")
-
-class NotificacaoAgendadaResponse(NotificacaoAgendadaCreate):
-    id: str
-    status: str = "agendada"
-    criado_em: datetime
-    criado_por_uid: str # Firebase UID do enfermeiro que agendou
-
-# =================================================================================
-# SCHEMAS DA FICHA DO PACIENTE (Módulo Clínico)
-# =================================================================================
-
 class VinculoCreate(BaseModel):
     paciente_id: str
-    enfermeiro_id: str # ID do documento do usuário enfermeiro
+    enfermeiro_id: str
+
+class TecnicosVincularRequest(BaseModel):
+    tecnicos_ids: List[str] = Field(..., description="Lista de IDs de usuários dos técnicos.")
+
+class SupervisorVincularRequest(BaseModel):
+    supervisor_id: str = Field(..., description="ID do usuário do supervisor.")
+    
+# =================================================================================
+# SCHEMAS DA FICHA DO PACIENTE
+# =================================================================================
 
 class ConsultaBase(BaseModel):
     negocio_id: str
@@ -323,14 +243,13 @@ class ExameBase(BaseModel):
     nome_exame: str
     data_exame: datetime
     url_anexo: Optional[str] = None
-    consulta_id: Optional[str] = Field(None, description="ID da consulta à qual o exame está vinculado.")
+    consulta_id: Optional[str] = Field(None, description="ID da consulta vinculada.")
 
 class ExameCreate(ExameBase):
     pass
 
 class ExameResponse(ExameBase):
     id: str
-    consulta_id: Optional[str] = Field(None, description="ID da consulta à qual o exame está vinculado.")
 
 class ExameUpdate(BaseModel):
     nome_exame: Optional[str] = None
@@ -343,16 +262,14 @@ class MedicacaoBase(BaseModel):
     nome_medicamento: str
     dosagem: str
     instrucoes: str
-    consulta_id: Optional[str] = Field(None, description="ID da consulta à qual a medicação está vinculada.")
+    consulta_id: Optional[str] = Field(None, description="ID da consulta vinculada.")
 
 class MedicacaoCreate(MedicacaoBase):
-    data_criacao: datetime = Field(default_factory=datetime.utcnow) # Adicionado para filtro de plano ativo
-    pass
+    data_criacao: datetime = Field(default_factory=datetime.utcnow)
 
 class MedicacaoResponse(MedicacaoBase):
     id: str
-    data_criacao: datetime # Adicionado para filtro de plano ativo
-    consulta_id: Optional[str] = Field(None, description="ID da consulta à qual a medicação está vinculada.")
+    data_criacao: datetime
 
 class MedicacaoUpdate(BaseModel):
     nome_medicamento: Optional[str] = None
@@ -364,16 +281,14 @@ class ChecklistItemBase(BaseModel):
     paciente_id: str
     descricao_item: str
     concluido: bool = False
-    consulta_id: Optional[str] = Field(None, description="ID da consulta à qual o item do checklist está vinculado.")
+    consulta_id: Optional[str] = Field(None, description="ID da consulta vinculada.")
 
 class ChecklistItemCreate(ChecklistItemBase):
-    data_criacao: datetime = Field(default_factory=datetime.utcnow) # Adicionado para filtro de plano ativo
-    pass
+    data_criacao: datetime = Field(default_factory=datetime.utcnow)
 
 class ChecklistItemResponse(ChecklistItemBase):
     id: str
-    data_criacao: datetime # Adicionado para filtro de plano ativo
-    consulta_id: Optional[str] = Field(None, description="ID da consulta à qual o item do checklist está vinculado.")
+    data_criacao: datetime
 
 class ChecklistItemUpdate(BaseModel):
     descricao_item: Optional[str] = None
@@ -384,16 +299,14 @@ class OrientacaoBase(BaseModel):
     paciente_id: str
     titulo: str
     conteudo: str
-    consulta_id: Optional[str] = Field(None, description="ID da consulta à qual a orientação está vinculada.")
+    consulta_id: Optional[str] = Field(None, description="ID da consulta vinculada.")
 
 class OrientacaoCreate(OrientacaoBase):
-    data_criacao: datetime = Field(default_factory=datetime.utcnow) # Adicionado para filtro de plano ativo
-    pass
+    data_criacao: datetime = Field(default_factory=datetime.utcnow)
 
 class OrientacaoResponse(OrientacaoBase):
     id: str
-    data_criacao: datetime # Adicionado para filtro de plano ativo
-    consulta_id: Optional[str] = Field(None, description="ID da consulta à qual a orientação está vinculada.")
+    data_criacao: datetime
 
 class OrientacaoUpdate(BaseModel):
     titulo: Optional[str] = None
@@ -405,40 +318,77 @@ class FichaCompletaResponse(BaseModel):
     medicacoes: List[MedicacaoResponse]
     checklist: List[ChecklistItemResponse]
     orientacoes: List[OrientacaoResponse]
+    
+# =================================================================================
+# SCHEMAS DE DISPONIBILIDADE
+# =================================================================================
 
+class HorarioTrabalho(BaseModel):
+    dia_semana: int
+    hora_inicio: time
+    hora_fim: time
+
+class Bloqueio(BaseModel):
+    inicio: datetime
+    fim: datetime
+    motivo: Optional[str] = None
+    
+# =================================================================================
+# SCHEMAS DE NOTIFICAÇÕES
+# =================================================================================
+
+class NotificacaoResponse(BaseModel):
+    id: str
+    title: str
+    body: str
+    lida: bool
+    data_criacao: datetime
+    tipo: Optional[str] = None
+    relacionado: Optional[Dict[str, str]] = None
+
+class NotificacaoContagemResponse(BaseModel):
+    count: int
+
+class MarcarLidaRequest(BaseModel):
+    notificacao_id: str
+
+class NotificacaoAgendadaCreate(BaseModel):
+    paciente_id: str
+    negocio_id: str
+    titulo: str
+    mensagem: str
+    data_agendamento: datetime
+
+class NotificacaoAgendadaResponse(NotificacaoAgendadaCreate):
+    id: str
+    status: str = "agendada"
+    criado_em: datetime
+    criado_por_uid: str
 
 # =================================================================================
-# SCHEMAS DE PERFIS REDUZIDOS (Para desnormalização e respostas otimizadas)
+# SCHEMAS DO FLUXO DO TÉCNICO
 # =================================================================================
 
 class TecnicoProfileReduzido(BaseModel):
-    id: str = Field(..., description="ID do documento do usuário técnico.")
-    nome: str = Field(..., description="Nome completo do técnico.")
-    email: EmailStr = Field(..., description="E-mail do técnico.")
-
-# barbearia-backend/schemas.py
-
-# ... (código anterior) ...
-
-# =================================================================================
-# SCHEMAS DO DIÁRIO DO TÉCNICO
-# =================================================================================
+    id: str
+    nome: str
+    email: EmailStr
 
 class DiarioTecnicoBase(BaseModel):
     negocio_id: str
     paciente_id: str
-    anotacao_geral: str = Field(..., description="Anotação principal sobre o acompanhamento.")
-    medicamentos: Optional[str] = Field(None, description="Observações sobre medicamentos.")
-    atividades: Optional[str] = Field(None, description="Observações sobre atividades realizadas.")
-    intercorrencias: Optional[str] = Field(None, description="Registro de qualquer intercorrência.")
+    anotacao_geral: str
+    medicamentos: Optional[str] = None
+    atividades: Optional[str] = None
+    intercorrencias: Optional[str] = None
 
 class DiarioTecnicoCreate(DiarioTecnicoBase):
     pass
 
 class DiarioTecnicoResponse(DiarioTecnicoBase):
     id: str
-    data_ocorrencia: datetime = Field(..., description="Data e hora em que o registro foi feito.")
-    tecnico: 'TecnicoProfileReduzido' = Field(..., description="Dados do técnico que fez o registro.")
+    data_ocorrencia: datetime
+    tecnico: 'TecnicoProfileReduzido'
 
 class DiarioTecnicoUpdate(BaseModel):
     anotacao_geral: Optional[str] = None
@@ -446,12 +396,6 @@ class DiarioTecnicoUpdate(BaseModel):
     atividades: Optional[str] = None
     intercorrencias: Optional[str] = None
 
-
-# =================================================================================
-# SCHEMAS DE REGISTROS DIÁRIOS ESTRUTURADOS
-# =================================================================================
-
-# Uso de Union para permitir diferentes tipos de conteúdo
 class SinaisVitaisConteudo(BaseModel):
     pressao_sistolica: Optional[int] = None
     pressao_diastolica: Optional[int] = None
@@ -462,27 +406,19 @@ class SinaisVitaisConteudo(BaseModel):
 class MedicacaoConteudo(BaseModel):
     nome: str
     dose: str
-    status: str = Field(..., description="Status da administração: 'administrado', 'recusado', 'pendente'.")
+    status: str
     observacoes: Optional[str] = None
 
 class AnotacaoConteudo(BaseModel):
-    categoria: str = Field(..., description="Categoria da anotação (ex: 'Queixa do Paciente', 'Ocorrência', 'Evolução').")
+    categoria: str
     descricao: str
 
-class AtividadeConteudo(BaseModel):
-    descricao: str = Field(..., description="Descrição da atividade.")
-
-class IntercorrenciaConteudo(BaseModel):
-    gravidade: str = Field(..., description="Gravidade da intercorrência: 'leve', 'moderada', 'grave'.")
-    descricao: str = Field(..., description="Descrição detalhada da intercorrência.")
-    comunicado_enfermeiro: bool = Field(False, description="Indica se o enfermeiro já foi comunicado.")
-
-RegistroDiarioConteudo = Union[SinaisVitaisConteudo, MedicacaoConteudo, AnotacaoConteudo, AtividadeConteudo, IntercorrenciaConteudo]
+RegistroDiarioConteudo = Union[SinaisVitaisConteudo, MedicacaoConteudo, AnotacaoConteudo]
 
 class RegistroDiarioCreate(BaseModel):
     negocio_id: str
     paciente_id: str
-    tipo: str = Field(..., description="O tipo do registro (ex: 'sinais_vitais', 'medicacao', 'anotacao', 'atividade', 'intercorrencia').")
+    tipo: str
     conteudo: RegistroDiarioConteudo
 
 class RegistroDiarioResponse(BaseModel):
@@ -493,10 +429,17 @@ class RegistroDiarioResponse(BaseModel):
     data_registro: datetime
     tipo: str
     conteudo: RegistroDiarioConteudo
-    tecnico_id: str = Field(..., description="ID do usuário técnico que fez o registro.")
 
+class ConfirmacaoLeituraCreate(BaseModel):
+    usuario_id: str
+    plano_version_id: str
+    ip_origem: Optional[str] = None
 
-# Schemas para a nova funcionalidade de Checklist Diário
+class ConfirmacaoLeituraResponse(ConfirmacaoLeituraCreate):
+    id: str
+    paciente_id: str
+    data_confirmacao: datetime
+
 class ChecklistItemDiarioResponse(BaseModel):
     id: str
     descricao: str
@@ -505,13 +448,33 @@ class ChecklistItemDiarioResponse(BaseModel):
 class ChecklistItemDiarioUpdate(BaseModel):
     concluido: bool
 
-# Schemas do Plano de Cuidado (modelo hipotético)
-# Note: o modelo real de um plano de cuidado teria que ser definido em conjunto
-class PlanoCuidado(BaseModel):
-    id: str
+# =================================================================================
+# SCHEMAS DA PESQUISA DE SATISFAÇÃO
+# =================================================================================
+
+class RespostaItem(BaseModel):
+    pergunta_id: str
+    pergunta_texto: str
+    resposta: str
+
+class PesquisaEnviadaCreate(BaseModel):
     negocio_id: str
     paciente_id: str
-    modelo_checklist_id: Optional[str] = Field(None, description="ID do modelo de checklist para geração diária.")
+    modelo_pesquisa_id: str
+
+class PesquisaEnviadaResponse(PesquisaEnviadaCreate):
+    id: str
+    data_envio: datetime
+    data_resposta: Optional[datetime] = None
+    status: str = Field("pendente", description="Status: 'pendente' ou 'respondida'.")
+    respostas: List[RespostaItem] = []
+
+class SubmeterPesquisaRequest(BaseModel):
+    respostas: List[RespostaItem]
+    
+# =================================================================================
+# SCHEMAS DO PLANO DE CUIDADO (ACK)
+# =================================================================================
 
 class PlanoAckCreate(BaseModel):
     paciente_id: int = Field(..., description="ID do paciente")
@@ -529,36 +492,12 @@ class PlanoAckRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class PlanoAckStatus(BaseModel):
-    """Resposta do GET /pacientes/{id}/plano-ativo/ack"""
     ackHoje: bool = Field(..., description="Se já houve confirmação hoje para a versão atual do plano")
     planoVersionId: Optional[str] = Field(None, description="Versão do plano considerada no status")
 
+# =================================================================================
+# REBUILD DE REFERÊNCIAS (ForwardRef)
+# =================================================================================
 
-# Em schemas.py, adicione este bloco no final do arquivo
-
-# Schemas para a "Confirmação de Leitura"
-class ConfirmacaoLeituraCreate(BaseModel):
-    usuario_id: str = Field(..., description="ID do usuário técnico que está confirmando a leitura.")
-    plano_version_id: str = Field(..., description="Identificador da versão do plano que está sendo confirmada.")
-    ip_origem: Optional[str] = Field(None, description="Endereço IP do cliente, se disponível.")
-
-class ConfirmacaoLeituraResponse(ConfirmacaoLeituraCreate):
-    id: str
-    paciente_id: str
-    data_confirmacao: datetime
-
-# Schemas para o "Checklist Obrigatório"
-class ChecklistItemDiarioResponse(BaseModel):
-    id: str
-    descricao: str
-    concluido: bool
-
-class ChecklistItemDiarioUpdate(BaseModel):
-    concluido: bool
-
-# --- FIM DOS NOVOS SCHEMAS ---
-
-# CORREÇÃO: Usa o método model_rebuild() do Pydantic V2 para resolver as referências
 ProfissionalResponse.model_rebuild()
-UsuarioProfile.model_rebuild()
 DiarioTecnicoResponse.model_rebuild()
