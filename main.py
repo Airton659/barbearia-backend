@@ -618,7 +618,10 @@ def criar_registro_diario_estruturado_endpoint(
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Adiciona um novo registro estruturado ao diário de acompanhamento."""
-    registro_data.paciente_id = paciente_id
+    # O paciente_id já é esperado no corpo da requisição conforme o schema corrigido.
+    if registro_data.paciente_id != paciente_id:
+        raise HTTPException(status_code=400, detail="ID do paciente na URL e no corpo da requisição não correspondem.")
+
     try:
         novo_registro = crud.criar_registro_diario_estruturado(db, registro_data, current_user.id)
         return novo_registro

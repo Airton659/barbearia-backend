@@ -510,6 +510,8 @@ class AnotacaoConteudo(BaseModel):
 RegistroDiarioConteudo = Union[SinaisVitaisConteudo, MedicacaoConteudo, AnotacaoConteudo]
 
 class RegistroDiarioCreate(BaseModel):
+    negocio_id: str
+    paciente_id: str # Adicionado para corrigir o erro de validação
     tipo: str = Field(..., description="O tipo do registro (ex: 'sinais_vitais', 'medicacao', 'anotacao').")
     conteudo: RegistroDiarioConteudo
 
