@@ -2393,7 +2393,7 @@ def criar_registro_diario_estruturado(db: firestore.client, registro_data: schem
         "tecnico_id": tecnico_id,
         "data_registro": datetime.utcnow()
     })
-    
+
     paciente_ref = db.collection('usuarios').document(registro_data.paciente_id)
     doc_ref = paciente_ref.collection('registros_diarios_estruturados').document()
     doc_ref.set(registro_dict)
@@ -2415,11 +2415,9 @@ def listar_registros_diario_estruturado(
     try:
         query = db.collection('usuarios').document(paciente_id).collection('registros_diarios_estruturados')
         
-        # Filtro por tipo, se fornecido
         if tipo:
             query = query.where('tipo', '==', tipo)
         
-        # Filtro por data, se fornecido
         if data:
             start_of_day = datetime.combine(data, datetime.min.time())
             end_of_day = datetime.combine(data, datetime.max.time())
@@ -2427,7 +2425,6 @@ def listar_registros_diario_estruturado(
 
         query = query.order_by('data_registro', direction=firestore.Query.DESCENDING)
 
-        # Cache para evitar múltiplas leituras do mesmo técnico
         tecnicos_cache = {}
 
         for doc in query.stream():
@@ -2436,7 +2433,6 @@ def listar_registros_diario_estruturado(
             tecnico_id = registro_data.get('tecnico_id')
 
             if tecnico_id:
-                # Busca os dados do técnico, usando o cache se já buscou antes
                 if tecnico_id in tecnicos_cache:
                     tecnico_perfil = tecnicos_cache[tecnico_id]
                 else:
@@ -2444,8 +2440,8 @@ def listar_registros_diario_estruturado(
                     if tecnico_doc.exists:
                         tecnico_perfil = {
                             "id": tecnico_doc.id,
-                            "nome": tecnico_doc.to_dict().get('nome'),
-                            "email": tecnico_doc.to_dict().get('email')
+                            "nome": tecnico_doc.to_dict().get('nome', 'Nome não disponível'),
+                            "email": tecnico_doc.to_dict().get('email', 'Email não disponível')
                         }
                         tecnicos_cache[tecnico_id] = tecnico_perfil
                     else:
@@ -2455,9 +2451,11 @@ def listar_registros_diario_estruturado(
                             "email": ""
                         }
                 
-                # Adiciona o objeto completo do técnico na resposta
-                registro_data['tecnico'] = schemas.TecnicoProfileReduzido(**tecnico_perfil)
+                registro_data['tecnico'] = tecnico_perfil
             
+            # Remove os campos desnecessários para a resposta
+            registro_data.pop('tecnico_id', None)
+
             registros.append(registro_data)
             
     except Exception as e:
