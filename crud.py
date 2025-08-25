@@ -2384,49 +2384,58 @@ def atualizar_item_checklist_diario(db: firestore.client, paciente_id: str, item
 # =================================================================================
 
 def criar_registro_diario_estruturado(db: firestore.client, registro_data: schemas.RegistroDiarioCreate, tecnico_id: str) -> Dict:
-    """Adiciona um novo registro estruturado ao diário de acompanhamento de um paciente."""
+    """
+    Adiciona um novo registro estruturado ao diário de acompanhamento de um paciente.
+    Agora valida que 'conteudo' é compatível com o 'tipo' informado; caso contrário, retorna 422.
+    """
+    # Revalida o conteudo de acordo com o tipo escolhido (para evitar documentos corrompidos)
+    try:
+        tipo = registro_data.tipo
+        bruto = registro_data.conteudo if isinstance(registro_data.conteudo, dict) else registro_data.conteudo.model_dump()
+        if tipo == 'sinais_vitais':
+            conteudo_ok = schemas.SinaisVitaisConteudo.model_validate(bruto)
+        elif tipo == 'medicacao':
+            conteudo_ok = schemas.MedicacaoConteudo.model_validate(bruto)
+        elif tipo in ('anotacao', 'atividade'):
+            conteudo_ok = schemas.AnotacaoConteudo.model_validate(bruto)
+        elif tipo == 'intercorrencia':
+            conteudo_ok = schemas.IntercorrenciaConteudo.model_validate(bruto)
+        else:
+            raise ValueError(f"Tipo de registro desconhecido: {tipo}")
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Conteúdo incompatível com o tipo '{registro_data.tipo}': {e}")
+
     # Monta o dicionário para salvar no Firestore
-    registro_dict_para_salvar = registro_data.model_dump()
-    registro_dict_para_salvar.update({
+    registro_dict_para_salvar = {
+        "negocio_id": registro_data.negocio_id,
         "paciente_id": registro_data.paciente_id,
+        "tipo": tipo,
+        "conteudo": conteudo_ok.model_dump(),
         "tecnico_id": tecnico_id,
-        "data_registro": datetime.utcnow()
-    })
+        "data_registro": datetime.utcnow(),
+    }
 
     # Salva o documento no banco de dados
     paciente_ref = db.collection('usuarios').document(registro_data.paciente_id)
     doc_ref = paciente_ref.collection('registros_diarios_estruturados').document()
     doc_ref.set(registro_dict_para_salvar)
 
-    # --- INÍCIO DA CORREÇÃO ---
-    # Após salvar, preparamos a resposta para a API, que tem um formato diferente.
-
-    # 1. Busca os dados completos do técnico
+    # Monta o técnico (objeto reduzido)
     tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
     if tecnico_doc.exists:
-        tecnico_data = tecnico_doc.to_dict()
+        tdat = tecnico_doc.to_dict() or {}
         tecnico_perfil = {
             "id": tecnico_doc.id,
-            "nome": tecnico_data.get('nome', 'Nome não disponível'),
-            "email": tecnico_data.get('email', 'Email não disponível')
+            "nome": tdat.get('nome', 'Nome não disponível'),
+            "email": tdat.get('email', 'Email não disponível'),
         }
     else:
-        # Fallback caso o técnico não seja encontrado
-        tecnico_perfil = {
-            "id": tecnico_id,
-            "nome": "Técnico Desconhecido",
-            "email": ""
-        }
+        tecnico_perfil = {"id": tecnico_id, "nome": "Técnico Desconhecido", "email": ""}
 
-    # 2. Monta o dicionário de resposta final, de acordo com o schema RegistroDiarioResponse
     resposta_dict = registro_dict_para_salvar.copy()
     resposta_dict['id'] = doc_ref.id
-    resposta_dict['tecnico'] = tecnico_perfil  # Adiciona o objeto completo
-    # Opcional: remove o tecnico_id se não quiser que ele apareça na resposta da API
-    # resposta_dict.pop('tecnico_id', None) 
-    
+    resposta_dict['tecnico'] = tecnico_perfil
     return resposta_dict
-    # --- FIM DA CORREÇÃO ---
 
 def listar_registros_diario_estruturado(
     db: firestore.client,
@@ -2436,109 +2445,118 @@ def listar_registros_diario_estruturado(
 ) -> List[schemas.RegistroDiarioResponse]:
     """
     Lista os registros diários estruturados de um paciente.
-    Esta versão contém a lógica de consulta corrigida para funcionar
-    com ou sem filtros e garantir o retorno dos dados existentes.
+    Corrige os erros de validação sem adulterar o 'tipo' salvo no documento.
+    Se o 'conteudo' não bater com o tipo, preenche campos obrigatórios com
+    valores vazios/sensatos para não quebrar o app e manter os CAMPOS do tipo original.
     """
-    registros_pydantic = []
+    registros_pydantic: List[schemas.RegistroDiarioResponse] = []
     try:
-        # --- INÍCIO DA CORREÇÃO DEFINITIVA NA CONSULTA ---
-        
-        # A referência da coleção base
-        base_query = db.collection('usuarios').document(paciente_id).collection('registros_diarios_estruturados')
-        
-        # Aplica a ordenação primeiro, que é necessária para os filtros de data
-        query = base_query.order_by('data_registro', direction=firestore.Query.DESCENDING)
+        coll_ref = db.collection('usuarios').document(paciente_id).collection('registros_diarios_estruturados')
+        # ordena por data (mais recentes primeiro)
+        try:
+            query = coll_ref.order_by('data_registro', direction=firestore.Query.DESCENDING)
+        except Exception:
+            # alguns emuladores/bancos não aceitam order_by antes do where
+            query = coll_ref
 
-        # Aplica os filtros APENAS se eles forem fornecidos
+        # filtro por tipo se enviado
         if tipo:
             query = query.where('tipo', '==', tipo)
-        
+
+        # filtro por data (dentro do dia em UTC)
         if data:
-            start_of_day = datetime.combine(data, datetime.min.time())
-            end_of_day = datetime.combine(data, datetime.max.time())
-            query = query.where('data_registro', '>=', start_of_day).where('data_registro', '<=', end_of_day)
+            inicio = datetime.combine(data, time.min)
+            fim = datetime.combine(data, time.max)
+            query = query.where('data_registro', '>=', inicio).where('data_registro', '<=', fim)
 
-        # --- FIM DA CORREÇÃO DEFINITIVA NA CONSULTA ---
-
-        docs = query.stream()
-        tecnicos_cache = {}
+        docs = list(query.stream())
+        tecnicos_cache: Dict[str, Dict] = {}
 
         for doc in docs:
-            registro_data = doc.to_dict()
-            if not registro_data: continue
+            d = doc.to_dict() or {}
+            d['id'] = doc.id
 
-            registro_data['id'] = doc.id
-            
-            tipo_registro = registro_data.get('tipo')
-            conteudo_bruto = registro_data.get('conteudo', {})
-            conteudo_validado = conteudo_bruto
+            tipo_salvo = d.get('tipo')
+            conteudo_bruto = d.get('conteudo', {}) or {}
 
-            try:
-                if tipo_registro == 'sinais_vitais':
-                    conteudo_validado = schemas.SinaisVitaisConteudo.model_validate(conteudo_bruto)
-                elif tipo_registro == 'medicacao':
-                    conteudo_validado = schemas.MedicacaoConteudo.model_validate(conteudo_bruto)
-                elif tipo_registro in ['anotacao', 'atividade']:
-                    conteudo_validado = schemas.AnotacaoConteudo.model_validate(conteudo_bruto)
-                elif tipo_registro == 'intercorrencia':
-                    conteudo_validado = schemas.IntercorrenciaConteudo.model_validate(conteudo_bruto)
+            # --- valida o conteudo respeitando o TIPO SALVO ---
+            def _coerce_for_tipo(tipo_salvo: str, bruto: Dict) -> BaseModel:
+                try:
+                    if tipo_salvo == 'sinais_vitais':
+                        return schemas.SinaisVitaisConteudo.model_validate(bruto)
+                    elif tipo_salvo == 'medicacao':
+                        try:
+                            return schemas.MedicacaoConteudo.model_validate(bruto)
+                        except Exception:
+                            # Monta mínimo viável preservando o que der
+                            return schemas.MedicacaoConteudo(
+                                nome=str(bruto.get('nome') or ''),
+                                dose=str(bruto.get('dose') or ''),
+                                status=str(bruto.get('status') or 'pendente'),
+                                observacoes=bruto.get('observacoes') or bruto.get('descricao')
+                            )
+                    elif tipo_salvo in ('anotacao', 'atividade'):
+                        try:
+                            return schemas.AnotacaoConteudo.model_validate(bruto)
+                        except Exception:
+                            return schemas.AnotacaoConteudo(
+                                descricao=str(bruto.get('descricao') or '')
+                            )
+                    elif tipo_salvo == 'intercorrencia':
+                        try:
+                            return schemas.IntercorrenciaConteudo.model_validate(bruto)
+                        except Exception:
+                            return schemas.IntercorrenciaConteudo(
+                                tipo=str(bruto.get('tipo') or 'indefinido'),
+                                descricao=str(bruto.get('descricao') or ''),
+                                comunicado_enfermeiro=bool(bruto.get('comunicado_enfermeiro') or False)
+                            )
+                    else:
+                        # tipo desconhecido -> devolve como sinais vitais (campos livres) para não quebrar
+                        return schemas.SinaisVitaisConteudo.model_validate(bruto)
+                except Exception:
+                    # pior caso: sempre retorna um objeto válido de sinais vitais
+                    return schemas.SinaisVitaisConteudo()
 
-                registro_data['conteudo'] = conteudo_validado
-            except Exception as e:
-                # Fallback: dados antigos/granulados podem estar com schema inconsistente.
-                # Tentamos validar em ordem segura e, se necessário, ajustar 'tipo' ao que tem cara de ser.
-                fallback_models = [
-                    ('sinais_vitais', schemas.SinaisVitaisConteudo),
-                    ('anotacao', schemas.AnotacaoConteudo),
-                    ('medicacao', schemas.MedicacaoConteudo),
-                    ('intercorrencia', schemas.IntercorrenciaConteudo),
-                ]
-                validou = False
-                for _tipo_detectado, _model in fallback_models:
-                    try:
-                        conteudo_validado = _model.model_validate(conteudo_bruto)
-                        registro_data['conteudo'] = conteudo_validado
-                        tipo_registro = _tipo_detectado
-                        registro_data['tipo'] = _tipo_detectado
-                        validou = True
-                        break
-                    except Exception:
-                        continue
-                if not validou:
-                    logger.error(f"Falha ao validar 'conteudo' para o registro {doc.id} (tipo: {tipo_registro}): {e}")
-                    continue
+            conteudo_validado = _coerce_for_tipo(tipo_salvo, conteudo_bruto)
 
-            tecnico_id = registro_data.pop('tecnico_id', None)
+            # monta o objeto 'tecnico'
+            tecnico_id = d.pop('tecnico_id', None)
+            tecnico_perfil = None
             if tecnico_id:
                 if tecnico_id in tecnicos_cache:
                     tecnico_perfil = tecnicos_cache[tecnico_id]
                 else:
-                    tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
-                    if tecnico_doc.exists:
-                        _tec_dict = tecnico_doc.to_dict() or {}
-                        _tec_dict['id'] = tecnico_doc.id
-                        # defaults to avoid validation errors
-                        if 'nome' not in _tec_dict:
-                            _tec_dict['nome'] = _tec_dict.get('name', 'Técnico')
-                        if 'email' not in _tec_dict:
-                            _tec_dict['email'] = 'desconhecido@exemplo.local'
-                        tecnico_perfil = schemas.TecnicoProfileReduzido.model_validate(_tec_dict).model_dump()
-                        tecnicos_cache[tecnico_id] = tecnico_perfil
+                    tdoc = db.collection('usuarios').document(tecnico_id).get()
+                    if tdoc.exists:
+                        tdat = tdoc.to_dict() or {}
+                        tecnico_perfil = {
+                            'id': tdoc.id,
+                            'nome': tdat.get('nome', 'Nome não disponível'),
+                            'email': tdat.get('email', 'Email não disponível'),
+                        }
                     else:
-                        tecnico_perfil = {"id": tecnico_id, "nome": "Técnico Desconhecido", "email": ""}
-                registro_data['tecnico'] = tecnico_perfil
-            
+                        tecnico_perfil = {'id': tecnico_id, 'nome': 'Técnico Desconhecido', 'email': ''}
+                    tecnicos_cache[tecnico_id] = tecnico_perfil
+
+            registro_data = {
+                'id': d['id'],
+                'negocio_id': d.get('negocio_id'),
+                'paciente_id': d.get('paciente_id'),
+                'tecnico': tecnico_perfil or {'id': '', 'nome': '', 'email': ''},
+                'data_registro': d.get('data_registro'),
+                'tipo': tipo_salvo or 'anotacao',
+                'conteudo': conteudo_validado
+            }
+
             try:
-                modelo_final = schemas.RegistroDiarioResponse.model_validate(registro_data)
-                registros_pydantic.append(modelo_final)
+                registros_pydantic.append(schemas.RegistroDiarioResponse.model_validate(registro_data))
             except Exception as e:
                 logger.error(f"Falha ao montar o modelo de resposta final para o registro {doc.id}: {e}")
 
     except Exception as e:
         logger.error(f"Erro ao listar registros estruturados para o paciente {paciente_id}: {e}")
-        # Em caso de erro na consulta, levanta uma exceção para retornar um 500 claro
         raise HTTPException(status_code=500, detail=f"Erro ao consultar o banco de dados: {e}")
-    
     return registros_pydantic
 
 def atualizar_registro_diario_estruturado(
