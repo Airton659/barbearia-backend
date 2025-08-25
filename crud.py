@@ -2431,13 +2431,21 @@ def listar_registros_diario_estruturado(
     tipo: Optional[str] = None
 ) -> List[schemas.RegistroDiarioResponse]:
     """
-    Lista os registros diários estruturados de um paciente, garantindo a correta
-    serialização do campo 'conteudo' com base no campo 'tipo'.
+    Lista os registros diários estruturados de um paciente.
+    Esta versão contém a lógica de consulta corrigida para funcionar
+    com ou sem filtros e garantir o retorno dos dados existentes.
     """
     registros_pydantic = []
     try:
-        query = db.collection('usuarios').document(paciente_id).collection('registros_diarios_estruturados')
+        # --- INÍCIO DA CORREÇÃO DEFINITIVA NA CONSULTA ---
         
+        # A referência da coleção base
+        base_query = db.collection('usuarios').document(paciente_id).collection('registros_diarios_estruturados')
+        
+        # Aplica a ordenação primeiro, que é necessária para os filtros de data
+        query = base_query.order_by('data_registro', direction=firestore.Query.DESCENDING)
+
+        # Aplica os filtros APENAS se eles forem fornecidos
         if tipo:
             query = query.where('tipo', '==', tipo)
         
@@ -2446,38 +2454,36 @@ def listar_registros_diario_estruturado(
             end_of_day = datetime.combine(data, datetime.max.time())
             query = query.where('data_registro', '>=', start_of_day).where('data_registro', '<=', end_of_day)
 
-        query = query.order_by('data_registro', direction=firestore.Query.DESCENDING)
+        # --- FIM DA CORREÇÃO DEFINITIVA NA CONSULTA ---
 
+        docs = query.stream()
         tecnicos_cache = {}
 
-        for doc in query.stream():
+        for doc in docs:
             registro_data = doc.to_dict()
             if not registro_data: continue
 
             registro_data['id'] = doc.id
             
-            # --- INÍCIO DA CORREÇÃO DEFINITIVA ---
-            
-            # 1. Resolve manualmente a estrutura do 'conteudo' com base no 'tipo'
             tipo_registro = registro_data.get('tipo')
             conteudo_bruto = registro_data.get('conteudo', {})
-            conteudo_validado = conteudo_bruto # Fallback
+            conteudo_validado = conteudo_bruto
 
             try:
                 if tipo_registro == 'sinais_vitais':
                     conteudo_validado = schemas.SinaisVitaisConteudo.model_validate(conteudo_bruto)
                 elif tipo_registro == 'medicacao':
                     conteudo_validado = schemas.MedicacaoConteudo.model_validate(conteudo_bruto)
-                elif tipo_registro == 'anotacao':
+                elif tipo_registro in ['anotacao', 'atividade']:
                     conteudo_validado = schemas.AnotacaoConteudo.model_validate(conteudo_bruto)
-                # Adicione outras condições aqui se houver mais tipos com schemas diferentes
+                elif tipo_registro == 'intercorrencia':
+                    conteudo_validado = schemas.IntercorrenciaConteudo.model_validate(conteudo_bruto)
                 
                 registro_data['conteudo'] = conteudo_validado
             except Exception as e:
                 logger.error(f"Falha ao validar 'conteudo' para o registro {doc.id} (tipo: {tipo_registro}): {e}")
-                continue # Pula para o próximo registro se este for inválido
+                continue
 
-            # 2. Enriquece a resposta com os dados completos do técnico
             tecnico_id = registro_data.pop('tecnico_id', None)
             if tecnico_id:
                 if tecnico_id in tecnicos_cache:
@@ -2491,17 +2497,16 @@ def listar_registros_diario_estruturado(
                         tecnico_perfil = {"id": tecnico_id, "nome": "Técnico Desconhecido", "email": ""}
                 registro_data['tecnico'] = tecnico_perfil
             
-            # 3. Valida o objeto de resposta completo
             try:
                 modelo_final = schemas.RegistroDiarioResponse.model_validate(registro_data)
                 registros_pydantic.append(modelo_final)
             except Exception as e:
                 logger.error(f"Falha ao montar o modelo de resposta final para o registro {doc.id}: {e}")
 
-            # --- FIM DA CORREÇÃO DEFINITIVA ---
-
     except Exception as e:
         logger.error(f"Erro ao listar registros estruturados para o paciente {paciente_id}: {e}")
+        # Em caso de erro na consulta, levanta uma exceção para retornar um 500 claro
+        raise HTTPException(status_code=500, detail=f"Erro ao consultar o banco de dados: {e}")
     
     return registros_pydantic
 
