@@ -2482,11 +2482,31 @@ def listar_registros_diario_estruturado(
                     conteudo_validado = schemas.AnotacaoConteudo.model_validate(conteudo_bruto)
                 elif tipo_registro == 'intercorrencia':
                     conteudo_validado = schemas.IntercorrenciaConteudo.model_validate(conteudo_bruto)
-                
+
                 registro_data['conteudo'] = conteudo_validado
             except Exception as e:
-                logger.error(f"Falha ao validar 'conteudo' para o registro {doc.id} (tipo: {tipo_registro}): {e}")
-                continue
+                # Fallback: dados antigos/granulados podem estar com schema inconsistente.
+                # Tentamos validar em ordem segura e, se necessário, ajustar 'tipo' ao que tem cara de ser.
+                fallback_models = [
+                    ('sinais_vitais', schemas.SinaisVitaisConteudo),
+                    ('anotacao', schemas.AnotacaoConteudo),
+                    ('medicacao', schemas.MedicacaoConteudo),
+                    ('intercorrencia', schemas.IntercorrenciaConteudo),
+                ]
+                validou = False
+                for _tipo_detectado, _model in fallback_models:
+                    try:
+                        conteudo_validado = _model.model_validate(conteudo_bruto)
+                        registro_data['conteudo'] = conteudo_validado
+                        tipo_registro = _tipo_detectado
+                        registro_data['tipo'] = _tipo_detectado
+                        validou = True
+                        break
+                    except Exception:
+                        continue
+                if not validou:
+                    logger.error(f"Falha ao validar 'conteudo' para o registro {doc.id} (tipo: {tipo_registro}): {e}")
+                    continue
 
             tecnico_id = registro_data.pop('tecnico_id', None)
             if tecnico_id:
@@ -2495,7 +2515,14 @@ def listar_registros_diario_estruturado(
                 else:
                     tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
                     if tecnico_doc.exists:
-                        tecnico_perfil = schemas.TecnicoProfileReduzido.model_validate(tecnico_doc.to_dict()).model_dump()
+                        _tec_dict = tecnico_doc.to_dict() or {}
+                        _tec_dict['id'] = tecnico_doc.id
+                        # defaults to avoid validation errors
+                        if 'nome' not in _tec_dict:
+                            _tec_dict['nome'] = _tec_dict.get('name', 'Técnico')
+                        if 'email' not in _tec_dict:
+                            _tec_dict['email'] = 'desconhecido@exemplo.local'
+                        tecnico_perfil = schemas.TecnicoProfileReduzido.model_validate(_tec_dict).model_dump()
                         tecnicos_cache[tecnico_id] = tecnico_perfil
                     else:
                         tecnico_perfil = {"id": tecnico_id, "nome": "Técnico Desconhecido", "email": ""}
