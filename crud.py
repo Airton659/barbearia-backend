@@ -2387,19 +2387,48 @@ def atualizar_item_checklist_diario(db: firestore.client, paciente_id: str, item
 
 def criar_registro_diario_estruturado(db: firestore.client, registro_data: schemas.RegistroDiarioCreate, tecnico_id: str) -> Dict:
     """Adiciona um novo registro estruturado ao diário de acompanhamento de um paciente."""
-    registro_dict = registro_data.model_dump()
-    registro_dict.update({
+    # Monta o dicionário para salvar no Firestore
+    registro_dict_para_salvar = registro_data.model_dump()
+    registro_dict_para_salvar.update({
         "paciente_id": registro_data.paciente_id,
         "tecnico_id": tecnico_id,
         "data_registro": datetime.utcnow()
     })
 
+    # Salva o documento no banco de dados
     paciente_ref = db.collection('usuarios').document(registro_data.paciente_id)
     doc_ref = paciente_ref.collection('registros_diarios_estruturados').document()
-    doc_ref.set(registro_dict)
+    doc_ref.set(registro_dict_para_salvar)
+
+    # --- INÍCIO DA CORREÇÃO ---
+    # Após salvar, preparamos a resposta para a API, que tem um formato diferente.
+
+    # 1. Busca os dados completos do técnico
+    tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
+    if tecnico_doc.exists:
+        tecnico_data = tecnico_doc.to_dict()
+        tecnico_perfil = {
+            "id": tecnico_doc.id,
+            "nome": tecnico_data.get('nome', 'Nome não disponível'),
+            "email": tecnico_data.get('email', 'Email não disponível')
+        }
+    else:
+        # Fallback caso o técnico não seja encontrado
+        tecnico_perfil = {
+            "id": tecnico_id,
+            "nome": "Técnico Desconhecido",
+            "email": ""
+        }
+
+    # 2. Monta o dicionário de resposta final, de acordo com o schema RegistroDiarioResponse
+    resposta_dict = registro_dict_para_salvar.copy()
+    resposta_dict['id'] = doc_ref.id
+    resposta_dict['tecnico'] = tecnico_perfil  # Adiciona o objeto completo
+    # Opcional: remove o tecnico_id se não quiser que ele apareça na resposta da API
+    # resposta_dict.pop('tecnico_id', None) 
     
-    registro_dict['id'] = doc_ref.id
-    return registro_dict
+    return resposta_dict
+    # --- FIM DA CORREÇÃO ---
 
 def listar_registros_diario_estruturado(
     db: firestore.client, 
