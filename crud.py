@@ -4,6 +4,10 @@ import schemas
 from datetime import datetime, date, time, timedelta
 from typing import Optional, List, Dict, Union
 
+# --- INÍCIO DA CORREÇÃO ---
+from fastapi import HTTPException
+# --- FIM DA CORREÇÃO ---
+
 
 
 
