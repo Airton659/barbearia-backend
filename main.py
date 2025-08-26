@@ -1468,7 +1468,8 @@ def confirmar_leitura_alias(
 @app.get("/pacientes/{paciente_id}/confirmar-leitura/status", tags=["Fluxo do Técnico"])
 def confirmar_leitura_status_alias(
     paciente_id: str,
-    data: date = Query(..., description="Data para verificar a leitura (formato: YYYY-MM-DD)."),
+    # A data agora é opcional e, se não for fornecida, usa a data atual.
+    data: date = Query(default_factory=date.today, description="Data para verificar a leitura (padrão: hoje)."),
     current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
     db: firestore.client = Depends(get_db)
 ):
