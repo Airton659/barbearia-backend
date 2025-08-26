@@ -1694,11 +1694,10 @@ def criar_orientacao(db: firestore.client, orientacao_data: schemas.OrientacaoCr
 
 def listar_tecnicos_supervisionados_por_paciente(db: firestore.client, paciente_id: str, enfermeiro_id: str) -> List[Dict]:
     """
-    Lista todos os técnicos que estão sob a supervisão do enfermeiro logado
-    e que também estão vinculados ao paciente em questão.
+    Lista os técnicos vinculados a um paciente que são supervisionados pelo enfermeiro logado.
     """
     try:
-        # 1. Busca os dados do paciente para obter a lista de técnicos vinculados
+        # 1. Busca os dados do paciente para obter a lista de IDs de técnicos vinculados.
         paciente_doc = db.collection('usuarios').document(paciente_id).get()
         if not paciente_doc.exists:
             logger.warning(f"Paciente com ID {paciente_id} não encontrado.")
@@ -1707,29 +1706,24 @@ def listar_tecnicos_supervisionados_por_paciente(db: firestore.client, paciente_
         paciente_data = paciente_doc.to_dict()
         tecnicos_vinculados_ids = paciente_data.get('tecnicos_ids', [])
         
-        # Se não há técnicos vinculados ao paciente, não há nada a retornar
         if not tecnicos_vinculados_ids:
+            logger.info(f"Paciente {paciente_id} não possui técnicos vinculados.")
             return []
 
-        # 2. Busca todos os usuários que são técnicos e são supervisionados pelo enfermeiro
-        tecnicos_supervisionados_query = db.collection('usuarios')\
-            .where('roles', '==', {'tecnico': 'tecnico'}) \
-            .where('supervisor_id', '==', enfermeiro_id)
-
-        tecnicos_supervisionados = []
-        for doc in tecnicos_supervisionados_query.stream():
-            tecnico_data = doc.to_dict()
-            tecnico_data['id'] = doc.id
-            tecnicos_supervisionados.append(tecnico_data)
-        
-        # 3. Filtra a lista de técnicos para retornar apenas os que estão em ambas as listas
         tecnicos_finais = []
-        for tecnico in tecnicos_supervisionados:
-            if tecnico['id'] in tecnicos_vinculados_ids:
+        # 2. Itera sobre os técnicos vinculados e verifica a supervisão de cada um.
+        for tecnico_id in tecnicos_vinculados_ids:
+            tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
+            if not tecnico_doc.exists:
+                continue # Pula para o próximo se o técnico não for encontrado
+
+            tecnico_data = tecnico_doc.to_dict()
+            # 3. Se o supervisor_id do técnico bate com o ID do enfermeiro, adiciona à lista.
+            if tecnico_data.get('supervisor_id') == enfermeiro_id:
                 tecnicos_finais.append({
-                    "id": tecnico['id'],
-                    "nome": tecnico.get('nome', 'Nome não disponível'),
-                    "email": tecnico.get('email', 'Email não disponível')
+                    "id": tecnico_doc.id,
+                    "nome": tecnico_data.get('nome', 'Nome não disponível'),
+                    "email": tecnico_data.get('email', 'Email não disponível')
                 })
         
         return tecnicos_finais
