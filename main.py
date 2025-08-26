@@ -1483,12 +1483,14 @@ def get_checklist_diario(
     paciente_id: str,
     data: date = Query(..., description="Data do checklist (formato: YYYY-MM-DD)."),
     negocio_id: str = Header(..., alias="negocio-id", description="ID do Negócio."),
-    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db),
 ):
-    """(Técnico) Retorna o checklist do dia. Se não existir, ele é replicado do dia anterior."""
-    if not crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, data):
-        raise HTTPException(status_code=403, detail="Leitura do Plano Ativo pendente para hoje.")
+    """
+    (Técnico, Profissional ou Admin) Retorna o checklist do dia. Se não existir, ele é replicado do dia anterior.
+    A permissão de acesso é validada pela dependência 'get_paciente_autorizado'.
+    A regra de 'confirmação de leitura pendente' é aplicada apenas no endpoint de alteração (PATCH) para não bloquear a visualização por Enfermeiros e Admins.
+    """
     return crud.listar_checklist_diario_com_replicacao(db, paciente_id, data, negocio_id)
 
 @app.patch("/pacientes/{paciente_id}/checklist-diario/{item_id}", response_model=schemas.ChecklistItemDiarioResponse, tags=["Fluxo do Técnico"])
