@@ -2202,18 +2202,6 @@ def registrar_confirmacao_leitura_plano(db: firestore.client, paciente_id: str, 
     confirmacao_dict['id'] = doc_ref.id
     return confirmacao_dict
 
-def verificar_leitura_plano_do_dia(db: firestore.client, paciente_id: str, tecnico_id: str, data: date) -> bool:
-    """Verifica se a leitura do plano de cuidado já foi confirmada pelo técnico em um dia específico."""
-    data_inicio_dia = datetime.combine(data, datetime.min.time())
-    data_fim_dia = datetime.combine(data, datetime.max.time())
-    
-    query = db.collection('usuarios').document(paciente_id).collection('confirmacoes_leitura')\
-        .where('usuario_id', '==', tecnico_id)\
-        .where('data_confirmacao', '>=', data_inicio_dia)\
-        .where('data_confirmacao', '<=', data_fim_dia)\
-        .limit(1)
-        
-    return len(list(query.stream())) > 0
 
 # =================================================================================
 # FUNÇÕES DO DIÁRIO DE ACOMPANHAMENTO ESTRUTURADO
@@ -2340,15 +2328,36 @@ def registrar_confirmacao_leitura_plano(db: firestore.client, paciente_id: str, 
     confirmacao_dict['id'] = doc_ref.id
     return confirmacao_dict
 
-def verificar_leitura_plano_do_dia(db: firestore.client, paciente_id: str, tecnico_id: str, data: date) -> bool:
-    """Verifica se a confirmação de leitura já foi feita para bloquear/liberar as funções."""
+# Substitua as DUAS versões antigas por esta ÚNICA versão correta
+def verificar_leitura_plano_do_dia(db: firestore.client, paciente_id: str, tecnico_id: str, data: date) -> dict:
+    """
+    Verifica se a leitura do plano já foi confirmada hoje e retorna o status e a data.
+    """
     data_inicio_dia = datetime.combine(data, datetime.min.time())
     data_fim_dia = datetime.combine(data, datetime.max.time())
+    
     query = db.collection('usuarios').document(paciente_id).collection('confirmacoes_leitura')\
         .where('usuario_id', '==', tecnico_id)\
         .where('data_confirmacao', '>=', data_inicio_dia)\
-        .where('data_confirmacao', '<=', data_fim_dia).limit(1)
-    return len(list(query.stream())) > 0
+        .where('data_confirmacao', '<=', data_fim_dia)\
+        .order_by('data_confirmacao', direction=firestore.Query.DESCENDING)\
+        .limit(1)
+        
+    docs = list(query.stream())
+    
+    if not docs:
+        return {
+            "leitura_confirmada": False,
+            "ultima_leitura": None
+        }
+    
+    ultima_leitura_doc = docs[0].to_dict()
+    data_confirmacao = ultima_leitura_doc.get("data_confirmacao")
+    
+    return {
+        "leitura_confirmada": True,
+        "ultima_leitura": data_confirmacao.isoformat() if data_confirmacao else None
+    }
 
 def listar_checklist_diario_com_replicacao(db: firestore.client, paciente_id: str, dia: date, negocio_id: str) -> List[Dict]:
     """Busca o checklist do dia. Se não existir, replica o do dia anterior, como definido na estratégia."""

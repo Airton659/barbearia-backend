@@ -1473,8 +1473,9 @@ def confirmar_leitura_status_alias(
     db: firestore.client = Depends(get_db)
 ):
     """Alias: verifica o status de leitura (equivalente a /verificar-leitura-plano)."""
-    leitura_confirmada = crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, data)
-    return {"leitura_confirmada": leitura_confirmada}
+    # Esta linha agora retorna o objeto JSON completo que o app precisa.
+    status_leitura = crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, data)
+    return status_leitura
 
 @app.get("/pacientes/{paciente_id}/checklist-diario", response_model=List[schemas.ChecklistItemDiarioResponse], tags=["Fluxo do Técnico"])
 def get_checklist_diario(
