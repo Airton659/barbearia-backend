@@ -1813,6 +1813,21 @@ def listar_orientacoes(db: firestore.client, paciente_id: str, consulta_id: str)
         logger.error(f"Erro ao listar orientações do paciente {paciente_id}: {e}")
     return orientacoes
 
+
+def _dedup_checklist_items(itens: List[Dict]) -> List[Dict]:
+    """Remove duplicatas do checklist usando uma chave normalizada (descricao/descricao_item).
+    Mantém a ordem de aparição (estável)."""
+    vistos = set()
+    resultado = []
+    for it in itens or []:
+        desc = (it.get('descricao_item') or it.get('descricao') or '').strip().lower()
+        chave = desc if desc else f"__id__:{it.get('id','')}"
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        resultado.append(it)
+    return resultado
+
 def get_ficha_completa_paciente(db: firestore.client, paciente_id: str, consulta_id: Optional[str] = None) -> Dict:
     """
     Retorna um dicionário com todos os dados da ficha do paciente,
@@ -1843,6 +1858,8 @@ def get_ficha_completa_paciente(db: firestore.client, paciente_id: str, consulta
         "checklist": listar_checklist(db, paciente_id, consulta_id=ultima_consulta_id),
         "orientacoes": listar_orientacoes(db, paciente_id, consulta_id=ultima_consulta_id),
     }
+    # Garantir checklist sem duplicatas (modelo + diário)
+    ficha['checklist'] = _dedup_checklist_items(ficha.get('checklist', []))
     return ficha
 
 # =================================================================================

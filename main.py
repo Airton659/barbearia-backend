@@ -356,7 +356,7 @@ def get_ficha_completa(
             "consultas": crud.listar_consultas(db, paciente_id),
             "exames": crud.listar_exames(db, paciente_id, consulta_id),
             "medicacoes": crud.listar_medicacoes(db, paciente_id, consulta_id),
-            "checklist": crud.listar_checklist(db, paciente_id, consulta_id),
+            "checklist": crud._dedup_checklist_items(crud.listar_checklist(db, paciente_id, consulta_id)),
             "orientacoes": crud.listar_orientacoes(db, paciente_id, consulta_id),
         }
     return crud.get_ficha_completa_paciente(db, paciente_id)
@@ -1450,6 +1450,29 @@ def verificar_leitura_plano(
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Verifica se a leitura foi confirmada para liberar as outras funções do dia."""
+    leitura_confirmada = crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, data)
+    return {"leitura_confirmada": leitura_confirmada}
+
+@app.post("/pacientes/{paciente_id}/confirmar-leitura", response_model=schemas.ConfirmacaoLeituraResponse, tags=["Fluxo do Técnico"])
+def confirmar_leitura_alias(
+    paciente_id: str,
+    confirmacao: schemas.ConfirmacaoLeituraCreate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    db: firestore.client = Depends(get_db)
+):
+    """Alias: confirma a leitura do plano (mesma lógica de /confirmar-leitura-plano)."""
+    if confirmacao.usuario_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Acesso negado: o usuario_id deve ser o do técnico autenticado.")
+    return crud.registrar_confirmacao_leitura_plano(db, paciente_id, confirmacao)
+
+@app.get("/pacientes/{paciente_id}/confirmar-leitura/status", tags=["Fluxo do Técnico"])
+def confirmar_leitura_status_alias(
+    paciente_id: str,
+    data: date = Query(..., description="Data para verificar a leitura (formato: YYYY-MM-DD)."),
+    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    db: firestore.client = Depends(get_db)
+):
+    """Alias: verifica o status de leitura (equivalente a /verificar-leitura-plano)."""
     leitura_confirmada = crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, data)
     return {"leitura_confirmada": leitura_confirmada}
 
