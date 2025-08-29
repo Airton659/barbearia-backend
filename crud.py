@@ -2605,25 +2605,18 @@ def listar_registros_diario_estruturado(
 ) -> List[schemas.RegistroDiarioResponse]:
     """
     Lista os registros diários estruturados de um paciente.
-    Corrige os erros de validação sem adulterar o 'tipo' salvo no documento.
-    Se o 'conteudo' não bater com o tipo, preenche campos obrigatórios com
-    valores vazios/sensatos para não quebrar o app e manter os CAMPOS do tipo original.
+    AGORA CORRIGIDO: Lida de forma robusta com registros antigos (estruturados)
+    e novos (texto livre), sem depender de schemas que foram removidos,
+    convertendo todos para o formato de anotação simples.
     """
     registros_pydantic: List[schemas.RegistroDiarioResponse] = []
     try:
         coll_ref = db.collection('usuarios').document(paciente_id).collection('registros_diarios_estruturados')
-        # ordena por data (mais recentes primeiro)
-        try:
-            query = coll_ref.order_by('data_registro', direction=firestore.Query.DESCENDING)
-        except Exception:
-            # alguns emuladores/bancos não aceitam order_by antes do where
-            query = coll_ref
+        query = coll_ref.order_by('data_registro', direction=firestore.Query.DESCENDING)
 
-        # filtro por tipo se enviado
         if tipo:
             query = query.where('tipo', '==', tipo)
 
-        # filtro por data (dentro do dia em UTC)
         if data:
             inicio = datetime.combine(data, time.min)
             fim = datetime.combine(data, time.max)
@@ -2636,61 +2629,36 @@ def listar_registros_diario_estruturado(
             d = doc.to_dict() or {}
             d['id'] = doc.id
 
-            tipo_salvo = d.get('tipo')
             conteudo_bruto = d.get('conteudo', {}) or {}
+            descricao_final = ""
 
-            # --- valida o conteudo respeitando o TIPO SALVO ---
-            def _coerce_for_tipo(tipo_salvo: str, bruto: Dict) -> BaseModel:
-                try:
-                    if tipo_salvo == 'sinais_vitais':
-                        return schemas.SinaisVitaisConteudo.model_validate(bruto)
-                    elif tipo_salvo == 'medicacao':
-                        try:
-                            return schemas.MedicacaoConteudo.model_validate(bruto)
-                        except Exception:
-                            # Monta mínimo viável preservando o que der
-                            return schemas.MedicacaoConteudo(
-                                nome=str(bruto.get('nome') or ''),
-                                dose=str(bruto.get('dose') or ''),
-                                status=str(bruto.get('status') or 'pendente'),
-                                observacoes=bruto.get('observacoes') or bruto.get('descricao')
-                            )
-                    elif tipo_salvo == 'atividade':
-                        try:
-                            return schemas.AtividadeConteudo.model_validate(bruto)
-                        except Exception:
-                            return schemas.AtividadeConteudo(
-                                nome_atividade=bruto.get('nome_atividade'),
-                                duracao_minutos=bruto.get('duracao_minutos'),
-                                descricao=bruto.get('descricao')
-                            )
-                    elif tipo_salvo == 'anotacao':
-                        try:
-                            return schemas.AnotacaoConteudo.model_validate(bruto)
-                        except Exception:
-                            return schemas.AnotacaoConteudo(
-                                descricao=str(bruto.get('descricao') or '')
-                            )
-                    elif tipo_salvo == 'intercorrencia':
-                        try:
-                            return schemas.IntercorrenciaConteudo.model_validate(bruto)
-                        except Exception:
-                            return schemas.IntercorrenciaConteudo(
-                                tipo=str(bruto.get('tipo') or 'indefinido'),
-                                descricao=str(bruto.get('descricao') or ''),
-                                comunicado_enfermeiro=bool(bruto.get('comunicado_enfermeiro') or False)
-                            )
-                    else:
-                        # tipo desconhecido -> devolve como sinais vitais (campos livres) para não quebrar
-                        return schemas.SinaisVitaisConteudo.model_validate(bruto)
-                except Exception:
-                    # pior caso: sempre retorna um objeto válido de sinais vitais
-                    return schemas.SinaisVitaisConteudo()
+            # Lógica para converter QUALQUER formato de 'conteudo' para uma 'descricao' simples
+            if 'descricao' in conteudo_bruto:
+                # Se for um registro novo ou um antigo que já tinha descrição, usa ela
+                descricao_final = conteudo_bruto.get('descricao', '')
+            else:
+                # Se for um registro antigo e estruturado, monta uma descrição a partir dos dados
+                partes = []
+                if 'pressao_sistolica' in conteudo_bruto:
+                    partes.append(f"PA: {conteudo_bruto.get('pressao_sistolica')}/{conteudo_bruto.get('pressao_diastolica')}")
+                if 'temperatura' in conteudo_bruto:
+                    partes.append(f"Temp: {conteudo_bruto.get('temperatura')}°C")
+                if 'batimentos_cardiacos' in conteudo_bruto:
+                    partes.append(f"FC: {conteudo_bruto.get('batimentos_cardiacos')} bpm")
+                if 'saturacao_oxigenio' in conteudo_bruto:
+                    partes.append(f"Sat O²: {conteudo_bruto.get('saturacao_oxigenio')}%")
+                if 'nome' in conteudo_bruto: # Para medicação antiga
+                    partes.append(f"Medicamento: {conteudo_bruto.get('nome')} ({conteudo_bruto.get('dose')})")
+                
+                descricao_final = ", ".join(filter(None, partes))
+                if not descricao_final:
+                    descricao_final = "Registro estruturado antigo sem descrição."
 
-            conteudo_validado = _coerce_for_tipo(tipo_salvo, conteudo_bruto)
+            # Monta o objeto de conteúdo final, que é sempre uma anotação simples
+            conteudo_final = schemas.AnotacaoConteudo(descricao=descricao_final)
 
-            # monta o objeto 'tecnico'
-            tecnico_id = d.pop('tecnico_id', None)
+            # Monta o objeto 'tecnico' (lógica reaproveitada)
+            tecnico_id = d.get('tecnico_id')
             tecnico_perfil = None
             if tecnico_id:
                 if tecnico_id in tecnicos_cache:
@@ -2699,33 +2667,33 @@ def listar_registros_diario_estruturado(
                     tdoc = db.collection('usuarios').document(tecnico_id).get()
                     if tdoc.exists:
                         tdat = tdoc.to_dict() or {}
-                        tecnico_perfil = {
-                            'id': tdoc.id,
-                            'nome': tdat.get('nome', 'Nome não disponível'),
-                            'email': tdat.get('email', 'Email não disponível'),
-                        }
+                        tecnico_perfil = {'id': tdoc.id, 'nome': tdat.get('nome'), 'email': tdat.get('email')}
                     else:
                         tecnico_perfil = {'id': tecnico_id, 'nome': 'Técnico Desconhecido', 'email': ''}
                     tecnicos_cache[tecnico_id] = tecnico_perfil
-
+            
+            # Constrói a resposta final
             registro_data = {
                 'id': d['id'],
                 'negocio_id': d.get('negocio_id'),
                 'paciente_id': d.get('paciente_id'),
                 'tecnico': tecnico_perfil or {'id': '', 'nome': '', 'email': ''},
                 'data_registro': d.get('data_registro'),
-                'tipo': tipo_salvo or 'anotacao',
-                'conteudo': conteudo_validado
+                'tipo': d.get('tipo', 'anotacao'),
+                'conteudo': conteudo_final
             }
 
             try:
+                # Valida com o schema de resposta, que agora espera AnotacaoConteudo
                 registros_pydantic.append(schemas.RegistroDiarioResponse.model_validate(registro_data))
             except Exception as e:
                 logger.error(f"Falha ao montar o modelo de resposta final para o registro {doc.id}: {e}")
 
     except Exception as e:
         logger.error(f"Erro ao listar registros estruturados para o paciente {paciente_id}: {e}")
+        # O erro original acontecia aqui. Agora a exceção é mais genérica.
         raise HTTPException(status_code=500, detail=f"Erro ao consultar o banco de dados: {e}")
+        
     return registros_pydantic
 
 def atualizar_registro_diario_estruturado(
