@@ -1,23 +1,22 @@
 steps:
   # 1. Constrói a imagem Docker
-  # Este passo executa o "docker build"
 - name: 'gcr.io/cloud-builders/docker'
   args:
     - 'build'
     - '--no-cache'
     - '-t'
-    - 'southamerica-east1-docker.pkg.dev/barbearia-backend-gc/barbearia-repo/barbearia-app:latest'
+    # ALTERAÇÃO AQUI: troque 'barbearia-backend-gc' pelo seu novo ID de projeto
+    - 'southamerica-east1-docker.pkg.dev/teste-notificacao-barbearia/barbearia-repo/barbearia-app:latest'
     - '.'
 
   # 2. Envia a imagem para o Artifact Registry
-  # Este passo executa o "docker push"
 - name: 'gcr.io/cloud-builders/docker'
   args:
     - 'push'
-    - 'southamerica-east1-docker.pkg.dev/barbearia-backend-gc/barbearia-repo/barbearia-app:latest'
+    # ALTERAÇÃO AQUI: troque 'barbearia-backend-gc' pelo seu novo ID de projeto
+    - 'southamerica-east1-docker.pkg.dev/teste-notificacao-barbearia/barbearia-repo/barbearia-app:latest'
 
   # 3. Faz o deploy da nova imagem no Google Cloud Run
-  # Este passo executa o "gcloud run deploy" com todas as suas configurações
 - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
   entrypoint: 'gcloud'
   args:
@@ -25,7 +24,8 @@ steps:
     - 'deploy'
     - 'barbearia-backend-service'
     - '--image'
-    - 'southamerica-east1-docker.pkg.dev/barbearia-backend-gc/barbearia-repo/barbearia-app:latest'
+    # ALTERAÇÃO AQUI: troque 'barbearia-backend-gc' pelo seu novo ID de projeto
+    - 'southamerica-east1-docker.pkg.dev/teste-notificacao-barbearia/barbearia-repo/barbearia-app:latest'
     - '--platform'
     - 'managed'
     - '--region'
@@ -34,12 +34,14 @@ steps:
     - '--set-secrets'
     - 'FIREBASE_ADMIN_CREDENTIALS=firebase-admin-credentials:latest'
     - '--set-env-vars'
+    # Verifique se o nome do bucket é o mesmo que você criou na Etapa 1.4
     - 'CLOUD_STORAGE_BUCKET_NAME=barbearia-app-fotos,GCP_PROJECT_ID=teste-notificacao-barbearia'
 
-# Define a imagem que foi construída para que possa ser usada em outros passos ou registros
+# Define a imagem que foi construída
 images:
-  - 'southamerica-east1-docker.pkg.dev/barbearia-backend-gc/barbearia-repo/barbearia-app:latest'
+  # ALTERAÇÃO AQUI: troque 'barbearia-backend-gc' pelo seu novo ID de projeto
+  - 'southamerica-east1-docker.pkg.dev/teste-notificacao-barbearia/barbearia-repo/barbearia-app:latest'
 
-# Adiciona a configuração de logging para resolver o erro do build
+# Adiciona a configuração de logging
 options:
   logging: CLOUD_LOGGING_ONLY
