@@ -44,4 +44,4 @@ images:
 
 # Adiciona a configuração de logging
 options:
-  logging: CLOUD_LOGGING_ONLY
+  logging: CLOUD_LOGGING_ONLY 
