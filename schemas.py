@@ -398,51 +398,61 @@ class DiarioTecnicoUpdate(BaseModel):
 
 # --- Início da Correção de Registros Diários ---
 
-class SinaisVitaisConteudo(BaseModel):
-    pressao_sistolica: Optional[int] = None
-    pressao_diastolica: Optional[int] = None
-    temperatura: Optional[float] = None
-    batimentos_cardiacos: Optional[int] = None
-    saturacao_oxigenio: Optional[float] = None
+# class SinaisVitaisConteudo(BaseModel):
+#     pressao_sistolica: Optional[int] = None
+#     pressao_diastolica: Optional[int] = None
+#     temperatura: Optional[float] = None
+#     batimentos_cardiacos: Optional[int] = None
+#     saturacao_oxigenio: Optional[float] = None
 
-class MedicacaoConteudo(BaseModel):
-    nome: str
-    dose: str
-    status: str
-    observacoes: Optional[str] = None
+# class MedicacaoConteudo(BaseModel):
+#     nome: str
+#     dose: str
+#     status: str
+#     observacoes: Optional[str] = None
 
 class AnotacaoConteudo(BaseModel):
     # Usado para tipos como 'anotacao' e 'atividade'
     descricao: str
 
 
-class AtividadeConteudo(BaseModel):
-    # Estrutura específica para o tipo 'atividade'
-    nome_atividade: str
-    descricao: Optional[str] = None
-    duracao_minutos: int
-    observacoes: Optional[str] = None
+# class AtividadeConteudo(BaseModel):
+#     # Estrutura específica para o tipo 'atividade'
+#     nome_atividade: str
+#     descricao: Optional[str] = None
+#     duracao_minutos: int
+#     observacoes: Optional[str] = None
 
-class IntercorrenciaConteudo(BaseModel):
-    # Estrutura específica para o tipo 'intercorrencia' conforme o log
-    tipo: str  # e.g., 'grave'
-    descricao: str
-    comunicado_enfermeiro: bool
+# class IntercorrenciaConteudo(BaseModel):
+#     # Estrutura específica para o tipo 'intercorrencia' conforme o log
+#     tipo: str  # e.g., 'grave'
+#     descricao: str
+#     comunicado_enfermeiro: bool
 
-# Union atualizada para incluir os novos modelos de conteúdo.
-# Pydantic tentará validar o payload contra os modelos nesta ordem.
-RegistroDiarioConteudo = Union[
-    IntercorrenciaConteudo,
-    AtividadeConteudo,
-    AnotacaoConteudo,
-    MedicacaoConteudo,
-    SinaisVitaisConteudo
-]
+# # Union atualizada para incluir os novos modelos de conteúdo.
+# # Pydantic tentará validar o payload contra os modelos nesta ordem.
+# RegistroDiarioConteudo = Union[
+#     IntercorrenciaConteudo,
+#     AtividadeConteudo,
+#     AnotacaoConteudo,
+#     MedicacaoConteudo,
+#     SinaisVitaisConteudo
+# ]
+
+# class RegistroDiarioCreate(BaseModel):
+#     negocio_id: str
+#     paciente_id: str
+#     tipo: str = Field(..., description="O tipo do registro (ex: 'sinais_vitais', 'medicacao', 'anotacao', 'intercorrencia', 'atividade').")
+#     conteudo: RegistroDiarioConteudo
+RegistroDiarioConteudo = AnotacaoConteudo
 
 class RegistroDiarioCreate(BaseModel):
     negocio_id: str
     paciente_id: str
-    tipo: str = Field(..., description="O tipo do registro (ex: 'sinais_vitais', 'medicacao', 'anotacao', 'intercorrencia', 'atividade').")
+    tipo: str = Field(..., description="O tipo do registro (ex: 'sinais_vitais', 'medicacao', 'anotacao').")
+    # Adiciona o timestamp enviado pelo app
+    data_hora: datetime = Field(..., description="Timestamp exato do evento, enviado pelo app.")
+    # Usa o novo modelo de conteúdo simplificado
     conteudo: RegistroDiarioConteudo
 
 class RegistroDiarioResponse(BaseModel):

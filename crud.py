@@ -2490,61 +2490,112 @@ def get_checklist_diario_plano_ativo(db: firestore.client, paciente_id: str, dia
 # FUNÇÕES DE REGISTROS DIÁRIOS ESTRUTURADOS
 # =================================================================================
 
+# def criar_registro_diario_estruturado(db: firestore.client, registro_data: schemas.RegistroDiarioCreate, tecnico_id: str) -> Dict:
+#     """
+#     Adiciona um novo registro estruturado ao diário de acompanhamento de um paciente.
+#     Agora valida que 'conteudo' é compatível com o 'tipo' informado; caso contrário, retorna 422.
+#     """
+#     # Revalida o conteudo de acordo com o tipo escolhido (para evitar documentos corrompidos)
+#     try:
+#         tipo = registro_data.tipo
+#         bruto = registro_data.conteudo if isinstance(registro_data.conteudo, dict) else registro_data.conteudo.model_dump()
+#         if tipo == 'sinais_vitais':
+#             conteudo_ok = schemas.SinaisVitaisConteudo.model_validate(bruto)
+#         elif tipo == 'medicacao':
+#             conteudo_ok = schemas.MedicacaoConteudo.model_validate(bruto)
+#         elif tipo == 'atividade':
+#             conteudo_ok = schemas.AtividadeConteudo.model_validate(bruto)
+#         elif tipo == 'anotacao':
+#             conteudo_ok = schemas.AnotacaoConteudo.model_validate(bruto)
+#         elif tipo == 'intercorrencia':
+#             conteudo_ok = schemas.IntercorrenciaConteudo.model_validate(bruto)
+#         else:
+#             raise ValueError(f"Tipo de registro desconhecido: {tipo}")
+#     except Exception as e:
+#         raise HTTPException(status_code=422, detail=f"Conteúdo incompatível com o tipo '{registro_data.tipo}': {e}")
+
+#     # Monta o dicionário para salvar no Firestore
+#     registro_dict_para_salvar = {
+#         "negocio_id": registro_data.negocio_id,
+#         "paciente_id": registro_data.paciente_id,
+#         "tipo": tipo,
+#         "conteudo": conteudo_ok.model_dump(),
+#         "tecnico_id": tecnico_id,
+#         "data_registro": datetime.utcnow(),
+#     }
+
+#     # Salva o documento no banco de dados
+#     paciente_ref = db.collection('usuarios').document(registro_data.paciente_id)
+#     doc_ref = paciente_ref.collection('registros_diarios_estruturados').document()
+#     doc_ref.set(registro_dict_para_salvar)
+
+#     # Monta o técnico (objeto reduzido)
+#     tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
+#     if tecnico_doc.exists:
+#         tdat = tecnico_doc.to_dict() or {}
+#         tecnico_perfil = {
+#             "id": tecnico_doc.id,
+#             "nome": tdat.get('nome', 'Nome não disponível'),
+#             "email": tdat.get('email', 'Email não disponível'),
+#         }
+#     else:
+#         tecnico_perfil = {"id": tecnico_id, "nome": "Técnico Desconhecido", "email": ""}
+
+#     resposta_dict = registro_dict_para_salvar.copy()
+#     resposta_dict['id'] = doc_ref.id
+#     resposta_dict['tecnico'] = tecnico_perfil
+#     return resposta_dict
+
+# Em crud.py, substitua a função inteira por esta:
+
 def criar_registro_diario_estruturado(db: firestore.client, registro_data: schemas.RegistroDiarioCreate, tecnico_id: str) -> Dict:
     """
     Adiciona um novo registro estruturado ao diário de acompanhamento de um paciente.
-    Agora valida que 'conteudo' é compatível com o 'tipo' informado; caso contrário, retorna 422.
+    AGORA SIMPLIFICADO: Aceita um payload de texto livre para todos os tipos e
+    respeita o timestamp enviado pelo cliente.
     """
-    # Revalida o conteudo de acordo com o tipo escolhido (para evitar documentos corrompidos)
     try:
-        tipo = registro_data.tipo
-        bruto = registro_data.conteudo if isinstance(registro_data.conteudo, dict) else registro_data.conteudo.model_dump()
-        if tipo == 'sinais_vitais':
-            conteudo_ok = schemas.SinaisVitaisConteudo.model_validate(bruto)
-        elif tipo == 'medicacao':
-            conteudo_ok = schemas.MedicacaoConteudo.model_validate(bruto)
-        elif tipo == 'atividade':
-            conteudo_ok = schemas.AtividadeConteudo.model_validate(bruto)
-        elif tipo == 'anotacao':
-            conteudo_ok = schemas.AnotacaoConteudo.model_validate(bruto)
-        elif tipo == 'intercorrencia':
-            conteudo_ok = schemas.IntercorrenciaConteudo.model_validate(bruto)
-        else:
-            raise ValueError(f"Tipo de registro desconhecido: {tipo}")
-    except Exception as e:
-        raise HTTPException(status_code=422, detail=f"Conteúdo incompatível com o tipo '{registro_data.tipo}': {e}")
+        # A validação agora é feita diretamente pelo Pydantic no schema.
+        # O conteúdo sempre será do tipo AnotacaoConteudo.
+        conteudo_ok = registro_data.conteudo
 
-    # Monta o dicionário para salvar no Firestore
-    registro_dict_para_salvar = {
-        "negocio_id": registro_data.negocio_id,
-        "paciente_id": registro_data.paciente_id,
-        "tipo": tipo,
-        "conteudo": conteudo_ok.model_dump(),
-        "tecnico_id": tecnico_id,
-        "data_registro": datetime.utcnow(),
-    }
-
-    # Salva o documento no banco de dados
-    paciente_ref = db.collection('usuarios').document(registro_data.paciente_id)
-    doc_ref = paciente_ref.collection('registros_diarios_estruturados').document()
-    doc_ref.set(registro_dict_para_salvar)
-
-    # Monta o técnico (objeto reduzido)
-    tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
-    if tecnico_doc.exists:
-        tdat = tecnico_doc.to_dict() or {}
-        tecnico_perfil = {
-            "id": tecnico_doc.id,
-            "nome": tdat.get('nome', 'Nome não disponível'),
-            "email": tdat.get('email', 'Email não disponível'),
+        # Monta o dicionário para salvar no Firestore
+        registro_dict_para_salvar = {
+            "negocio_id": registro_data.negocio_id,
+            "paciente_id": registro_data.paciente_id,
+            "tipo": registro_data.tipo,
+            "conteudo": conteudo_ok.model_dump(),
+            "tecnico_id": tecnico_id,
+            # CORREÇÃO: Usa o timestamp enviado pelo app em vez de gerar um novo.
+            "data_registro": registro_data.data_hora,
         }
-    else:
-        tecnico_perfil = {"id": tecnico_id, "nome": "Técnico Desconhecido", "email": ""}
 
-    resposta_dict = registro_dict_para_salvar.copy()
-    resposta_dict['id'] = doc_ref.id
-    resposta_dict['tecnico'] = tecnico_perfil
-    return resposta_dict
+        # Salva o documento no banco de dados
+        paciente_ref = db.collection('usuarios').document(registro_data.paciente_id)
+        doc_ref = paciente_ref.collection('registros_diarios_estruturados').document()
+        doc_ref.set(registro_dict_para_salvar)
+
+        # Monta o técnico (objeto reduzido) para a resposta da API
+        tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
+        if tecnico_doc.exists:
+            tdat = tecnico_doc.to_dict() or {}
+            tecnico_perfil = {
+                "id": tecnico_doc.id,
+                "nome": tdat.get('nome', 'Nome não disponível'),
+                "email": tdat.get('email', 'Email não disponível'),
+            }
+        else:
+            tecnico_perfil = {"id": tecnico_id, "nome": "Técnico Desconhecido", "email": ""}
+
+        resposta_dict = registro_dict_para_salvar.copy()
+        resposta_dict['id'] = doc_ref.id
+        resposta_dict['tecnico'] = tecnico_perfil
+        return resposta_dict
+
+    except Exception as e:
+        # Mantém um tratamento de erro genérico caso algo inesperado aconteça
+        logger.error(f"Erro inesperado ao criar registro diário estruturado: {e}")
+        raise HTTPException(status_code=500, detail=f"Ocorreu um erro interno no servidor: {e}")
 
 def listar_registros_diario_estruturado(
     db: firestore.client,
