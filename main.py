@@ -1487,11 +1487,13 @@ def get_checklist_diario(
     db: firestore.client = Depends(get_db),
 ):
     """
-    (Técnico, Profissional ou Admin) Retorna o checklist do dia. Se não existir, ele é replicado do dia anterior.
-    A permissão de acesso é validada pela dependência 'get_paciente_autorizado'.
-    A regra de 'confirmação de leitura pendente' é aplicada apenas no endpoint de alteração (PATCH) para não bloquear a visualização por Enfermeiros e Admins.
+    (Técnico, Profissional ou Admin) Retorna o checklist do dia, baseado EXCLUSIVAMENTE no plano de cuidado mais recente.
+    Se o plano mais recente não tiver checklist, retorna uma lista vazia.
+    Se não existir, o checklist do dia é replicado a partir do plano ativo.
     """
-    return crud.listar_checklist_diario_com_replicacao(db, paciente_id, data, negocio_id)
+    # ALTERAÇÃO AQUI: Chame a nova função corrigida
+    return crud.get_checklist_diario_plano_ativo(db, paciente_id, data, negocio_id)
+
 
 @app.patch("/pacientes/{paciente_id}/checklist-diario/{item_id}", response_model=schemas.ChecklistItemDiarioResponse, tags=["Fluxo do Técnico"])
 def update_checklist_item_diario(
