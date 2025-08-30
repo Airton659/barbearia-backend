@@ -98,22 +98,41 @@ def listar_clientes_do_negocio(
     """(Admin de Negócio) Lista todos os usuários com o papel de 'cliente' no seu negócio."""
     return crud.admin_listar_clientes_por_negocio(db, negocio_id, status)
 
-@app.patch("/negocios/{negocio_id}/pacientes/{paciente_id}/status", response_model=schemas.UsuarioProfile, tags=["Admin - Gestão do Negócio"])
-def set_paciente_status(
-    paciente_id: str,
+# @app.patch("/negocios/{negocio_id}/pacientes/{paciente_id}/status", response_model=schemas.UsuarioProfile, tags=["Admin - Gestão do Negócio"])
+# def set_paciente_status(
+#     paciente_id: str,
+#     status_update: schemas.StatusUpdateRequest,
+#     negocio_id: str = Depends(validate_path_negocio_id),
+#     admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+#     db: firestore.client = Depends(get_db)
+# ):
+#     """(Admin de Negócio) Define o status de um paciente como 'ativo' ou 'arquivado'."""
+#     try:
+#         paciente_atualizado = crud.admin_set_paciente_status(
+#             db, negocio_id, paciente_id, status_update.status, admin.firebase_uid
+#         )
+#         if not paciente_atualizado:
+#             raise HTTPException(status_code=404, detail="Paciente não encontrado.")
+#         return paciente_atualizado
+#     except ValueError as e:
+#         raise HTTPException(status_code=400, detail=str(e))
+
+@app.patch("/negocios/{negocio_id}/usuarios/{user_id}/status", response_model=schemas.UsuarioProfile, tags=["Admin - Gestão do Negócio"])
+def set_usuario_status(
+    user_id: str,
     status_update: schemas.StatusUpdateRequest,
     negocio_id: str = Depends(validate_path_negocio_id),
     admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
     db: firestore.client = Depends(get_db)
 ):
-    """(Admin de Negócio) Define o status de um paciente como 'ativo' ou 'arquivado'."""
+    """(Admin de Negócio) Define o status de um usuário como 'ativo' ou 'inativo'."""
     try:
-        paciente_atualizado = crud.admin_set_paciente_status(
-            db, negocio_id, paciente_id, status_update.status, admin.firebase_uid
+        usuario_atualizado = crud.admin_set_usuario_status(
+            db, negocio_id, user_id, status_update.status, admin.firebase_uid
         )
-        if not paciente_atualizado:
-            raise HTTPException(status_code=404, detail="Paciente não encontrado.")
-        return paciente_atualizado
+        if not usuario_atualizado:
+            raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+        return usuario_atualizado
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -199,19 +218,38 @@ def delete_medico_endpoint(
         raise HTTPException(status_code=404, detail="Médico não encontrado ou não pertence a este negócio.")
     return
 
+# @app.post("/negocios/{negocio_id}/vincular-paciente", response_model=schemas.UsuarioProfile, tags=["Admin - Gestão do Negócio"])
+# def vincular_paciente(
+#     vinculo_data: schemas.VinculoCreate,
+#     negocio_id: str = Depends(validate_path_negocio_id),
+#     current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+#     db: firestore.client = Depends(get_db)
+# ):
+#     """(Admin de Negócio ou Enfermeiro) Vincula um paciente a um enfermeiro."""
+#     paciente_atualizado = crud.vincular_paciente_enfermeiro(
+#         db,
+#         negocio_id=negocio_id,
+#         paciente_id=vinculo_data.paciente_id,
+#         enfermeiro_id=vinculo_data.enfermeiro_id,
+#         autor_uid=current_user.firebase_uid
+#     )
+#     if not paciente_atualizado:
+#         raise HTTPException(status_code=404, detail="Paciente ou enfermeiro não encontrado.")
+#     return paciente_atualizado
+
 @app.post("/negocios/{negocio_id}/vincular-paciente", response_model=schemas.UsuarioProfile, tags=["Admin - Gestão do Negócio"])
-def vincular_paciente(
+def vincular_ou_desvincular_paciente( # Nome alterado para clareza
     vinculo_data: schemas.VinculoCreate,
     negocio_id: str = Depends(validate_path_negocio_id),
     current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
-    """(Admin de Negócio ou Enfermeiro) Vincula um paciente a um enfermeiro."""
+    """(Admin ou Enfermeiro) Vincula um paciente a um enfermeiro ou desvincula ao enviar 'enfermeiro_id' como null."""
     paciente_atualizado = crud.vincular_paciente_enfermeiro(
         db,
         negocio_id=negocio_id,
         paciente_id=vinculo_data.paciente_id,
-        enfermeiro_id=vinculo_data.enfermeiro_id,
+        enfermeiro_id=vinculo_data.enfermeiro_id, # pode ser null
         autor_uid=current_user.firebase_uid
     )
     if not paciente_atualizado:
@@ -258,27 +296,47 @@ def vincular_tecnicos_ao_paciente(
         logger.error(f"Erro inesperado ao vincular técnicos: {e}")
         raise HTTPException(status_code=500, detail="Ocorreu um erro interno no servidor.")
 
+# @app.patch("/negocios/{negocio_id}/usuarios/{tecnico_id}/vincular-supervisor", response_model=schemas.UsuarioProfile, tags=["Admin - Gestão do Negócio"])
+# def vincular_supervisor_ao_tecnico(
+#     negocio_id: str = Depends(validate_path_negocio_id),
+#     tecnico_id: str = Path(..., description="ID do usuário (documento) do técnico a ser modificado."),
+#     vinculo_data: schemas.SupervisorVincularRequest = ...,
+#     admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+#     db: firestore.client = Depends(get_db)
+# ):
+#     """(Admin de Negócio) Vincula um enfermeiro supervisor a um técnico."""
+#     try:
+#         tecnico_atualizado = crud.vincular_supervisor_tecnico(
+#             db, tecnico_id, vinculo_data.supervisor_id, admin.firebase_uid
+#         )
+#         if not tecnico_atualizado:
+#             raise HTTPException(status_code=404, detail="Técnico ou supervisor não encontrado.")
+#         return tecnico_atualizado
+#     except ValueError as e:
+#         raise HTTPException(status_code=400, detail=str(e))
+#     except Exception as e:
+#         logger.error(f"Erro inesperado ao vincular supervisor: {e}")
+#         raise HTTPException(status_code=500, detail="Ocorreu um erro interno no servidor.")
+
 @app.patch("/negocios/{negocio_id}/usuarios/{tecnico_id}/vincular-supervisor", response_model=schemas.UsuarioProfile, tags=["Admin - Gestão do Negócio"])
-def vincular_supervisor_ao_tecnico(
+def vincular_ou_desvincular_supervisor( # Nome alterado para clareza
     negocio_id: str = Depends(validate_path_negocio_id),
-    tecnico_id: str = Path(..., description="ID do usuário (documento) do técnico a ser modificado."),
+    tecnico_id: str = Path(..., description="ID do usuário (documento) do técnico."),
     vinculo_data: schemas.SupervisorVincularRequest = ...,
     admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
     db: firestore.client = Depends(get_db)
 ):
-    """(Admin de Negócio) Vincula um enfermeiro supervisor a um técnico."""
+    """(Admin de Negócio) Vincula um supervisor a um técnico ou desvincula ao enviar 'supervisor_id' como null."""
     try:
         tecnico_atualizado = crud.vincular_supervisor_tecnico(
-            db, tecnico_id, vinculo_data.supervisor_id, admin.firebase_uid
+            db, tecnico_id, vinculo_data.supervisor_id, admin.firebase_uid # pode ser null
         )
         if not tecnico_atualizado:
             raise HTTPException(status_code=404, detail="Técnico ou supervisor não encontrado.")
         return tecnico_atualizado
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Erro inesperado ao vincular supervisor: {e}")
-        raise HTTPException(status_code=500, detail="Ocorreu um erro interno no servidor.")
+
 
 # =================================================================================
 # ENDPOINTS DA FICHA DO PACIENTE (Módulo Clínico)
@@ -1511,3 +1569,59 @@ def update_checklist_item_diario(
     if not item_atualizado:
         raise HTTPException(status_code=404, detail="Item do checklist não encontrado.")
     return item_atualizado
+
+
+# =================================================================================
+# 1. NOVOS ENDPOINTS: ANAMNESE
+# =================================================================================
+
+@app.post("/pacientes/{paciente_id}/anamnese", response_model=schemas.AnamneseEnfermagemResponse, status_code=status.HTTP_201_CREATED, tags=["Anamnese"])
+def criar_anamnese(
+    paciente_id: str,
+    anamnese_data: schemas.AnamneseEnfermagemCreate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin ou Enfermeiro) Cria uma nova ficha de anamnese para um paciente."""
+    return crud.criar_anamnese(db, paciente_id, anamnese_data)
+
+@app.get("/pacientes/{paciente_id}/anamnese", response_model=List[schemas.AnamneseEnfermagemResponse], tags=["Anamnese"])
+def listar_anamneses(
+    paciente_id: str,
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    db: firestore.client = Depends(get_db)
+):
+    """(Autorizado) Lista todas as fichas de anamnese de um paciente."""
+    return crud.listar_anamneses_por_paciente(db, paciente_id)
+
+@app.put("/anamnese/{anamnese_id}", response_model=schemas.AnamneseEnfermagemResponse, tags=["Anamnese"])
+def atualizar_anamnese(
+    anamnese_id: str,
+    paciente_id: str = Query(..., description="ID do paciente a quem a anamnese pertence."),
+    update_data: schemas.AnamneseEnfermagemUpdate = ...,
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin ou Enfermeiro) Atualiza uma ficha de anamnese existente."""
+    anamnese_atualizada = crud.atualizar_anamnese(db, anamnese_id, paciente_id, update_data)
+    if not anamnese_atualizada:
+        raise HTTPException(status_code=404, detail="Ficha de anamnese não encontrada.")
+    return anamnese_atualizada
+
+# =================================================================================
+# 2. NOVO ENDPOINT: ENDEREÇO
+# =================================================================================
+
+@app.put("/pacientes/{paciente_id}/endereco", response_model=schemas.UsuarioProfile, tags=["Pacientes"])
+def atualizar_endereco_paciente(
+    paciente_id: str,
+    endereco_data: schemas.EnderecoUpdate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin ou Enfermeiro) Adiciona ou atualiza o endereço de um paciente."""
+    paciente_atualizado = crud.atualizar_endereco_paciente(db, paciente_id, endereco_data)
+    if not paciente_atualizado:
+        raise HTTPException(status_code=404, detail="Paciente não encontrado.")
+    return paciente_atualizado
+    

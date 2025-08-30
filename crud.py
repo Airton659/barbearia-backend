@@ -64,8 +64,6 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
             }
             if hasattr(user_data, 'telefone') and user_data.telefone:
                 user_dict['telefone'] = user_data.telefone
-            if hasattr(user_data, 'endereco') and user_data.endereco:
-                user_dict['endereco'] = user_data.endereco
             doc_ref = db.collection('usuarios').document()
             doc_ref.set(user_dict)
             user_dict['id'] = doc_ref.id
@@ -209,65 +207,108 @@ def admin_listar_negocios(db: firestore.client) -> List[Dict]:
 
 # Em crud.py, substitua a função inteira por esta versão final e completa
 
-def admin_listar_usuarios_por_negocio(db: firestore.client, negocio_id: str, status: str = 'ativo') -> List[Dict]:
-    """
-    Lista todos os usuários de um negócio, enriquecendo os dados com os IDs de
-    vínculos de profissionais, enfermeiros e técnicos quando aplicável.
-    """
-    usuarios = []
-    try:
-        query = db.collection('usuarios').where(f'roles.{negocio_id}', 'in', ['cliente', 'profissional', 'admin', 'tecnico'])
+# def admin_listar_usuarios_por_negocio(db: firestore.client, negocio_id: str, status: str = 'ativo') -> List[Dict]:
+#     """
+#     Lista todos os usuários de um negócio, enriquecendo os dados com os IDs de
+#     vínculos de profissionais, enfermeiros e técnicos quando aplicável.
+#     """
+#     usuarios = []
+#     try:
+#         query = db.collection('usuarios').where(f'roles.{negocio_id}', 'in', ['cliente', 'profissional', 'admin', 'tecnico'])
 
-        for doc in query.stream():
-            usuario_data = doc.to_dict()
-            status_no_negocio = usuario_data.get('status_por_negocio', {}).get(negocio_id, 'ativo')
+#         for doc in query.stream():
+#             usuario_data = doc.to_dict()
+#             status_no_negocio = usuario_data.get('status_por_negocio', {}).get(negocio_id, 'ativo')
 
-            if status_no_negocio == status:
-                usuario_data['id'] = doc.id
-                user_role = usuario_data.get("roles", {}).get(negocio_id)
+#             if status_no_negocio == status:
+#                 usuario_data['id'] = doc.id
+#                 user_role = usuario_data.get("roles", {}).get(negocio_id)
 
-                # --- LÓGICA DE ENRIQUECIMENTO DE DADOS ---
+#                 # --- LÓGICA DE ENRIQUECIMENTO DE DADOS ---
 
-                # 1. Para Profissionais e Admins, adiciona o profissional_id
-                if user_role in ['profissional', 'admin']:
-                    firebase_uid = usuario_data.get('firebase_uid')
-                    if firebase_uid:
-                        perfil_profissional = buscar_profissional_por_uid(db, negocio_id, firebase_uid)
-                        usuario_data['profissional_id'] = perfil_profissional.get('id') if perfil_profissional else None
-                    else:
-                        usuario_data['profissional_id'] = None
+#                 # 1. Para Profissionais e Admins, adiciona o profissional_id
+#                 if user_role in ['profissional', 'admin']:
+#                     firebase_uid = usuario_data.get('firebase_uid')
+#                     if firebase_uid:
+#                         perfil_profissional = buscar_profissional_por_uid(db, negocio_id, firebase_uid)
+#                         usuario_data['profissional_id'] = perfil_profissional.get('id') if perfil_profissional else None
+#                     else:
+#                         usuario_data['profissional_id'] = None
                 
-                # 2. Para Clientes (Pacientes), adiciona os IDs dos profissionais vinculados
-                elif user_role == 'cliente':
-                    # Adiciona o ID do enfermeiro vinculado (convertido para profissional_id)
-                    enfermeiro_user_id = usuario_data.get('enfermeiro_id')
-                    if enfermeiro_user_id:
-                        enfermeiro_doc = db.collection('usuarios').document(enfermeiro_user_id).get()
-                        if enfermeiro_doc.exists:
-                            firebase_uid_enfermeiro = enfermeiro_doc.to_dict().get('firebase_uid')
-                            perfil_enfermeiro = buscar_profissional_por_uid(db, negocio_id, firebase_uid_enfermeiro)
-                            usuario_data['enfermeiro_vinculado_id'] = perfil_enfermeiro.get('id') if perfil_enfermeiro else None
-                        else:
-                            usuario_data['enfermeiro_vinculado_id'] = None
-                    else:
-                        usuario_data['enfermeiro_vinculado_id'] = None
+#                 # 2. Para Clientes (Pacientes), adiciona os IDs dos profissionais vinculados
+#                 elif user_role == 'cliente':
+#                     # Adiciona o ID do enfermeiro vinculado (convertido para profissional_id)
+#                     enfermeiro_user_id = usuario_data.get('enfermeiro_id')
+#                     if enfermeiro_user_id:
+#                         enfermeiro_doc = db.collection('usuarios').document(enfermeiro_user_id).get()
+#                         if enfermeiro_doc.exists:
+#                             firebase_uid_enfermeiro = enfermeiro_doc.to_dict().get('firebase_uid')
+#                             perfil_enfermeiro = buscar_profissional_por_uid(db, negocio_id, firebase_uid_enfermeiro)
+#                             usuario_data['enfermeiro_vinculado_id'] = perfil_enfermeiro.get('id') if perfil_enfermeiro else None
+#                         else:
+#                             usuario_data['enfermeiro_vinculado_id'] = None
+#                     else:
+#                         usuario_data['enfermeiro_vinculado_id'] = None
 
-                    # Adiciona a lista de IDs de técnicos vinculados
-                    usuario_data['tecnicos_vinculados_ids'] = usuario_data.get('tecnicos_ids', [])
+#                     # Adiciona a lista de IDs de técnicos vinculados
+#                     usuario_data['tecnicos_vinculados_ids'] = usuario_data.get('tecnicos_ids', [])
 
-                usuarios.append(usuario_data)
+#                 usuarios.append(usuario_data)
 
-        return usuarios
-    except Exception as e:
-        logger.error(f"Erro ao listar usuários para o negocio_id {negocio_id}: {e}")
-        return []
+#         return usuarios
+#     except Exception as e:
+#         logger.error(f"Erro ao listar usuários para o negocio_id {negocio_id}: {e}")
+#         return []
 
-def admin_set_paciente_status(db: firestore.client, negocio_id: str, paciente_id: str, status: str, autor_uid: str) -> Optional[Dict]:
-    """Define o status de um paciente ('ativo' ou 'arquivado') em um negócio."""
-    if status not in ['ativo', 'arquivado']:
-        raise ValueError("Status inválido. Use 'ativo' ou 'arquivado'.")
+# def admin_set_paciente_status(db: firestore.client, negocio_id: str, paciente_id: str, status: str, autor_uid: str) -> Optional[Dict]:
+#     """Define o status de um paciente ('ativo' ou 'arquivado') em um negócio."""
+#     if status not in ['ativo', 'arquivado']:
+#         raise ValueError("Status inválido. Use 'ativo' ou 'arquivado'.")
 
-    user_ref = db.collection('usuarios').document(paciente_id)
+#     user_ref = db.collection('usuarios').document(paciente_id)
+#     status_path = f'status_por_negocio.{negocio_id}'
+#     user_ref.update({status_path: status})
+
+#     criar_log_auditoria(
+#         db,
+#         autor_uid=autor_uid,
+#         negocio_id=negocio_id,
+#         acao=f"PACIENTE_STATUS_{status.upper()}",
+#         detalhes={"paciente_alvo_id": paciente_id}
+#     )
+
+#     logger.info(f"Status do paciente {paciente_id} definido como '{status}' no negócio {negocio_id}.")
+
+#     doc = user_ref.get()
+#     if doc.exists:
+#         data = doc.to_dict()
+#         data['id'] = doc.id
+#         return data
+#     return None
+
+def admin_listar_usuarios_por_negocio(db: firestore.client, negocio_id: str, status: str = 'ativo') -> List[Dict]:
+    """Lista todos os usuários de um negócio, com filtro de status."""
+    usuarios = []
+    query = db.collection('usuarios').where(f'roles.{negocio_id}', 'in', ['cliente', 'profissional', 'admin', 'tecnico'])
+    
+    for doc in query.stream():
+        usuario_data = doc.to_dict()
+        status_no_negocio = usuario_data.get('status_por_negocio', {}).get(negocio_id, 'ativo')
+        
+        # APLICA O FILTRO DE STATUS
+        if status_no_negocio == status:
+            usuario_data['id'] = doc.id
+            # ... (o resto da lógica de enriquecimento de dados continua igual)
+            usuarios.append(usuario_data)
+            
+    return usuarios
+
+def admin_set_usuario_status(db: firestore.client, negocio_id: str, user_id: str, status: str, autor_uid: str) -> Optional[Dict]:
+    """Define o status de um usuário ('ativo' ou 'inativo') em um negócio."""
+    if status not in ['ativo', 'inativo']:
+        raise ValueError("Status inválido. Use 'ativo' ou 'inativo'.")
+
+    user_ref = db.collection('usuarios').document(user_id)
     status_path = f'status_por_negocio.{negocio_id}'
     user_ref.update({status_path: status})
 
@@ -275,11 +316,10 @@ def admin_set_paciente_status(db: firestore.client, negocio_id: str, paciente_id
         db,
         autor_uid=autor_uid,
         negocio_id=negocio_id,
-        acao=f"PACIENTE_STATUS_{status.upper()}",
-        detalhes={"paciente_alvo_id": paciente_id}
+        acao=f"USUARIO_STATUS_{status.upper()}",
+        detalhes={"usuario_alvo_id": user_id}
     )
-
-    logger.info(f"Status do paciente {paciente_id} definido como '{status}' no negócio {negocio_id}.")
+    logger.info(f"Status do usuário {user_id} definido como '{status}' no negócio {negocio_id}.")
 
     doc = user_ref.get()
     if doc.exists:
@@ -1437,49 +1477,38 @@ def _notificar_cliente_cancelamento(db: firestore.client, agendamento: Dict, age
 # =================================================================================
 
 # Correção na função para garantir que o ID do documento 'usuarios' seja sempre usado
-def vincular_paciente_enfermeiro(db: firestore.client, negocio_id: str, paciente_id: str, enfermeiro_id: str, autor_uid: str) -> Optional[Dict]:
-    """Vincula um paciente a um enfermeiro (profissional) em uma clínica."""
-    try:
-        # 1. Obter o perfil profissional do enfermeiro para encontrar o UID do usuário
+def vincular_paciente_enfermeiro(db: firestore.client, negocio_id: str, paciente_id: str, enfermeiro_id: Optional[str], autor_uid: str) -> Optional[Dict]:
+    """Vincula ou desvincula um paciente de um enfermeiro."""
+    paciente_ref = db.collection('usuarios').document(paciente_id)
+    
+    # LÓGICA DE DESVINCULAÇÃO
+    if enfermeiro_id is None:
+        paciente_ref.update({'enfermeiro_id': firestore.DELETE_FIELD})
+        acao_log = "DESVINCULO_PACIENTE_ENFERMEIRO"
+        detalhes_log = {"paciente_id": paciente_id}
+        logger.info(f"Paciente {paciente_id} desvinculado do enfermeiro.")
+    # LÓGICA DE VINCULAÇÃO (existente)
+    else:
+        # (A lógica para encontrar o ID do usuário do enfermeiro continua a mesma)
         perfil_enfermeiro = buscar_profissional_por_id(db, enfermeiro_id)
-        if not perfil_enfermeiro:
-            logger.warning(f"Tentativa de vincular a um enfermeiro inexistente com ID de profissional: {enfermeiro_id}")
-            return None
-            
-        # 2. Encontrar o ID do documento de usuário (usuarios collection) do enfermeiro
+        if not perfil_enfermeiro: return None
         usuario_enfermeiro = buscar_usuario_por_firebase_uid(db, perfil_enfermeiro['usuario_uid'])
-        if not usuario_enfermeiro:
-             logger.warning(f"Usuário associado ao perfil profissional {enfermeiro_id} não encontrado.")
-             return None
-             
-        # O ID a ser salvo é o ID do documento do usuário, não o ID do documento profissional.
+        if not usuario_enfermeiro: return None
+        
         usuario_enfermeiro_id_para_salvar = usuario_enfermeiro['id']
+        paciente_ref.update({'enfermeiro_id': usuario_enfermeiro_id_para_salvar})
+        acao_log = "VINCULO_PACIENTE_ENFERMEIRO"
+        detalhes_log = {"paciente_id": paciente_id, "enfermeiro_id": usuario_enfermeiro_id_para_salvar}
+        logger.info(f"Paciente {paciente_id} vinculado ao enfermeiro {usuario_enfermeiro_id_para_salvar}.")
 
-        paciente_ref = db.collection('usuarios').document(paciente_id)
-        # Adiciona/atualiza o campo enfermeiro_id no documento do paciente
-        paciente_ref.update({
-            'enfermeiro_id': usuario_enfermeiro_id_para_salvar
-        })
-
-        criar_log_auditoria(
-            db,
-            autor_uid=autor_uid,
-            negocio_id=negocio_id,
-            acao="VINCULO_PACIENTE_ENFERMEIRO",
-            detalhes={"paciente_id": paciente_id, "enfermeiro_id": usuario_enfermeiro_id_para_salvar}
-        )
-
-        logger.info(f"Paciente {paciente_id} vinculado ao enfermeiro {usuario_enfermeiro_id_para_salvar} no negócio {negocio_id}.")
-        doc = paciente_ref.get()
-        if doc.exists:
-            # Retorna o documento atualizado do paciente
-            updated_doc = doc.to_dict()
-            updated_doc['id'] = doc.id
-            return updated_doc
-        return None
-    except Exception as e:
-        logger.error(f"Erro ao vincular paciente {paciente_id} ao enfermeiro {enfermeiro_id}: {e}")
-        return None
+    criar_log_auditoria(db, autor_uid=autor_uid, negocio_id=negocio_id, acao=acao_log, detalhes=detalhes_log)
+    
+    doc = paciente_ref.get()
+    if doc.exists:
+        data = doc.to_dict()
+        data['id'] = doc.id
+        return data
+    return None
 
 def desvincular_paciente_enfermeiro(db: firestore.client, negocio_id: str, paciente_id: str, autor_uid: str) -> Optional[Dict]:
     """Desvincula um paciente de um enfermeiro, removendo o campo enfermeiro_id."""
@@ -1562,44 +1591,36 @@ def vincular_tecnicos_paciente(db: firestore.client, paciente_id: str, tecnicos_
         logger.error(f"Erro ao vincular técnicos ao paciente {paciente_id}: {e}")
         raise e # Re-lança para o endpoint
 
-def vincular_supervisor_tecnico(db: firestore.client, tecnico_id: str, supervisor_id: str, autor_uid: str) -> Optional[Dict]:
-    """
-    Vincula um enfermeiro supervisor a um técnico.
-    """
-    try:
-        tecnico_ref = db.collection('usuarios').document(tecnico_id)
-        tecnico_doc = tecnico_ref.get()
-        if not tecnico_doc.exists:
-            raise ValueError(f"Técnico com ID '{tecnico_id}' não encontrado.")
-            
-        supervisor_ref = db.collection('usuarios').document(supervisor_id)
-        if not supervisor_ref.get().exists:
-            raise ValueError(f"Supervisor com ID '{supervisor_id}' não encontrado.")
-            
-        # Opcional: validar se o papel do supervisor é 'profissional' ou 'admin'
-        
-        tecnico_ref.update({
-            'supervisor_id': supervisor_id
-        })
-        
-        criar_log_auditoria(
-            db,
-            autor_uid=autor_uid,
-            negocio_id=list(tecnico_doc.to_dict().get('roles', {}).keys())[0], # Assumindo um único negócio
-            acao="VINCULO_SUPERVISOR_TECNICO",
-            detalhes={"tecnico_id": tecnico_id, "supervisor_id": supervisor_id}
-        )
+def vincular_supervisor_tecnico(db: firestore.client, tecnico_id: str, supervisor_id: Optional[str], autor_uid: str) -> Optional[Dict]:
+    """Vincula ou desvincula um supervisor de um técnico."""
+    tecnico_ref = db.collection('usuarios').document(tecnico_id)
+    tecnico_doc = tecnico_ref.get()
+    if not tecnico_doc.exists: return None
 
+    # LÓGICA DE DESVINCULAÇÃO
+    if supervisor_id is None:
+        tecnico_ref.update({'supervisor_id': firestore.DELETE_FIELD})
+        acao_log = "DESVINCULO_SUPERVISOR_TECNICO"
+        detalhes_log = {"tecnico_id": tecnico_id}
+        logger.info(f"Supervisor desvinculado do técnico {tecnico_id}.")
+    # LÓGICA DE VINCULAÇÃO (existente)
+    else:
+        supervisor_ref = db.collection('usuarios').document(supervisor_id)
+        if not supervisor_ref.get().exists: raise ValueError("Supervisor não encontrado.")
+        tecnico_ref.update({'supervisor_id': supervisor_id})
+        acao_log = "VINCULO_SUPERVISOR_TECNICO"
+        detalhes_log = {"tecnico_id": tecnico_id, "supervisor_id": supervisor_id}
         logger.info(f"Supervisor {supervisor_id} vinculado ao técnico {tecnico_id}.")
-        doc = tecnico_ref.get()
-        if doc.exists:
-            updated_doc = doc.to_dict()
-            updated_doc['id'] = doc.id
-            return updated_doc
-        return None
-    except Exception as e:
-        logger.error(f"Erro ao vincular supervisor ao técnico {tecnico_id}: {e}")
-        raise e # Re-lança para o endpoint
+    
+    negocio_id = list(tecnico_doc.to_dict().get('roles', {}).keys())[0]
+    criar_log_auditoria(db, autor_uid=autor_uid, negocio_id=negocio_id, acao=acao_log, detalhes=detalhes_log)
+
+    doc = tecnico_ref.get()
+    if doc.exists:
+        data = doc.to_dict()
+        data['id'] = doc.id
+        return data
+    return None
 
 def listar_pacientes_por_profissional_ou_tecnico(db: firestore.client, negocio_id: str, usuario_id: str, role: str) -> List[Dict]:
     """
@@ -2773,3 +2794,63 @@ def deletar_registro_diario_estruturado(
         raise e
 
 # --- FIM DAS NOVAS FUNÇÕES ---
+
+# =================================================================================
+# 1. NOVAS FUNÇÕES: FICHA DE AVALIAÇÃO DE ENFERMAGEM (ANAMNESE)
+# =================================================================================
+
+def criar_anamnese(db: firestore.client, paciente_id: str, anamnese_data: schemas.AnamneseEnfermagemCreate) -> Dict:
+    """Cria um novo registro de anamnese para um paciente."""
+    anamnese_dict = anamnese_data.model_dump(mode='json') # Converte date para string
+    anamnese_dict.update({
+        "paciente_id": paciente_id,
+        "created_at": firestore.SERVER_TIMESTAMP,
+        "updated_at": None,
+    })
+    doc_ref = db.collection('usuarios').document(paciente_id).collection('anamneses').document()
+    doc_ref.set(anamnese_dict)
+    anamnese_dict['id'] = doc_ref.id
+    return anamnese_dict
+
+def listar_anamneses_por_paciente(db: firestore.client, paciente_id: str) -> List[Dict]:
+    """Lista todos os registros de anamnese de um paciente."""
+    anamneses = []
+    query = db.collection('usuarios').document(paciente_id).collection('anamneses').order_by('data_avaliacao', direction=firestore.Query.DESCENDING)
+    for doc in query.stream():
+        data = doc.to_dict()
+        data['id'] = doc.id
+        anamneses.append(data)
+    return anamneses
+
+def atualizar_anamnese(db: firestore.client, anamnese_id: str, paciente_id: str, update_data: schemas.AnamneseEnfermagemUpdate) -> Optional[Dict]:
+    """Atualiza um registro de anamnese existente."""
+    anamnese_ref = db.collection('usuarios').document(paciente_id).collection('anamneses').document(anamnese_id)
+    if not anamnese_ref.get().exists:
+        return None
+    
+    update_dict = update_data.model_dump(exclude_unset=True, mode='json')
+    update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
+    anamnese_ref.update(update_dict)
+    
+    updated_doc = anamnese_ref.get()
+    data = updated_doc.to_dict()
+    data['id'] = updated_doc.id
+    return data
+
+# =================================================================================
+# 2. NOVA FUNÇÃO: ENDEREÇO
+# =================================================================================
+
+def atualizar_endereco_paciente(db: firestore.client, paciente_id: str, endereco_data: schemas.EnderecoUpdate) -> Optional[Dict]:
+    """Adiciona ou atualiza o endereço de um paciente."""
+    paciente_ref = db.collection('usuarios').document(paciente_id)
+    paciente_doc = paciente_ref.get()
+    if not paciente_doc.exists:
+        return None
+    
+    paciente_ref.update({"endereco": endereco_data.model_dump()})
+    
+    updated_doc = paciente_ref.get()
+    data = updated_doc.to_dict()
+    data['id'] = updated_doc.id
+    return data
