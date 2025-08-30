@@ -402,9 +402,10 @@ def admin_atualizar_role_usuario(db: firestore.client, negocio_id: str, user_id:
 
 def admin_criar_paciente(db: firestore.client, negocio_id: str, paciente_data: schemas.PacienteCreateByAdmin) -> Dict:
     """
-    (Admin ou Enfermeiro) Cria um novo usuário de paciente no Firebase Auth e o sincroniza no Firestore.
+    (Admin ou Enfermeiro) Cria um novo usuário de paciente no Firebase Auth e o sincroniza no Firestore,
+    lidando corretamente com o endereço como um campo exclusivo do paciente.
     """
-    # 1. Criar usuário no Firebase Auth
+    # 1. Criar usuário no Firebase Auth (lógica inalterada)
     try:
         firebase_user = auth.create_user(
             email=paciente_data.email,
@@ -419,21 +420,33 @@ def admin_criar_paciente(db: firestore.client, negocio_id: str, paciente_data: s
         logger.error(f"Erro ao criar usuário paciente no Firebase Auth: {e}")
         raise
 
-    # 2. Sincronizar o usuário no Firestore, passando todos os dados
+    # 2. Sincronizar o usuário no Firestore, SEM o endereço.
+    # O schema UsuarioSync não tem mais o campo 'endereco'.
     sync_data = schemas.UsuarioSync(
         nome=paciente_data.nome,
         email=paciente_data.email,
         firebase_uid=firebase_user.uid,
         negocio_id=negocio_id,
-        telefone=paciente_data.telefone,
-        endereco=paciente_data.endereco
+        telefone=paciente_data.telefone
     )
 
     try:
+        # Cria o perfil básico do usuário (sem endereço)
         user_profile = criar_ou_atualizar_usuario(db, sync_data)
-        logger.info(f"Perfil do paciente {paciente_data.email} sincronizado no Firestore.")
+        
+        # 3. Se um endereço foi fornecido na requisição, ATUALIZA o documento recém-criado
+        if paciente_data.endereco:
+            logger.info(f"Adicionando endereço ao paciente recém-criado: {user_profile['id']}")
+            # Chama a função específica para adicionar/atualizar o endereço
+            atualizar_endereco_paciente(db, user_profile['id'], paciente_data.endereco)
+            # Adiciona o endereço ao dicionário de resposta para consistência
+            user_profile['endereco'] = paciente_data.endereco.model_dump()
+
+        logger.info(f"Perfil do paciente {paciente_data.email} sincronizado com sucesso no Firestore.")
         return user_profile
+
     except Exception as e:
+        # A lógica de reversão em caso de erro continua a mesma
         logger.error(f"Erro ao sincronizar paciente no Firestore. Tentando reverter a criação no Auth... UID: {firebase_user.uid}")
         try:
             auth.delete_user(firebase_user.uid)
@@ -1623,26 +1636,38 @@ def vincular_supervisor_tecnico(db: firestore.client, tecnico_id: str, superviso
     return None
 
 def listar_pacientes_por_profissional_ou_tecnico(db: firestore.client, negocio_id: str, usuario_id: str, role: str) -> List[Dict]:
+    """
+    Lista todos os pacientes ATIVOS vinculados a um enfermeiro ou a um técnico,
+    com base no papel do usuário logado.
+    """
     pacientes = []
-    # A query base já filtra por 'cliente'
-    query = db.collection('usuarios').where(f'roles.{negocio_id}', '==', 'cliente')
-    
-    if role == 'profissional':
-        query = query.where('enfermeiro_id', '==', usuario_id)
-    elif role == 'tecnico':
-        query = query.where('tecnicos_ids', 'array_contains', usuario_id)
-    else:
+    try:
+        # A query base já filtra por 'cliente'
+        query = db.collection('usuarios').where(f'roles.{negocio_id}', '==', 'cliente')
+        
+        if role == 'profissional':
+            query = query.where('enfermeiro_id', '==', usuario_id)
+        elif role == 'tecnico':
+            query = query.where('tecnicos_ids', 'array_contains', usuario_id)
+        else:
+            return []
+
+        for doc in query.stream():
+            paciente_data = doc.to_dict()
+            
+            # AQUI ESTÁ A CORREÇÃO: Filtra para incluir apenas pacientes com status 'ativo'.
+            status_no_negocio = paciente_data.get('status_por_negocio', {}).get(negocio_id, 'ativo')
+            
+            if status_no_negocio == 'ativo':
+                paciente_data['id'] = doc.id
+                pacientes.append(paciente_data)
+        
+        return pacientes
+    except Exception as e:
+        logger.error(f"Erro ao listar pacientes para o usuário {usuario_id} com role '{role}': {e}")
         return []
-
-    for doc in query.stream():
-        paciente_data = doc.to_dict()
-        # AQUI ESTÁ A CORREÇÃO PROATIVA
-        status_no_negocio = paciente_data.get('status_por_negocio', {}).get(negocio_id, 'ativo')
-        if status_no_negocio == 'ativo':
-            paciente_data['id'] = doc.id
-            pacientes.append(paciente_data)
-    return pacientes
-
+    
+    
 def criar_consulta(db: firestore.client, consulta_data: schemas.ConsultaCreate) -> Dict:
     """Salva uma nova consulta na subcoleção de um paciente."""
     consulta_dict = consulta_data.model_dump()

@@ -1608,6 +1608,19 @@ def atualizar_anamnese(
         raise HTTPException(status_code=404, detail="Ficha de anamnese não encontrada.")
     return anamnese_atualizada
 
+@app.put("/pacientes/{paciente_id}/endereco", response_model=schemas.UsuarioProfile, tags=["Pacientes"])
+def atualizar_endereco_paciente_endpoint(
+    paciente_id: str,
+    endereco_data: schemas.EnderecoUpdate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    paciente_atualizado = crud.atualizar_endereco_paciente(db, paciente_id, endereco_data)
+    if not paciente_atualizado:
+        raise HTTPException(status_code=404, detail="Paciente não encontrado.")
+    return paciente_atualizado
+
+
 # =================================================================================
 # 2. NOVO ENDPOINT: ENDEREÇO
 # =================================================================================

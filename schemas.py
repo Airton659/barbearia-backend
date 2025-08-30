@@ -20,6 +20,22 @@ class NegocioResponse(NegocioBase):
     owner_uid: str = Field(..., description="Firebase UID do dono do negócio.")
     codigo_convite: str = Field(..., description="Código de convite para o admin do negócio.")
 
+
+
+# =================================================================================
+# 1. NOVO SCHEMA: ENDEREÇO (MOVIDO PARA CIMA PARA CORRIGIR O NameError)
+# =================================================================================
+
+class Endereco(BaseModel):
+    rua: str
+    numero: str
+    cidade: str
+    estado: str
+    cep: str
+
+class EnderecoUpdate(Endereco):
+    pass
+
 # =================================================================================
 # SCHEMAS DE USUÁRIOS
 # =================================================================================
@@ -31,14 +47,18 @@ class UsuarioBase(BaseModel):
     email: EmailStr
     firebase_uid: str
     telefone: Optional[str] = None
-    # endereco: Optional[Dict[str, str]] # REMOVIDO
+    # endereco: ... # LINHA REMOVIDA
 
 # Em UsuarioProfile, adicione 'status_por_negocio' e o novo modelo de Endereco
 class UsuarioProfile(UsuarioBase):
     id: str
     roles: dict[str, str]
     status_por_negocio: Dict[str, str] = Field({}, description="Status do usuário por negócio (ex: 'ativo', 'inativo').")
-    # ... (outros campos existentes)
+    fcm_tokens: List[str] = []
+    profissional_id: Optional[str] = None
+    supervisor_id: Optional[str] = None
+    enfermeiro_vinculado_id: Optional[str] = None
+    tecnicos_vinculados_ids: Optional[List[str]] = None
     endereco: Optional[Endereco] = None
 
 # Em UsuarioSync, remova 'endereco'
@@ -49,7 +69,7 @@ class UsuarioSync(BaseModel):
     negocio_id: Optional[str] = None
     codigo_convite: Optional[str] = None
     telefone: Optional[str] = None
-    # endereco: Optional[Dict[str, str]] = None # REMOVIDO
+    # endereco: ... # LINHA REMOVIDA
 
 class FCMTokenUpdate(BaseModel):
     fcm_token: str
@@ -208,17 +228,16 @@ class MedicoUpdate(BaseModel):
     especialidade: Optional[str] = None
     crm: Optional[str] = None
 
-# Em VinculoCreate, torne enfermeiro_id opcional
 class VinculoCreate(BaseModel):
     paciente_id: str
-    enfermeiro_id: Optional[str] = None
+    enfermeiro_id: Optional[str] = None # Tornou-se opcional
 
 class TecnicosVincularRequest(BaseModel):
     tecnicos_ids: List[str] = Field(..., description="Lista de IDs de usuários dos técnicos.")
 
-# Em SupervisorVincularRequest, torne supervisor_id opcional
 class SupervisorVincularRequest(BaseModel):
     supervisor_id: Optional[str] = Field(None, description="ID do usuário supervisor. Envie null para desvincular.")
+
 
 # =================================================================================
 # SCHEMAS DA FICHA DO PACIENTE
@@ -537,33 +556,26 @@ class PlanoAckStatus(BaseModel):
     planoVersionId: Optional[str] = Field(None, description="Versão do plano considerada no status")
 
 # =================================================================================
-# 1. NOVOS SCHEMAS: FICHA DE AVALIAÇÃO DE ENFERMAGEM (ANAMNESE)
+# 3. NOVOS SCHEMAS: FICHA DE ANAMNESE
 # =================================================================================
 
 class SinaisVitaisAnamnese(BaseModel):
-    pa: str = Field(..., description="Pressão Arterial (ex: '120/80 mmHg').")
-    fc: str = Field(..., description="Frequência Cardíaca (ex: '80 bpm').")
-    fr: str = Field(..., description="Frequência Respiratória (ex: '18 irpm').")
-    temp: str = Field(..., description="Temperatura (ex: '36.5 °C').")
-    spo2: str = Field(..., description="Saturação de Oxigênio (ex: '98%').")
+    pa: str
+    fc: str
+    fr: str
+    temp: str
+    spo2: str
 
 class AnamneseEnfermagemBase(BaseModel):
-    # Identificação
     nome_paciente: str
     data_avaliacao: date
-
-    # Dados da Cirurgia
     tipo_cirurgia: str
     data_cirurgia: date
     tipo_anestesia: str
     cirurgia_eletiva: bool
     medico_responsavel: str
-
-    # Anamnese
     queixa_principal: str
     historia_doenca_atual: str
-
-    # Antecedentes Pessoais
     antecedentes_doencas: List[str] = Field(default_factory=list)
     antecedentes_outros: Optional[str] = None
     cirurgias_anteriores: Optional[str] = None
@@ -572,8 +584,6 @@ class AnamneseEnfermagemBase(BaseModel):
     habitos: List[str] = Field(default_factory=list)
     habitos_outros: Optional[str] = None
     historia_familiar: Optional[str] = None
-
-    # Avaliação do Estado Atual
     sinais_vitais: SinaisVitaisAnamnese
     nivel_consciencia: str
     estado_nutricional: str
@@ -590,7 +600,6 @@ class AnamneseEnfermagemBase(BaseModel):
     planejamento_enfermagem: Optional[str] = None
     observacoes_enfermagem: Optional[str] = None
 
-
 class AnamneseEnfermagemCreate(AnamneseEnfermagemBase):
     pass
 
@@ -598,8 +607,7 @@ class AnamneseEnfermagemUpdate(BaseModel):
     # Permite a atualização de qualquer campo, todos opcionais
     nome_paciente: Optional[str] = None
     data_avaliacao: Optional[date] = None
-    tipo_cirurgia: Optional[str] = None
-    # ... (adicione todos os outros campos de AnamneseEnfermagemBase como Optional)
+    # ... adicione todos os outros campos de AnamneseEnfermagemBase como Optional aqui ...
     observacoes_enfermagem: Optional[str] = None
 
 class AnamneseEnfermagemResponse(AnamneseEnfermagemBase):
@@ -607,21 +615,6 @@ class AnamneseEnfermagemResponse(AnamneseEnfermagemBase):
     paciente_id: str
     created_at: datetime
     updated_at: Optional[datetime] = None
-
-# =================================================================================
-# 2. NOVO SCHEMA: ENDEREÇO
-# =================================================================================
-
-class Endereco(BaseModel):
-    rua: str
-    numero: str
-    cidade: str
-    estado: str
-    cep: str
-
-class EnderecoUpdate(Endereco):
-    pass
-
 
 
 ProfissionalResponse.model_rebuild()
