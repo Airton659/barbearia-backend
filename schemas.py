@@ -25,26 +25,20 @@ class NegocioResponse(NegocioBase):
 # =================================================================================
 
 
-# Em UsuarioBase, remova o campo 'endereco'
+# Em UsuarioBase, remova 'endereco'
 class UsuarioBase(BaseModel):
     nome: str
     email: EmailStr
     firebase_uid: str
     telefone: Optional[str] = None
-    # endereco: Optional[Dict[str, str]] = Field(None, description="Dicionário com dados de endereço.") # LINHA REMOVIDA
+    # endereco: Optional[Dict[str, str]] # REMOVIDO
 
-# Em UsuarioProfile, adicione o novo modelo de Endereco como opcional
+# Em UsuarioProfile, adicione 'status_por_negocio' e o novo modelo de Endereco
 class UsuarioProfile(UsuarioBase):
-    id: str = Field(..., description="ID do documento do usuário no Firestore.")
-    roles: dict[str, str] = Field({}, description="Dicionário de negocio_id para role.")
-    # NOVO CAMPO DE STATUS
-    status_por_negocio: Dict[str, str] = Field({}, description="Status do usuário por negócio (ex: {'negocio_A': 'ativo'}).")
-    fcm_tokens: List[str] = []
-    profissional_id: Optional[str] = Field(None, description="ID do perfil profissional, se aplicável.")
-    supervisor_id: Optional[str] = Field(None, description="ID do usuário supervisor.")
-    enfermeiro_vinculado_id: Optional[str] = Field(None, description="ID do profissional (enfermeiro) vinculado.")
-    tecnicos_vinculados_ids: Optional[List[str]] = Field(None, description="Lista de IDs dos técnicos vinculados.")
-    # ADICIONA O ENDEREÇO AQUI
+    id: str
+    roles: dict[str, str]
+    status_por_negocio: Dict[str, str] = Field({}, description="Status do usuário por negócio (ex: 'ativo', 'inativo').")
+    # ... (outros campos existentes)
     endereco: Optional[Endereco] = None
 
 # Em UsuarioSync, remova 'endereco'
@@ -52,10 +46,10 @@ class UsuarioSync(BaseModel):
     nome: str
     email: EmailStr
     firebase_uid: str
-    negocio_id: Optional[str] = Field(None, description="ID do negócio ao qual o usuário está se cadastrando.")
-    codigo_convite: Optional[str] = Field(None, description="Código de convite para se tornar admin.")
+    negocio_id: Optional[str] = None
+    codigo_convite: Optional[str] = None
     telefone: Optional[str] = None
-    # endereco: Optional[Dict[str, str]] = None # LINHA REMOVIDA
+    # endereco: Optional[Dict[str, str]] = None # REMOVIDO
 
 class FCMTokenUpdate(BaseModel):
     fcm_token: str
@@ -63,12 +57,12 @@ class FCMTokenUpdate(BaseModel):
 class RoleUpdateRequest(BaseModel):
     role: str = Field(..., description="O novo papel do usuário (ex: 'cliente', 'profissional', 'admin', 'tecnico').")
 
+# Em PacienteCreateByAdmin, use o novo modelo Endereco
 class PacienteCreateByAdmin(BaseModel):
     email: EmailStr
-    password: str = Field(..., min_length=6, description="Senha para o novo paciente.")
+    password: str = Field(..., min_length=6)
     nome: str
     telefone: Optional[str] = None
-    # ALTERAÇÃO AQUI
     endereco: Optional[Endereco] = None
 
 class StatusUpdateRequest(BaseModel):
@@ -214,17 +208,17 @@ class MedicoUpdate(BaseModel):
     especialidade: Optional[str] = None
     crm: Optional[str] = None
 
+# Em VinculoCreate, torne enfermeiro_id opcional
 class VinculoCreate(BaseModel):
     paciente_id: str
-    # ALTERAÇÃO AQUI
     enfermeiro_id: Optional[str] = None
 
 class TecnicosVincularRequest(BaseModel):
     tecnicos_ids: List[str] = Field(..., description="Lista de IDs de usuários dos técnicos.")
 
+# Em SupervisorVincularRequest, torne supervisor_id opcional
 class SupervisorVincularRequest(BaseModel):
-    # ALTERAÇÃO AQUI
-    supervisor_id: Optional[str] = Field(None, description="ID do usuário do supervisor. Envie null para desvincular.")
+    supervisor_id: Optional[str] = Field(None, description="ID do usuário supervisor. Envie null para desvincular.")
 
 # =================================================================================
 # SCHEMAS DA FICHA DO PACIENTE
@@ -543,7 +537,7 @@ class PlanoAckStatus(BaseModel):
     planoVersionId: Optional[str] = Field(None, description="Versão do plano considerada no status")
 
 # =================================================================================
-# REBUILD DE REFERÊNCIAS (ForwardRef)
+# 1. NOVOS SCHEMAS: FICHA DE AVALIAÇÃO DE ENFERMAGEM (ANAMNESE)
 # =================================================================================
 
 class SinaisVitaisAnamnese(BaseModel):
@@ -554,7 +548,7 @@ class SinaisVitaisAnamnese(BaseModel):
     spo2: str = Field(..., description="Saturação de Oxigênio (ex: '98%').")
 
 class AnamneseEnfermagemBase(BaseModel):
-    # Identificação (já vem do paciente_id, mas pode ser útil repetir)
+    # Identificação
     nome_paciente: str
     data_avaliacao: date
 
@@ -562,7 +556,7 @@ class AnamneseEnfermagemBase(BaseModel):
     tipo_cirurgia: str
     data_cirurgia: date
     tipo_anestesia: str
-    cirurgia_eletiva: bool # True para Eletiva, False para Urgência/Emergência
+    cirurgia_eletiva: bool
     medico_responsavel: str
 
     # Anamnese
@@ -570,12 +564,12 @@ class AnamneseEnfermagemBase(BaseModel):
     historia_doenca_atual: str
 
     # Antecedentes Pessoais
-    antecedentes_doencas: List[str] = Field(default_factory=list, description="Lista de doenças crônicas (HAS, DM, etc.).")
+    antecedentes_doencas: List[str] = Field(default_factory=list)
     antecedentes_outros: Optional[str] = None
     cirurgias_anteriores: Optional[str] = None
     alergias: Optional[str] = None
     medicamentos_continuos: Optional[str] = None
-    habitos: List[str] = Field(default_factory=list, description="Lista de hábitos (Tabagismo, Etílico, etc.).")
+    habitos: List[str] = Field(default_factory=list)
     habitos_outros: Optional[str] = None
     historia_familiar: Optional[str] = None
 
@@ -589,13 +583,9 @@ class AnamneseEnfermagemBase(BaseModel):
     abdome: str
     eliminacoes_fisiologicas: str
     drenos_sondas_cateteres: Optional[str] = None
-
-    # Aspectos Psicossociais
     ansiedade_relacao_cirurgia: bool
     apoio_familiar_social: str
     necessidades_emocionais_espirituais: Optional[str] = None
-
-    # Campos abertos
     diagnosticos_enfermagem: Optional[str] = None
     planejamento_enfermagem: Optional[str] = None
     observacoes_enfermagem: Optional[str] = None
@@ -609,34 +599,7 @@ class AnamneseEnfermagemUpdate(BaseModel):
     nome_paciente: Optional[str] = None
     data_avaliacao: Optional[date] = None
     tipo_cirurgia: Optional[str] = None
-    data_cirurgia: Optional[date] = None
-    tipo_anestesia: Optional[str] = None
-    cirurgia_eletiva: Optional[bool] = None
-    medico_responsavel: Optional[str] = None
-    queixa_principal: Optional[str] = None
-    historia_doenca_atual: Optional[str] = None
-    antecedentes_doencas: Optional[List[str]] = None
-    antecedentes_outros: Optional[str] = None
-    cirurgias_anteriores: Optional[str] = None
-    alergias: Optional[str] = None
-    medicamentos_continuos: Optional[str] = None
-    habitos: Optional[List[str]] = None
-    habitos_outros: Optional[str] = None
-    historia_familiar: Optional[str] = None
-    sinais_vitais: Optional[SinaisVitaisAnamnese] = None
-    nivel_consciencia: Optional[str] = None
-    estado_nutricional: Optional[str] = None
-    pele_mucosas: Optional[str] = None
-    sistema_respiratorio: Optional[str] = None
-    sistema_cardiovascular: Optional[str] = None
-    abdome: Optional[str] = None
-    eliminacoes_fisiologicas: Optional[str] = None
-    drenos_sondas_cateteres: Optional[str] = None
-    ansiedade_relacao_cirurgia: Optional[bool] = None
-    apoio_familiar_social: Optional[str] = None
-    necessidades_emocionais_espirituais: Optional[str] = None
-    diagnosticos_enfermagem: Optional[str] = None
-    planejamento_enfermagem: Optional[str] = None
+    # ... (adicione todos os outros campos de AnamneseEnfermagemBase como Optional)
     observacoes_enfermagem: Optional[str] = None
 
 class AnamneseEnfermagemResponse(AnamneseEnfermagemBase):

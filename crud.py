@@ -1623,33 +1623,25 @@ def vincular_supervisor_tecnico(db: firestore.client, tecnico_id: str, superviso
     return None
 
 def listar_pacientes_por_profissional_ou_tecnico(db: firestore.client, negocio_id: str, usuario_id: str, role: str) -> List[Dict]:
-    """
-    Lista todos os pacientes vinculados a um enfermeiro ou a um técnico,
-    com base no papel do usuário logado.
-    """
     pacientes = []
-    try:
-        query = db.collection('usuarios').where(f'roles.{negocio_id}', '==', 'cliente')
-        
-        if role == 'profissional':
-            # Se for enfermeiro, busca pacientes que têm o enfermeiro_id correspondente
-            query = query.where('enfermeiro_id', '==', usuario_id)
-        elif role == 'tecnico':
-            # Se for técnico, busca pacientes onde o ID do técnico está na lista tecnicos_ids
-            query = query.where('tecnicos_ids', 'array_contains', usuario_id)
-        else:
-            # Caso contrário, não retorna nada
-            return []
+    # A query base já filtra por 'cliente'
+    query = db.collection('usuarios').where(f'roles.{negocio_id}', '==', 'cliente')
+    
+    if role == 'profissional':
+        query = query.where('enfermeiro_id', '==', usuario_id)
+    elif role == 'tecnico':
+        query = query.where('tecnicos_ids', 'array_contains', usuario_id)
+    else:
+        return []
 
-        for doc in query.stream():
-            paciente_data = doc.to_dict()
+    for doc in query.stream():
+        paciente_data = doc.to_dict()
+        # AQUI ESTÁ A CORREÇÃO PROATIVA
+        status_no_negocio = paciente_data.get('status_por_negocio', {}).get(negocio_id, 'ativo')
+        if status_no_negocio == 'ativo':
             paciente_data['id'] = doc.id
             pacientes.append(paciente_data)
-        
-        return pacientes
-    except Exception as e:
-        logger.error(f"Erro ao listar pacientes para o usuário {usuario_id} com role '{role}': {e}")
-        return []
+    return pacientes
 
 def criar_consulta(db: firestore.client, consulta_data: schemas.ConsultaCreate) -> Dict:
     """Salva uma nova consulta na subcoleção de um paciente."""
@@ -2796,12 +2788,11 @@ def deletar_registro_diario_estruturado(
 # --- FIM DAS NOVAS FUNÇÕES ---
 
 # =================================================================================
-# 1. NOVAS FUNÇÕES: FICHA DE AVALIAÇÃO DE ENFERMAGEM (ANAMNESE)
+# 1. NOVAS FUNÇÕES: FICHA DE ANAMNESE
 # =================================================================================
 
 def criar_anamnese(db: firestore.client, paciente_id: str, anamnese_data: schemas.AnamneseEnfermagemCreate) -> Dict:
-    """Cria um novo registro de anamnese para um paciente."""
-    anamnese_dict = anamnese_data.model_dump(mode='json') # Converte date para string
+    anamnese_dict = anamnese_data.model_dump(mode='json')
     anamnese_dict.update({
         "paciente_id": paciente_id,
         "created_at": firestore.SERVER_TIMESTAMP,
@@ -2813,7 +2804,6 @@ def criar_anamnese(db: firestore.client, paciente_id: str, anamnese_data: schema
     return anamnese_dict
 
 def listar_anamneses_por_paciente(db: firestore.client, paciente_id: str) -> List[Dict]:
-    """Lista todos os registros de anamnese de um paciente."""
     anamneses = []
     query = db.collection('usuarios').document(paciente_id).collection('anamneses').order_by('data_avaliacao', direction=firestore.Query.DESCENDING)
     for doc in query.stream():
@@ -2823,15 +2813,12 @@ def listar_anamneses_por_paciente(db: firestore.client, paciente_id: str) -> Lis
     return anamneses
 
 def atualizar_anamnese(db: firestore.client, anamnese_id: str, paciente_id: str, update_data: schemas.AnamneseEnfermagemUpdate) -> Optional[Dict]:
-    """Atualiza um registro de anamnese existente."""
     anamnese_ref = db.collection('usuarios').document(paciente_id).collection('anamneses').document(anamnese_id)
     if not anamnese_ref.get().exists:
         return None
-    
     update_dict = update_data.model_dump(exclude_unset=True, mode='json')
     update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
     anamnese_ref.update(update_dict)
-    
     updated_doc = anamnese_ref.get()
     data = updated_doc.to_dict()
     data['id'] = updated_doc.id
@@ -2842,14 +2829,10 @@ def atualizar_anamnese(db: firestore.client, anamnese_id: str, paciente_id: str,
 # =================================================================================
 
 def atualizar_endereco_paciente(db: firestore.client, paciente_id: str, endereco_data: schemas.EnderecoUpdate) -> Optional[Dict]:
-    """Adiciona ou atualiza o endereço de um paciente."""
     paciente_ref = db.collection('usuarios').document(paciente_id)
-    paciente_doc = paciente_ref.get()
-    if not paciente_doc.exists:
+    if not paciente_ref.get().exists:
         return None
-    
     paciente_ref.update({"endereco": endereco_data.model_dump()})
-    
     updated_doc = paciente_ref.get()
     data = updated_doc.to_dict()
     data['id'] = updated_doc.id
