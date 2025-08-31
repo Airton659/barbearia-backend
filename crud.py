@@ -287,21 +287,52 @@ def admin_listar_negocios(db: firestore.client) -> List[Dict]:
 #     return None
 
 def admin_listar_usuarios_por_negocio(db: firestore.client, negocio_id: str, status: str = 'ativo') -> List[Dict]:
-    """Lista todos os usuários de um negócio, com filtro de status."""
+    """
+    Lista todos os usuários de um negócio, com filtro de status.
+    CORRIGIDO: Agora trata o parâmetro 'all' para retornar todos os usuários.
+    """
     usuarios = []
-    query = db.collection('usuarios').where(f'roles.{negocio_id}', 'in', ['cliente', 'profissional', 'admin', 'tecnico'])
-    
-    for doc in query.stream():
-        usuario_data = doc.to_dict()
-        status_no_negocio = usuario_data.get('status_por_negocio', {}).get(negocio_id, 'ativo')
-        
-        # APLICA O FILTRO DE STATUS
-        if status_no_negocio == status:
-            usuario_data['id'] = doc.id
-            # ... (o resto da lógica de enriquecimento de dados continua igual)
-            usuarios.append(usuario_data)
+    try:
+        query = db.collection('usuarios').where(f'roles.{negocio_id}', 'in', ['cliente', 'profissional', 'admin', 'tecnico'])
+
+        for doc in query.stream():
+            usuario_data = doc.to_dict()
             
-    return usuarios
+            # LÓGICA DE FILTRO CORRIGIDA
+            deve_incluir = False
+            if status == 'all':
+                deve_incluir = True
+            else:
+                status_no_negocio = usuario_data.get('status_por_negocio', {}).get(negocio_id, 'ativo')
+                if status_no_negocio == status:
+                    deve_incluir = True
+
+            if deve_incluir:
+                usuario_data['id'] = doc.id
+                
+                # A lógica de enriquecimento de dados continua a mesma
+                user_role = usuario_data.get("roles", {}).get(negocio_id)
+                if user_role in ['profissional', 'admin']:
+                    firebase_uid = usuario_data.get('firebase_uid')
+                    if firebase_uid:
+                        perfil_profissional = buscar_profissional_por_uid(db, negocio_id, firebase_uid)
+                        usuario_data['profissional_id'] = perfil_profissional.get('id') if perfil_profissional else None
+                elif user_role == 'cliente':
+                    enfermeiro_user_id = usuario_data.get('enfermeiro_id')
+                    if enfermeiro_user_id:
+                        enfermeiro_doc = db.collection('usuarios').document(enfermeiro_user_id).get()
+                        if enfermeiro_doc.exists:
+                            firebase_uid_enfermeiro = enfermeiro_doc.to_dict().get('firebase_uid')
+                            perfil_enfermeiro = buscar_profissional_por_uid(db, negocio_id, firebase_uid_enfermeiro)
+                            usuario_data['enfermeiro_vinculado_id'] = perfil_enfermeiro.get('id') if perfil_enfermeiro else None
+                    usuario_data['tecnicos_vinculados_ids'] = usuario_data.get('tecnicos_ids', [])
+
+                usuarios.append(usuario_data)
+
+        return usuarios
+    except Exception as e:
+        logger.error(f"Erro ao listar usuários para o negocio_id {negocio_id}: {e}")
+        return []
 
 def admin_set_usuario_status(db: firestore.client, negocio_id: str, user_id: str, status: str, autor_uid: str) -> Optional[Dict]:
     """Define o status de um usuário ('ativo' ou 'inativo') em um negócio."""
