@@ -555,11 +555,14 @@ class PlanoAckStatus(BaseModel):
     ackHoje: bool = Field(..., description="Se já houve confirmação hoje para a versão atual do plano")
     planoVersionId: Optional[str] = Field(None, description="Versão do plano considerada no status")
 
+# Em schemas.py, SUBSTITUA as classes de Anamnese por este bloco inteiro:
+
 # =================================================================================
-# 3. NOVOS SCHEMAS: FICHA DE ANAMNESE
+# SCHEMAS DA FICHA DE AVALIAÇÃO DE ENFERMAGEM (ANAMNESE) - VERSÃO CORRIGIDA CONFORME FRONTEND
 # =================================================================================
 
 class SinaisVitaisAnamnese(BaseModel):
+    # --- OBRIGATÓRIOS (Conforme Seção 4) ---
     pa: str
     fc: str
     fr: str
@@ -567,15 +570,26 @@ class SinaisVitaisAnamnese(BaseModel):
     spo2: str
 
 class AnamneseEnfermagemBase(BaseModel):
+    # --- JÁ ERAM OBRIGATÓRIOS ---
     nome_paciente: str
     data_avaliacao: date
-    tipo_cirurgia: str
-    data_cirurgia: date
-    tipo_anestesia: str
-    cirurgia_eletiva: bool
-    medico_responsavel: str
-    queixa_principal: str
-    historia_doenca_atual: str
+    
+    # --- SEÇÃO 1: OBRIGATÓRIO (Conforme solicitado) ---
+    # idade: int # O frontend já tem esse campo
+    # sexo: str
+    # estado_civil: str
+    # profissao: str
+
+    # --- SEÇÃO 2: DADOS DA CIRURGIA (TORNADOS OPCIONAIS) ---
+    tipo_cirurgia: Optional[str] = None
+    data_cirurgia: Optional[date] = None
+    tipo_anestesia: Optional[str] = None
+    cirurgia_eletiva: Optional[bool] = None
+    medico_responsavel: Optional[str] = None
+
+    # --- SEÇÃO 3: HISTÓRICO (OPCIONAL, Conforme solicitado) ---
+    queixa_principal: Optional[str] = None
+    historia_doenca_atual: Optional[str] = None
     antecedentes_doencas: List[str] = Field(default_factory=list)
     antecedentes_outros: Optional[str] = None
     cirurgias_anteriores: Optional[str] = None
@@ -584,6 +598,8 @@ class AnamneseEnfermagemBase(BaseModel):
     habitos: List[str] = Field(default_factory=list)
     habitos_outros: Optional[str] = None
     historia_familiar: Optional[str] = None
+
+    # --- SEÇÃO 4: AVALIAÇÃO (OBRIGATÓRIO, Conforme solicitado) ---
     sinais_vitais: SinaisVitaisAnamnese
     nivel_consciencia: str
     estado_nutricional: str
@@ -592,10 +608,14 @@ class AnamneseEnfermagemBase(BaseModel):
     sistema_cardiovascular: str
     abdome: str
     eliminacoes_fisiologicas: str
-    drenos_sondas_cateteres: Optional[str] = None
-    ansiedade_relacao_cirurgia: bool
-    apoio_familiar_social: str
+    drenos_sondas_cateteres: str # Alterado para obrigatório conforme front
+
+    # --- SEÇÃO 5: PSICOSSOCIAIS (OPCIONAL, Conforme solicitado) ---
+    ansiedade_relacao_cirurgia: Optional[bool] = None
+    apoio_familiar_social: Optional[str] = None
     necessidades_emocionais_espirituais: Optional[str] = None
+
+    # --- SEÇÕES 6, 7, 8: CAMPOS ABERTOS (OPCIONAIS) ---
     diagnosticos_enfermagem: Optional[str] = None
     planejamento_enfermagem: Optional[str] = None
     observacoes_enfermagem: Optional[str] = None
@@ -604,10 +624,10 @@ class AnamneseEnfermagemCreate(AnamneseEnfermagemBase):
     pass
 
 class AnamneseEnfermagemUpdate(BaseModel):
-    # Permite a atualização de qualquer campo, todos opcionais
+    # Modelo de atualização continua permitindo alterar qualquer campo
     nome_paciente: Optional[str] = None
     data_avaliacao: Optional[date] = None
-    # ... adicione todos os outros campos de AnamneseEnfermagemBase como Optional aqui ...
+    # ... (todos os outros campos de AnamneseEnfermagemBase como Optional) ...
     observacoes_enfermagem: Optional[str] = None
 
 class AnamneseEnfermagemResponse(AnamneseEnfermagemBase):
