@@ -286,10 +286,12 @@ def admin_listar_negocios(db: firestore.client) -> List[Dict]:
 #         return data
 #     return None
 
+# Em crud.py, SUBSTITUA a função 'admin_listar_usuarios_por_negocio' inteira por esta:
+
 def admin_listar_usuarios_por_negocio(db: firestore.client, negocio_id: str, status: str = 'ativo') -> List[Dict]:
     """
     Lista todos os usuários de um negócio, com filtro de status.
-    CORRIGIDO: Agora trata o parâmetro 'all' para retornar todos os usuários.
+    VERSÃO FINAL: Retorna o campo de status corretamente para cada usuário.
     """
     usuarios = []
     try:
@@ -298,19 +300,26 @@ def admin_listar_usuarios_por_negocio(db: firestore.client, negocio_id: str, sta
         for doc in query.stream():
             usuario_data = doc.to_dict()
             
-            # LÓGICA DE FILTRO CORRIGIDA
+            # Pega o status do usuário para o negócio específico, com 'ativo' como padrão.
+            status_no_negocio = usuario_data.get('status_por_negocio', {}).get(negocio_id, 'ativo')
+            
+            # LÓGICA DE FILTRO (continua a mesma)
             deve_incluir = False
             if status == 'all':
                 deve_incluir = True
-            else:
-                status_no_negocio = usuario_data.get('status_por_negocio', {}).get(negocio_id, 'ativo')
-                if status_no_negocio == status:
-                    deve_incluir = True
+            elif status_no_negocio == status:
+                deve_incluir = True
 
             if deve_incluir:
                 usuario_data['id'] = doc.id
                 
-                # A lógica de enriquecimento de dados continua a mesma
+                # ***** A CORREÇÃO ESTÁ AQUI *****
+                # Adiciona o status do negócio ao dicionário de resposta.
+                # O nome do campo foi corrigido no schema para 'status_por_negocio' para ser mais claro.
+                # Esta linha garante que o dado seja populado na resposta da API.
+                usuario_data['status_por_negocio'] = {negocio_id: status_no_negocio}
+
+                # A lógica de enriquecimento de dados continua a mesma...
                 user_role = usuario_data.get("roles", {}).get(negocio_id)
                 if user_role in ['profissional', 'admin']:
                     firebase_uid = usuario_data.get('firebase_uid')
