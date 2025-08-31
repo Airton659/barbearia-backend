@@ -2857,15 +2857,24 @@ def deletar_registro_diario_estruturado(
 # =================================================================================
 
 def criar_anamnese(db: firestore.client, paciente_id: str, anamnese_data: schemas.AnamneseEnfermagemCreate) -> Dict:
+    """Cria um novo registro de anamnese para um paciente."""
     anamnese_dict = anamnese_data.model_dump(mode='json')
     anamnese_dict.update({
         "paciente_id": paciente_id,
-        "created_at": firestore.SERVER_TIMESTAMP,
+        "created_at": firestore.SERVER_TIMESTAMP, # Usa o timestamp do servidor para o DB
         "updated_at": None,
     })
+    
     doc_ref = db.collection('usuarios').document(paciente_id).collection('anamneses').document()
     doc_ref.set(anamnese_dict)
+
+    # --- INÍCIO DA CORREÇÃO ---
+    # Para a RESPOSTA da API, não podemos retornar o 'SERVER_TIMESTAMP'.
+    # Substituímos pelo horário atual do servidor da aplicação, que é válido para o schema.
     anamnese_dict['id'] = doc_ref.id
+    anamnese_dict['created_at'] = datetime.utcnow() # Garante que a resposta seja um datetime válido
+    # --- FIM DA CORREÇÃO ---
+    
     return anamnese_dict
 
 def listar_anamneses_por_paciente(db: firestore.client, paciente_id: str) -> List[Dict]:
