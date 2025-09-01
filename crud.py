@@ -2501,6 +2501,8 @@ def atualizar_item_checklist_diario(db: firestore.client, paciente_id: str, item
 
 # Em crud.py, substitua a função inteira por esta:
 
+# Em crud.py, SUBSTITUA a função inteira por esta:
+
 def get_checklist_diario_plano_ativo(db: firestore.client, paciente_id: str, dia: date, negocio_id: str) -> List[Dict]:
     """
     Busca o checklist do dia com a lógica corrigida.
@@ -2508,12 +2510,11 @@ def get_checklist_diario_plano_ativo(db: firestore.client, paciente_id: str, dia
     2. Se nenhum plano existia naquela data, retorna [].
     3. Se um plano existia, busca o checklist daquela data.
     4. A replicação de um novo checklist só ocorre se a data solicitada for HOJE.
+    5. CORREÇÃO: Garante que a lista final não tenha itens duplicados.
     """
     try:
         # 1. Encontrar o plano de cuidado (consulta) válido para a data solicitada.
-        # A consulta deve ter sido criada em ou antes do final do 'dia'.
         end_of_day = datetime.combine(dia, time.max)
-        
         consulta_ref = db.collection('usuarios').document(paciente_id).collection('consultas')
         query_plano_valido = consulta_ref.where('created_at', '<=', end_of_day)\
                                          .order_by('created_at', direction=firestore.Query.DESCENDING)\
@@ -2521,22 +2522,18 @@ def get_checklist_diario_plano_ativo(db: firestore.client, paciente_id: str, dia
         
         docs_plano_valido = list(query_plano_valido.stream())
 
-        # 2. Se nenhum plano de cuidado existia na data solicitada, retorna lista vazia.
         if not docs_plano_valido:
-            logger.info(f"Nenhum plano de cuidado ativo encontrado para o paciente {paciente_id} na data {dia.isoformat()} ou antes. Retornando checklist vazio.")
+            logger.info(f"Nenhum plano de cuidado ativo para {paciente_id} em {dia.isoformat()}.")
             return []
             
-        plano_valido = docs_plano_valido[0].to_dict()
         plano_valido_id = docs_plano_valido[0].id
-        logger.info(f"Plano de cuidado válido para a data {dia.isoformat()} é a consulta {plano_valido_id}.")
+        logger.info(f"Plano válido para {dia.isoformat()} é a consulta {plano_valido_id}.")
 
-        # 3. Buscar o checklist TEMPLATE associado a esse plano válido.
         checklist_template = listar_checklist(db, paciente_id, plano_valido_id)
         if not checklist_template:
-            logger.info(f"O plano de cuidado válido ({plano_valido_id}) não possui itens de checklist. Retornando lista vazia.")
+            logger.info(f"Plano {plano_valido_id} não possui checklist.")
             return []
 
-        # 4. Tentar buscar os itens de checklist já criados para o 'dia' solicitado.
         col_ref = db.collection('usuarios').document(paciente_id).collection('checklist')
         start_dt = datetime.combine(dia, time.min)
         end_dt = datetime.combine(dia, time.max)
@@ -2548,41 +2545,45 @@ def get_checklist_diario_plano_ativo(db: firestore.client, paciente_id: str, dia
         
         docs_checklist_do_dia = list(query_checklist_do_dia.stream())
 
-        if docs_checklist_do_dia:
-            logger.info(f"Retornando {len(docs_checklist_do_dia)} itens de checklist já existentes para o dia {dia.isoformat()}.")
-            return [{'id': doc.id, 'descricao': doc.to_dict().get('descricao_item', ''), 'concluido': doc.to_dict().get('concluido', False)} for doc in docs_checklist_do_dia]
-
-        # 5. Se não encontrou e a data for HOJE, replica o checklist. Para datas passadas, não faz nada.
-        if dia == date.today():
-            logger.info(f"Nenhum checklist encontrado para hoje. Replicando {len(checklist_template)} itens do plano ativo {plano_valido_id}.")
+        # Se não encontrou e a data for HOJE, replica o checklist.
+        if not docs_checklist_do_dia and dia == date.today():
+            logger.info(f"Replicando {len(checklist_template)} itens do plano {plano_valido_id} para hoje.")
             batch = db.batch()
-            novos_itens_resposta = []
-            
             for item_template in checklist_template:
-                novos_dados = {
-                    "paciente_id": paciente_id,
-                    "negocio_id": negocio_id,
+                novo_doc_ref = col_ref.document()
+                batch.set(novo_doc_ref, {
+                    "paciente_id": paciente_id, "negocio_id": negocio_id,
                     "descricao_item": item_template.get("descricao_item", "Item sem descrição"),
                     "concluido": False,
                     "data_criacao": datetime.combine(dia, datetime.utcnow().time()),
                     "consulta_id": plano_valido_id
-                }
-                novo_doc_ref = col_ref.document()
-                batch.set(novo_doc_ref, novos_dados)
-                novos_itens_resposta.append({'id': novo_doc_ref.id, 'descricao': novos_dados['descricao_item'], 'concluido': novos_dados['concluido']})
-            
+                })
             batch.commit()
-            logger.info(f"Checklist replicado com sucesso para o paciente {paciente_id} no dia {dia.isoformat()}.")
-            return novos_itens_resposta
-        
-        # 6. Se a data for no passado e não havia checklist, retorna vazio.
-        logger.info(f"Nenhum checklist encontrado para a data passada {dia.isoformat()}. Não será criado um novo. Retornando lista vazia.")
-        return []
+            # Após a replicação, busca novamente para obter os IDs corretos
+            docs_checklist_do_dia = list(query_checklist_do_dia.stream())
+
+        # --- INÍCIO DA CORREÇÃO CONTRA DUPLICATAS ---
+        itens_formatados = []
+        descricoes_vistas = set()
+        for doc in docs_checklist_do_dia:
+            item_data = doc.to_dict()
+            descricao = item_data.get('descricao_item', '')
+            if descricao not in descricoes_vistas:
+                itens_formatados.append({
+                    'id': doc.id,
+                    'descricao': descricao,
+                    'concluido': item_data.get('concluido', False)
+                })
+                descricoes_vistas.add(descricao)
+        # --- FIM DA CORREÇÃO ---
+
+        logger.info(f"Retornando {len(itens_formatados)} itens de checklist únicos para o dia {dia.isoformat()}.")
+        return itens_formatados
 
     except Exception as e:
         logger.error(f"ERRO CRÍTICO ao buscar checklist do plano ativo para o paciente {paciente_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Erro interno ao processar o checklist: {e}")
-
+    
 # =================================================================================
 # FUNÇÕES DE REGISTROS DIÁRIOS ESTRUTURADOS
 # =================================================================================
