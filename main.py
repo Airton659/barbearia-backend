@@ -81,11 +81,12 @@ def admin_listar_negocios(
 @app.get("/negocios/{negocio_id}/usuarios", response_model=List[schemas.UsuarioProfile], tags=["Admin - Gestão do Negócio"])
 def listar_usuarios_do_negocio(
     negocio_id: str = Depends(validate_path_negocio_id),
-    status: str = Query('ativo', description="Filtre por status: 'ativo' ou 'arquivado'."),
-    admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+    status: str = Query('ativo', description="Filtre por status: 'ativo', 'inativo' ou 'all'."),
+    # ***** A CORREÇÃO ESTÁ AQUI *****
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
-    """(Admin de Negócio) Lista todos os usuários (clientes, técnicos e profissionais) do seu negócio."""
+    """(Admin ou Enfermeiro) Lista todos os usuários (clientes, técnicos e profissionais) do negócio."""
     return crud.admin_listar_usuarios_por_negocio(db, negocio_id, status)
 
 @app.get("/negocios/{negocio_id}/clientes", response_model=List[schemas.UsuarioProfile], tags=["Admin - Gestão do Negócio"])
@@ -1588,10 +1589,11 @@ def criar_anamnese(
 @app.get("/pacientes/{paciente_id}/anamnese", response_model=List[schemas.AnamneseEnfermagemResponse], tags=["Anamnese"])
 def listar_anamneses(
     paciente_id: str,
-    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    # ***** A CORREÇÃO ESTÁ AQUI *****
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado_anamnese),
     db: firestore.client = Depends(get_db)
 ):
-    """(Autorizado) Lista todas as fichas de anamnese de um paciente."""
+    """(Autorizado, EXCETO Técnico) Lista todas as fichas de anamnese de um paciente."""
     return crud.listar_anamneses_por_paciente(db, paciente_id)
 
 @app.put("/anamnese/{anamnese_id}", response_model=schemas.AnamneseEnfermagemResponse, tags=["Anamnese"])

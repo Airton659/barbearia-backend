@@ -254,3 +254,44 @@ def get_current_tecnico_user(
         )
     return current_user
 # --- FIM DO NOVO BLOCO DE CÓDIGO ---
+
+
+# Em auth.py, adicione esta nova função no final do arquivo
+
+def get_paciente_autorizado_anamnese(
+    paciente_id: str = Path(..., description="ID do paciente cujos dados estão sendo acessados."),
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db = Depends(get_db)
+) -> schemas.UsuarioProfile:
+    """
+    Dependência de segurança para Anamnese.
+    Permite acesso apenas ao próprio paciente, ao admin, ou ao enfermeiro vinculado.
+    BLOQUEIA O ACESSO DE TÉCNICOS.
+    """
+    # 1. O próprio paciente sempre tem acesso.
+    if current_user.id == paciente_id:
+        return current_user
+
+    paciente_doc = db.collection('usuarios').document(paciente_id).get()
+    if not paciente_doc.exists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paciente não encontrado.")
+    
+    paciente_data = paciente_doc.to_dict()
+    negocio_id_paciente = list(paciente_data.get('roles', {}).keys())[0] if paciente_data.get('roles') else None
+    if not negocio_id_paciente:
+         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Paciente não está associado a uma clínica.")
+
+    # 2. O Gestor (admin) da clínica do paciente tem acesso.
+    if current_user.roles.get(negocio_id_paciente) == 'admin':
+        return current_user
+        
+    # 3. O Enfermeiro vinculado ao paciente tem acesso.
+    enfermeiro_vinculado_id = paciente_data.get('enfermeiro_id')
+    if enfermeiro_vinculado_id and current_user.id == enfermeiro_vinculado_id:
+        return current_user
+
+    # 4. Nenhuma outra role (incluindo técnico) tem acesso.
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Acesso negado: seu perfil não tem permissão para visualizar ou modificar a Ficha de Avaliação."
+    )
