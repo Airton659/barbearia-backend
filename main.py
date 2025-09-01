@@ -7,10 +7,11 @@ import logging
 from datetime import date
 from database import initialize_firebase_app, get_db
 from auth import (
-    get_current_user_firebase, get_super_admin_user, get_current_admin_user, 
-    get_current_profissional_user, get_optional_current_user_firebase, 
-    validate_negocio_id, validate_path_negocio_id, get_paciente_autorizado, 
-    get_current_admin_or_profissional_user, get_current_tecnico_user
+    get_current_user_firebase, get_super_admin_user, get_current_admin_user,
+    get_current_profissional_user, get_optional_current_user_firebase,
+    validate_negocio_id, validate_path_negocio_id, get_paciente_autorizado,
+    get_current_admin_or_profissional_user, get_current_tecnico_user,
+    get_paciente_autorizado_anamnese  # <<<--- ADICIONA A FUNÇÃO QUE FALTAVA AQUI
 )
 from firebase_admin import firestore
 from pydantic import BaseModel
