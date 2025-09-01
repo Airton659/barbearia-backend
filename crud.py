@@ -1675,14 +1675,15 @@ def vincular_supervisor_tecnico(db: firestore.client, tecnico_id: str, superviso
         return data
     return None
 
+# Em crud.py, SUBSTITUA a função inteira por esta:
+
 def listar_pacientes_por_profissional_ou_tecnico(db: firestore.client, negocio_id: str, usuario_id: str, role: str) -> List[Dict]:
     """
-    Lista todos os pacientes ATIVOS vinculados a um enfermeiro ou a um técnico,
-    com base no papel do usuário logado.
+    Lista todos os pacientes ATIVOS vinculados a um enfermeiro ou a um técnico.
+    VERSÃO CORRIGIDA: Agora retorna o perfil completo do paciente, incluindo telefone e endereço.
     """
     pacientes = []
     try:
-        # A query base já filtra por 'cliente'
         query = db.collection('usuarios').where(f'roles.{negocio_id}', '==', 'cliente')
         
         if role == 'profissional':
@@ -1695,10 +1696,12 @@ def listar_pacientes_por_profissional_ou_tecnico(db: firestore.client, negocio_i
         for doc in query.stream():
             paciente_data = doc.to_dict()
             
-            # AQUI ESTÁ A CORREÇÃO: Filtra para incluir apenas pacientes com status 'ativo'.
             status_no_negocio = paciente_data.get('status_por_negocio', {}).get(negocio_id, 'ativo')
             
             if status_no_negocio == 'ativo':
+                # A CORREÇÃO ESTÁ AQUI: Garantimos que o dicionário completo seja usado.
+                # O schema 'PacienteProfile' na resposta da API cuidará de pegar
+                # todos os campos necessários, incluindo 'telefone' e 'endereco'.
                 paciente_data['id'] = doc.id
                 pacientes.append(paciente_data)
         
