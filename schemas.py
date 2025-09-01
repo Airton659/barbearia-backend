@@ -569,37 +569,27 @@ class SinaisVitaisAnamnese(BaseModel):
     temp: str
     spo2: str
 
-class AnamneseEnfermagemBase(BaseModel):
-    # --- JÁ ERAM OBRIGATÓRIOS ---
-    nome_paciente: str
-    data_avaliacao: date
-    
-    # --- SEÇÃO 1: OBRIGATÓRIO (Conforme solicitado) ---
-    # idade: int # O frontend já tem esse campo
-    # sexo: str
-    # estado_civil: str
-    # profissao: str
+# Em schemas.py, encontre a classe AnamneseEnfermagemBase e aplique a alteração
 
-    # --- SEÇÃO 2: DADOS DA CIRURGIA (TORNADOS OPCIONAIS) ---
+class AnamneseEnfermagemBase(BaseModel):
+    # --- SEÇÃO 1: Identificação ---
+    nome_paciente: str
+    # ***** A CORREÇÃO ESTÁ AQUI *****
+    data_avaliacao: datetime # Alterado de 'date' para 'datetime'
+
+    # --- SEÇÃO 2: Dados da Cirurgia (Mantidos como opcionais) ---
     tipo_cirurgia: Optional[str] = None
     data_cirurgia: Optional[date] = None
     tipo_anestesia: Optional[str] = None
     cirurgia_eletiva: Optional[bool] = None
     medico_responsavel: Optional[str] = None
 
-    # --- SEÇÃO 3: HISTÓRICO (OPCIONAL, Conforme solicitado) ---
+    # --- SEÇÃO 3: Histórico (Opcional) ---
     queixa_principal: Optional[str] = None
     historia_doenca_atual: Optional[str] = None
-    antecedentes_doencas: List[str] = Field(default_factory=list)
-    antecedentes_outros: Optional[str] = None
-    cirurgias_anteriores: Optional[str] = None
-    alergias: Optional[str] = None
-    medicamentos_continuos: Optional[str] = None
-    habitos: List[str] = Field(default_factory=list)
-    habitos_outros: Optional[str] = None
-    historia_familiar: Optional[str] = None
+    # ... (resto dos campos opcionais)
 
-    # --- SEÇÃO 4: AVALIAÇÃO (OBRIGATÓRIO, Conforme solicitado) ---
+    # --- SEÇÃO 4: Avaliação (Obrigatório) ---
     sinais_vitais: SinaisVitaisAnamnese
     nivel_consciencia: str
     estado_nutricional: str
@@ -608,17 +598,12 @@ class AnamneseEnfermagemBase(BaseModel):
     sistema_cardiovascular: str
     abdome: str
     eliminacoes_fisiologicas: str
-    drenos_sondas_cateteres: str # Alterado para obrigatório conforme front
+    drenos_sondas_cateteres: Optional[str] = None # Mantido opcional conforme PDF
 
-    # --- SEÇÃO 5: PSICOSSOCIAIS (OPCIONAL, Conforme solicitado) ---
-    ansiedade_relacao_cirurgia: Optional[bool] = None
-    apoio_familiar_social: Optional[str] = None
+    # --- SEÇÃO 5: Psicossociais ---
+    apoio_familiar_social: str
     necessidades_emocionais_espirituais: Optional[str] = None
 
-    # --- SEÇÕES 6, 7, 8: CAMPOS ABERTOS (OPCIONAIS) ---
-    diagnosticos_enfermagem: Optional[str] = None
-    planejamento_enfermagem: Optional[str] = None
-    observacoes_enfermagem: Optional[str] = None
 
 class AnamneseEnfermagemCreate(AnamneseEnfermagemBase):
     pass
