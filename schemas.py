@@ -557,39 +557,45 @@ class PlanoAckStatus(BaseModel):
 
 # Em schemas.py, SUBSTITUA as classes de Anamnese por este bloco inteiro:
 
+# Em schemas.py, SUBSTITUA todas as classes de Anamnese por este bloco:
+
 # =================================================================================
-# SCHEMAS DA FICHA DE AVALIAÇÃO DE ENFERMAGEM (ANAMNESE) - VERSÃO CORRIGIDA CONFORME FRONTEND
+# SCHEMAS DA FICHA DE AVALIAÇÃO DE ENFERMAGEM (ANAMNESE) - VERSÃO FINAL, COMPLETA E CORRETA
 # =================================================================================
 
 class SinaisVitaisAnamnese(BaseModel):
-    # --- OBRIGATÓRIOS (Conforme Seção 4) ---
+    # OBRIGATÓRIOS (Conforme Seção 4)
     pa: str
     fc: str
     fr: str
     temp: str
     spo2: str
 
-# Em schemas.py, encontre a classe AnamneseEnfermagemBase e aplique a alteração
-
 class AnamneseEnfermagemBase(BaseModel):
-    # --- SEÇÃO 1: Identificação ---
+    # --- DADOS GERAIS OBRIGATÓRIOS ---
     nome_paciente: str
-    # ***** A CORREÇÃO ESTÁ AQUI *****
-    data_avaliacao: datetime # Alterado de 'date' para 'datetime'
+    data_avaliacao: datetime
+    responsavel_id: str
 
-    # --- SEÇÃO 2: Dados da Cirurgia (Mantidos como opcionais) ---
-    tipo_cirurgia: Optional[str] = None
-    data_cirurgia: Optional[date] = None
-    tipo_anestesia: Optional[str] = None
-    cirurgia_eletiva: Optional[bool] = None
-    medico_responsavel: Optional[str] = None
+    # --- SEÇÃO 1: Identificação do Paciente (OBRIGATÓRIO) ---
+    idade: int
+    sexo: str
+    estado_civil: str
+    profissao: str
 
-    # --- SEÇÃO 3: Histórico (Opcional) ---
+    # --- SEÇÃO 3: Histórico de Enfermagem (OPCIONAL) ---
     queixa_principal: Optional[str] = None
     historia_doenca_atual: Optional[str] = None
-    # ... (resto dos campos opcionais)
+    antecedentes_doencas: List[str] = Field(default_factory=list)
+    antecedentes_outros: Optional[str] = None
+    cirurgias_anteriores: Optional[str] = None
+    alergias: Optional[str] = None
+    medicamentos_continuos: Optional[str] = None
+    habitos: List[str] = Field(default_factory=list)
+    habitos_outros: Optional[str] = None
+    historia_familiar: Optional[str] = None
 
-    # --- SEÇÃO 4: Avaliação (Obrigatório) ---
+    # --- SEÇÃO 4: Avaliação do Estado Atual (OBRIGATÓRIO) ---
     sinais_vitais: SinaisVitaisAnamnese
     nivel_consciencia: str
     estado_nutricional: str
@@ -598,22 +604,45 @@ class AnamneseEnfermagemBase(BaseModel):
     sistema_cardiovascular: str
     abdome: str
     eliminacoes_fisiologicas: str
-    drenos_sondas_cateteres: Optional[str] = None # Mantido opcional conforme PDF
+    drenos_sondas_cateteres: str
 
-    # --- SEÇÃO 5: Psicossociais ---
-    apoio_familiar_social: str
+    # --- SEÇÃO 5: Aspectos Psicossociais (OPCIONAL) ---
+    apoio_familiar_social: Optional[str] = None
     necessidades_emocionais_espirituais: Optional[str] = None
-
 
 class AnamneseEnfermagemCreate(AnamneseEnfermagemBase):
     pass
 
 class AnamneseEnfermagemUpdate(BaseModel):
-    # Modelo de atualização continua permitindo alterar qualquer campo
+    # CÓDIGO COMPLETO, SEM RESUMO
     nome_paciente: Optional[str] = None
-    data_avaliacao: Optional[date] = None
-    # ... (todos os outros campos de AnamneseEnfermagemBase como Optional) ...
-    observacoes_enfermagem: Optional[str] = None
+    data_avaliacao: Optional[datetime] = None
+    responsavel_id: Optional[str] = None
+    idade: Optional[int] = None
+    sexo: Optional[str] = None
+    estado_civil: Optional[str] = None
+    profissao: Optional[str] = None
+    queixa_principal: Optional[str] = None
+    historia_doenca_atual: Optional[str] = None
+    antecedentes_doencas: Optional[List[str]] = None
+    antecedentes_outros: Optional[str] = None
+    cirurgias_anteriores: Optional[str] = None
+    alergias: Optional[str] = None
+    medicamentos_continuos: Optional[str] = None
+    habitos: Optional[List[str]] = None
+    habitos_outros: Optional[str] = None
+    historia_familiar: Optional[str] = None
+    sinais_vitais: Optional[SinaisVitaisAnamnese] = None
+    nivel_consciencia: Optional[str] = None
+    estado_nutricional: Optional[str] = None
+    pele_mucosas: Optional[str] = None
+    sistema_respiratorio: Optional[str] = None
+    sistema_cardiovascular: Optional[str] = None
+    abdome: Optional[str] = None
+    eliminacoes_fisiologicas: Optional[str] = None
+    drenos_sondas_cateteres: Optional[str] = None
+    apoio_familiar_social: Optional[str] = None
+    necessidades_emocionais_espirituais: Optional[str] = None
 
 class AnamneseEnfermagemResponse(AnamneseEnfermagemBase):
     id: str
