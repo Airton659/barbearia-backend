@@ -952,14 +952,18 @@ def listar_meus_pacientes(
     db: firestore.client = Depends(get_db)
 ):
     """
-    (Profissional/Enfermeiro ou Técnico)
-    Lista todos os pacientes vinculados ao usuário logado, com base na sua role.
+    (Gestor, Enfermeiro ou Técnico)
+    Lista os pacientes. Para Gestores, retorna TODOS os pacientes do negócio.
+    Para Enfermeiros/Técnicos, retorna apenas os pacientes vinculados.
     """
     user_role = current_user.roles.get(negocio_id)
-    if user_role not in ["profissional", "tecnico"]:
+    
+    # ***** A CORREÇÃO ESTÁ AQUI *****
+    # Adiciona 'admin' à lista de roles permitidas.
+    if user_role not in ["profissional", "tecnico", "admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Acesso negado: esta operação é apenas para profissionais (enfermeiros) ou técnicos."
+            detail="Acesso negado: seu perfil não tem permissão para visualizar pacientes."
         )
 
     pacientes = crud.listar_pacientes_por_profissional_ou_tecnico(db, negocio_id, current_user.id, user_role)

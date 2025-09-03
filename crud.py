@@ -1677,16 +1677,24 @@ def vincular_supervisor_tecnico(db: firestore.client, tecnico_id: str, superviso
 
 # Em crud.py, SUBSTITUA a função inteira por esta:
 
+# Em crud.py, SUBSTITUA esta função inteira:
+
 def listar_pacientes_por_profissional_ou_tecnico(db: firestore.client, negocio_id: str, usuario_id: str, role: str) -> List[Dict]:
     """
-    Lista todos os pacientes ATIVOS vinculados a um enfermeiro ou a um técnico.
-    VERSÃO CORRIGIDA: Agora retorna o perfil completo do paciente, incluindo telefone e endereço.
+    Lista todos os pacientes ATIVOS.
+    - Se a role for 'admin', retorna TODOS os pacientes do negócio.
+    - Se a role for 'profissional' ou 'tecnico', retorna apenas os pacientes vinculados.
     """
     pacientes = []
     try:
         query = db.collection('usuarios').where(f'roles.{negocio_id}', '==', 'cliente')
         
-        if role == 'profissional':
+        # ***** A CORREÇÃO ESTÁ AQUI *****
+        # Adiciona a lógica para o gestor ('admin')
+        if role == 'admin':
+            # Se for admin, não aplica filtro de vínculo, pega todos os clientes do negócio.
+            pass
+        elif role == 'profissional':
             query = query.where('enfermeiro_id', '==', usuario_id)
         elif role == 'tecnico':
             query = query.where('tecnicos_ids', 'array_contains', usuario_id)
@@ -1695,13 +1703,9 @@ def listar_pacientes_por_profissional_ou_tecnico(db: firestore.client, negocio_i
 
         for doc in query.stream():
             paciente_data = doc.to_dict()
-            
             status_no_negocio = paciente_data.get('status_por_negocio', {}).get(negocio_id, 'ativo')
             
             if status_no_negocio == 'ativo':
-                # A CORREÇÃO ESTÁ AQUI: Garantimos que o dicionário completo seja usado.
-                # O schema 'PacienteProfile' na resposta da API cuidará de pegar
-                # todos os campos necessários, incluindo 'telefone' e 'endereco'.
                 paciente_data['id'] = doc.id
                 pacientes.append(paciente_data)
         
@@ -1709,7 +1713,7 @@ def listar_pacientes_por_profissional_ou_tecnico(db: firestore.client, negocio_i
     except Exception as e:
         logger.error(f"Erro ao listar pacientes para o usuário {usuario_id} com role '{role}': {e}")
         return []
-    
+        
     
 def criar_consulta(db: firestore.client, consulta_data: schemas.ConsultaCreate) -> Dict:
     """Salva uma nova consulta na subcoleção de um paciente."""
