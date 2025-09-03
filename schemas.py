@@ -651,5 +651,30 @@ class AnamneseEnfermagemResponse(AnamneseEnfermagemBase):
     updated_at: Optional[datetime] = None
 
 
+# =================================================================================
+# SCHEMAS DE SUPORTE PSICOLÓGICO
+# =================================================================================
+
+class SuportePsicologicoBase(BaseModel):
+    titulo: str = Field(..., min_length=3, max_length=100)
+    conteudo: str = Field(..., min_length=5, max_length=1000)
+
+class SuportePsicologicoCreate(SuportePsicologicoBase):
+    pass
+
+class SuportePsicologicoUpdate(BaseModel):
+    titulo: Optional[str] = Field(None, min_length=3, max_length=100)
+    conteudo: Optional[str] = Field(None, min_length=5, max_length=1000)
+
+class SuportePsicologicoResponse(SuportePsicologicoBase):
+    id: str
+    paciente_id: str
+    negocio_id: str
+    tipo: str = Field(..., description="'link' ou 'texto'")
+    criado_por: str = Field(..., description="ID do usuário que criou o recurso.")
+    data_criacao: datetime
+    data_atualizacao: Optional[datetime] = None
+
+
 ProfissionalResponse.model_rebuild()
 DiarioTecnicoResponse.model_rebuild()

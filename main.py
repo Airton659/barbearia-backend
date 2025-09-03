@@ -1659,3 +1659,55 @@ def atualizar_endereco_paciente(
     if not paciente_atualizado:
         raise HTTPException(status_code=404, detail="Paciente não encontrado.")
     return paciente_atualizado
+
+
+
+# =================================================================================
+# ENDPOINTS DE SUPORTE PSICOLÓGICO
+# =================================================================================
+
+@app.get("/pacientes/{paciente_id}/suporte-psicologico", response_model=List[schemas.SuportePsicologicoResponse], tags=["Suporte Psicológico"])
+def get_suportes_psicologicos(
+    paciente_id: str,
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin, Enfermeiro ou Técnico) Lista todos os recursos de suporte psicológico do paciente."""
+    return crud.listar_suportes_psicologicos(db, paciente_id)
+
+@app.post("/pacientes/{paciente_id}/suporte-psicologico", response_model=schemas.SuportePsicologicoResponse, status_code=status.HTTP_201_CREATED, tags=["Suporte Psicológico"])
+def create_suporte_psicologico(
+    paciente_id: str,
+    suporte_data: schemas.SuportePsicologicoCreate,
+    negocio_id: str = Depends(validate_negocio_id),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin, Enfermeiro ou Técnico) Cria um novo recurso de suporte (link ou texto)."""
+    return crud.criar_suporte_psicologico(db, paciente_id, negocio_id, suporte_data, current_user.id)
+
+@app.put("/pacientes/{paciente_id}/suporte-psicologico/{suporte_id}", response_model=schemas.SuportePsicologicoResponse, tags=["Suporte Psicológico"])
+def update_suporte_psicologico(
+    paciente_id: str,
+    suporte_id: str,
+    update_data: schemas.SuportePsicologicoUpdate,
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin, Enfermeiro ou Técnico) Atualiza um recurso de suporte existente."""
+    suporte_atualizado = crud.atualizar_suporte_psicologico(db, paciente_id, suporte_id, update_data)
+    if not suporte_atualizado:
+        raise HTTPException(status_code=404, detail="Recurso de suporte não encontrado.")
+    return suporte_atualizado
+
+@app.delete("/pacientes/{paciente_id}/suporte-psicologico/{suporte_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Suporte Psicológico"])
+def delete_suporte_psicologico(
+    paciente_id: str,
+    suporte_id: str,
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin, Enfermeiro ou Técnico) Deleta um recurso de suporte."""
+    if not crud.deletar_suporte_psicologico(db, paciente_id, suporte_id):
+        raise HTTPException(status_code=404, detail="Recurso de suporte não encontrado.")
+    return

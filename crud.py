@@ -2919,3 +2919,86 @@ def atualizar_endereco_paciente(db: firestore.client, paciente_id: str, endereco
     data = updated_doc.to_dict()
     data['id'] = updated_doc.id
     return data
+
+
+# =================================================================================
+# FUNÇÕES DE SUPORTE PSICOLÓGICO
+# =================================================================================
+
+def _detectar_tipo_conteudo(conteudo: str) -> str:
+    """Detecta se o conteúdo é um link ou texto simples."""
+    if conteudo.strip().lower().startswith(('http://', 'https://')):
+        return "link"
+    return "texto"
+
+def criar_suporte_psicologico(
+    db: firestore.client,
+    paciente_id: str,
+    negocio_id: str,
+    suporte_data: schemas.SuportePsicologicoCreate,
+    criado_por_id: str
+) -> Dict:
+    """Cria um novo recurso de suporte psicológico para um paciente."""
+    suporte_dict = suporte_data.model_dump()
+    suporte_dict.update({
+        "paciente_id": paciente_id,
+        "negocio_id": negocio_id,
+        "criado_por": criado_por_id,
+        "tipo": _detectar_tipo_conteudo(suporte_data.conteudo),
+        "data_criacao": firestore.SERVER_TIMESTAMP,
+        "data_atualizacao": firestore.SERVER_TIMESTAMP,
+    })
+    
+    doc_ref = db.collection('usuarios').document(paciente_id).collection('suporte_psicologico').document()
+    doc_ref.set(suporte_dict)
+    
+    # Para a resposta, substituímos o ServerTimestamp por um datetime real
+    suporte_dict['id'] = doc_ref.id
+    now = datetime.utcnow()
+    suporte_dict['data_criacao'] = now
+    suporte_dict['data_atualizacao'] = now
+    
+    return suporte_dict
+
+def listar_suportes_psicologicos(db: firestore.client, paciente_id: str) -> List[Dict]:
+    """Lista todos os recursos de suporte psicológico de um paciente."""
+    suportes = []
+    query = db.collection('usuarios').document(paciente_id).collection('suporte_psicologico').order_by('data_criacao', direction=firestore.Query.DESCENDING)
+    for doc in query.stream():
+        data = doc.to_dict()
+        data['id'] = doc.id
+        suportes.append(data)
+    return suportes
+
+def atualizar_suporte_psicologico(
+    db: firestore.client,
+    paciente_id: str,
+    suporte_id: str,
+    update_data: schemas.SuportePsicologicoUpdate
+) -> Optional[Dict]:
+    """Atualiza um recurso de suporte psicológico existente."""
+    suporte_ref = db.collection('usuarios').document(paciente_id).collection('suporte_psicologico').document(suporte_id)
+    if not suporte_ref.get().exists:
+        return None
+        
+    update_dict = update_data.model_dump(exclude_unset=True)
+    
+    # Se o conteúdo for atualizado, reavalia o tipo
+    if 'conteudo' in update_dict:
+        update_dict['tipo'] = _detectar_tipo_conteudo(update_dict['conteudo'])
+        
+    update_dict['data_atualizacao'] = firestore.SERVER_TIMESTAMP
+    suporte_ref.update(update_dict)
+    
+    updated_doc = suporte_ref.get()
+    data = updated_doc.to_dict()
+    data['id'] = updated_doc.id
+    return data
+
+def deletar_suporte_psicologico(db: firestore.client, paciente_id: str, suporte_id: str) -> bool:
+    """Deleta um recurso de suporte psicológico."""
+    suporte_ref = db.collection('usuarios').document(paciente_id).collection('suporte_psicologico').document(suporte_id)
+    if not suporte_ref.get().exists:
+        return False
+    suporte_ref.delete()
+    return True
