@@ -3002,3 +3002,33 @@ def deletar_suporte_psicologico(db: firestore.client, paciente_id: str, suporte_
         return False
     suporte_ref.delete()
     return True
+
+# =================================================================================
+# NOVA FUNÇÃO: CONSENTIMENTO LGPD
+# =================================================================================
+
+def atualizar_consentimento_lgpd(db: firestore.client, user_id: str, consent_data: schemas.ConsentimentoLGPDUpdate) -> Optional[Dict]:
+    """
+    Atualiza os dados de consentimento LGPD para um usuário específico.
+    """
+    user_ref = db.collection('usuarios').document(user_id)
+    user_doc = user_ref.get()
+
+    if not user_doc.exists:
+        logger.warning(f"Tentativa de atualizar consentimento de usuário inexistente: {user_id}")
+        return None
+
+    # Converte o modelo Pydantic para um dicionário para o Firestore
+    update_dict = consent_data.model_dump()
+    
+    # Garante que o enum seja salvo como string
+    update_dict['tipo_consentimento'] = update_dict['tipo_consentimento'].value
+
+    user_ref.update(update_dict)
+    logger.info(f"Consentimento LGPD atualizado para o usuário {user_id}.")
+
+    # Retorna o documento completo e atualizado
+    updated_doc = user_ref.get()
+    data = updated_doc.to_dict()
+    data['id'] = updated_doc.id
+    return data

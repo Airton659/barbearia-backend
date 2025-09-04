@@ -1711,3 +1711,21 @@ def delete_suporte_psicologico(
     if not crud.deletar_suporte_psicologico(db, paciente_id, suporte_id):
         raise HTTPException(status_code=404, detail="Recurso de suporte não encontrado.")
     return
+
+
+@app.patch("/negocios/{negocio_id}/usuarios/{user_id}/consent", response_model=schemas.UsuarioProfile, tags=["Admin - Gestão do Negócio"])
+def update_user_consent(
+    negocio_id: str = Depends(validate_path_negocio_id),
+    user_id: str = Path(..., description="ID do usuário a ser atualizado."),
+    consent_data: schemas.ConsentimentoLGPDUpdate = ...,
+    # Permissão: Apenas Admin ou Profissional do negócio podem atualizar o consentimento
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin ou Enfermeiro) Atualiza os dados de consentimento LGPD de um usuário."""
+    usuario_atualizado = crud.atualizar_consentimento_lgpd(db, user_id, consent_data)
+    
+    if not usuario_atualizado:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+        
+    return usuario_atualizado

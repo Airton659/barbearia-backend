@@ -3,7 +3,7 @@
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from datetime import datetime, time, date
 from typing import Optional, List, Dict, Union
-
+from enum import Enum
 # =================================================================================
 # SCHEMAS CENTRAIS (ARQUITETURA MULTI-TENANT)
 # =================================================================================
@@ -51,15 +51,20 @@ class UsuarioBase(BaseModel):
 
 # Em UsuarioProfile, adicione 'status_por_negocio' e o novo modelo de Endereco
 class UsuarioProfile(UsuarioBase):
-    id: str
-    roles: dict[str, str]
+    id: str = Field(..., description="ID do documento do usuário no Firestore.")
+    roles: dict[str, str] = Field({}, description="Dicionário de negocio_id para role.")
     status_por_negocio: Dict[str, str] = Field({}, description="Status do usuário por negócio (ex: 'ativo', 'inativo').")
     fcm_tokens: List[str] = []
-    profissional_id: Optional[str] = None
-    supervisor_id: Optional[str] = None
-    enfermeiro_vinculado_id: Optional[str] = None
-    tecnicos_vinculados_ids: Optional[List[str]] = None
+    profissional_id: Optional[str] = Field(None, description="ID do perfil profissional, se aplicável.")
+    supervisor_id: Optional[str] = Field(None, description="ID do usuário supervisor.")
+    enfermeiro_vinculado_id: Optional[str] = Field(None, description="ID do profissional (enfermeiro) vinculado.")
+    tecnicos_vinculados_ids: Optional[List[str]] = Field(None, description="Lista de IDs dos técnicos vinculados.")
     endereco: Optional[Endereco] = None
+    
+    # --- NOVOS CAMPOS ADICIONADOS AQUI ---
+    consentimento_lgpd: Optional[bool] = None
+    data_consentimento_lgpd: Optional[datetime] = None
+    tipo_consentimento: Optional[str] = None
 
 # Em UsuarioSync, remova 'endereco'
 class UsuarioSync(BaseModel):
@@ -674,6 +679,19 @@ class SuportePsicologicoResponse(SuportePsicologicoBase):
     criado_por: str = Field(..., description="ID do usuário que criou o recurso.")
     data_criacao: datetime
     data_atualizacao: Optional[datetime] = None
+
+# =================================================================================
+# NOVO: SCHEMAS DE CONSENTIMENTO LGPD
+# =================================================================================
+
+class TipoConsentimentoEnum(str, Enum):
+    digital = "digital"
+    fisico = "fisico"
+
+class ConsentimentoLGPDUpdate(BaseModel):
+    consentimento_lgpd: bool
+    data_consentimento_lgpd: datetime
+    tipo_consentimento: TipoConsentimentoEnum
 
 
 ProfissionalResponse.model_rebuild()
