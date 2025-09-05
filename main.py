@@ -439,6 +439,23 @@ def get_exames(
     # O filtro por 'consulta_id' foi removido
     return crud.listar_exames(db, paciente_id)
 
+@app.put("/pacientes/{paciente_id}/exames/{exame_id}", response_model=schemas.ExameResponse, tags=["Ficha do Paciente"])
+def update_exame(
+    paciente_id: str,
+    exame_id: str,
+    update_data: schemas.ExameUpdate,
+    # Permissão: Apenas Admin ou Profissional (Enfermeiro) podem editar
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """
+    (Admin ou Enfermeiro) Atualiza um exame existente na ficha do paciente.
+    """
+    exame_atualizado = crud.update_exame(db, paciente_id, exame_id, update_data)
+    if not exame_atualizado:
+        raise HTTPException(status_code=404, detail="Exame não encontrado.")
+    return exame_atualizado
+
 @app.get("/pacientes/{paciente_id}/medicacoes", response_model=List[schemas.MedicacaoResponse], tags=["Ficha do Paciente"])
 def get_medicacoes(
     paciente_id: str,
