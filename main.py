@@ -359,13 +359,20 @@ def adicionar_consulta(
 def adicionar_exame(
     paciente_id: str,
     exame_data: schemas.ExameCreate,
+    # ***** A CORREÇÃO ESTÁ AQUI *****
+    # negocio_id agora vem do Header, como no PUT e DELETE
+    negocio_id: str = Depends(validate_negocio_id),
     current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Admin ou Enfermeiro) Adiciona um novo exame à ficha do paciente."""
-    exame_data.paciente_id = paciente_id
-    # Passa o firebase_uid do criador para a função do CRUD
-    return crud.adicionar_exame(db, exame_data, current_user.firebase_uid)
+    # Cria um objeto completo com os dados do body + os da rota/header
+    exame_data_completo = schemas.ExameBase(
+        **exame_data.model_dump(),
+        paciente_id=paciente_id,
+        negocio_id=negocio_id
+    )
+    return crud.adicionar_exame(db, exame_data_completo, current_user.firebase_uid)
 
 @app.post("/pacientes/{paciente_id}/medicacoes", response_model=schemas.MedicacaoResponse, status_code=status.HTTP_201_CREATED, tags=["Ficha do Paciente"])
 def adicionar_medicacao(

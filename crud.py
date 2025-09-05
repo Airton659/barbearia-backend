@@ -1730,12 +1730,11 @@ def criar_consulta(db: firestore.client, consulta_data: schemas.ConsultaCreate) 
     consulta_dict['id'] = doc_ref.id
     return consulta_dict
 
-def adicionar_exame(db: firestore.client, exame_data: schemas.ExameCreate, criador_uid: str) -> Dict:
+def adicionar_exame(db: firestore.client, exame_data: schemas.ExameBase, criador_uid: str) -> Dict:
     """Salva um novo exame, adicionando os campos de auditoria."""
     exame_dict = exame_data.model_dump(mode='json')
     now = datetime.utcnow()
     
-    # Adiciona os campos de auditoria
     exame_dict['criado_por'] = criador_uid
     exame_dict['data_criacao'] = now
     exame_dict['data_atualizacao'] = now

@@ -282,15 +282,13 @@ class ExameBase(BaseModel):
 
 
 class ExameCreate(BaseModel):
-    # Schema para criação, não inclui campos de auditoria que são gerados pelo backend
-    negocio_id: str
-    paciente_id: str
+    # Schema para criação, não inclui mais negocio_id e paciente_id no corpo
     nome_exame: str
     data_exame: datetime
     horario_exame: Optional[str] = None
     descricao: Optional[str] = None
     url_anexo: Optional[str] = None
-
+    
 class ExameResponse(ExameBase):
     id: str
 
