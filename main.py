@@ -364,8 +364,8 @@ def adicionar_exame(
 ):
     """(Autorizado) Adiciona um novo exame à ficha do paciente."""
     exame_data.paciente_id = paciente_id
-    consulta_id = exame_data.consulta_id
-    return crud.adicionar_exame(db, exame_data, consulta_id)
+    # A lógica de 'consulta_id' foi removida
+    return crud.adicionar_exame(db, exame_data)
 
 @app.post("/pacientes/{paciente_id}/medicacoes", response_model=schemas.MedicacaoResponse, status_code=status.HTTP_201_CREATED, tags=["Ficha do Paciente"])
 def adicionar_medicacao(
@@ -410,11 +410,10 @@ def get_ficha_completa(
     current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
-    """(Autorizado) Retorna a ficha clínica completa do paciente."""
+    """(Autorizado) Retorna a ficha clínica do paciente (sem os exames)."""
     if consulta_id:
         return {
             "consultas": crud.listar_consultas(db, paciente_id),
-            "exames": crud.listar_exames(db, paciente_id, consulta_id),
             "medicacoes": crud.listar_medicacoes(db, paciente_id, consulta_id),
             "checklist": crud._dedup_checklist_items(crud.listar_checklist(db, paciente_id, consulta_id)),
             "orientacoes": crud.listar_orientacoes(db, paciente_id, consulta_id),
@@ -433,12 +432,12 @@ def get_consultas(
 @app.get("/pacientes/{paciente_id}/exames", response_model=List[schemas.ExameResponse], tags=["Ficha do Paciente"])
 def get_exames(
     paciente_id: str,
-    consulta_id: Optional[str] = Query(None, description="Filtre os exames por um ID de consulta específico."),
     current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
-    """(Autorizado) Lista os exames da ficha do paciente."""
-    return crud.listar_exames(db, paciente_id, consulta_id)
+    """(Autorizado) Lista TODOS os exames da ficha do paciente."""
+    # O filtro por 'consulta_id' foi removido
+    return crud.listar_exames(db, paciente_id)
 
 @app.get("/pacientes/{paciente_id}/medicacoes", response_model=List[schemas.MedicacaoResponse], tags=["Ficha do Paciente"])
 def get_medicacoes(

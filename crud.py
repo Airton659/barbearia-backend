@@ -1730,10 +1730,10 @@ def criar_consulta(db: firestore.client, consulta_data: schemas.ConsultaCreate) 
     consulta_dict['id'] = doc_ref.id
     return consulta_dict
 
-def adicionar_exame(db: firestore.client, exame_data: schemas.ExameCreate, consulta_id: str) -> Dict:
-    """Salva um novo exame na subcoleção de um paciente, vinculando-o a uma consulta."""
-    exame_dict = exame_data.model_dump()
-    exame_dict['consulta_id'] = consulta_id
+def adicionar_exame(db: firestore.client, exame_data: schemas.ExameCreate) -> Dict:
+    """Salva um novo exame na subcoleção de um paciente, agora sem vínculo com consulta."""
+    exame_dict = exame_data.model_dump(mode='json') # Garante que a data seja serializada corretamente
+    # Remove a necessidade de 'consulta_id'
     paciente_ref = db.collection('usuarios').document(exame_data.paciente_id)
     doc_ref = paciente_ref.collection('exames').document()
     doc_ref.set(exame_dict)
@@ -1840,11 +1840,12 @@ def listar_consultas(db: firestore.client, paciente_id: str) -> List[Dict]:
         logger.error(f"Erro ao listar consultas do paciente {paciente_id}: {e}")
     return consultas
 
-def listar_exames(db: firestore.client, paciente_id: str, consulta_id: str) -> List[Dict]:
-    """Lista todos os exames de um paciente, filtrando-os pelo ID da consulta."""
+def listar_exames(db: firestore.client, paciente_id: str) -> List[Dict]:
+    """Lista todos os exames de um paciente, independente do plano de cuidado."""
     exames = []
     try:
-        query = db.collection('usuarios').document(paciente_id).collection('exames').where('consulta_id', '==', consulta_id).order_by('data_exame', direction=firestore.Query.DESCENDING)
+        # A query agora busca diretamente na subcoleção do paciente, sem filtro de consulta
+        query = db.collection('usuarios').document(paciente_id).collection('exames').order_by('data_exame', direction=firestore.Query.DESCENDING)
         for doc in query.stream():
             exame_data = doc.to_dict()
             exame_data['id'] = doc.id
@@ -1909,12 +1910,12 @@ def _dedup_checklist_items(itens: List[Dict]) -> List[Dict]:
 
 def get_ficha_completa_paciente(db: firestore.client, paciente_id: str, consulta_id: Optional[str] = None) -> Dict:
     """
-    Retorna um dicionário com todos os dados da ficha do paciente,
+    Retorna um dicionário com os dados da ficha do paciente (sem exames),
     filtrando para mostrar apenas o "Plano Ativo" (o mais recente).
     """
     # 1. Encontra a última consulta do paciente
     consultas = listar_consultas(db, paciente_id)
-    # Se um consulta_id específico for informado (hotfix), usar direto
+    # Se um consulta_id específico for informado, usar direto
     if consulta_id:
         ultima_consulta_id = consulta_id
     else:
@@ -1922,7 +1923,6 @@ def get_ficha_completa_paciente(db: firestore.client, paciente_id: str, consulta
             # Se não houver consultas, não há plano ativo.
             return {
                 "consultas": [],
-                "exames": [],
                 "medicacoes": [],
                 "checklist": [],
                 "orientacoes": [],
@@ -1932,7 +1932,6 @@ def get_ficha_completa_paciente(db: firestore.client, paciente_id: str, consulta
 
     ficha = {
         "consultas": consultas,
-        "exames": listar_exames(db, paciente_id, consulta_id=ultima_consulta_id),
         "medicacoes": listar_medicacoes(db, paciente_id, consulta_id=ultima_consulta_id),
         "checklist": listar_checklist(db, paciente_id, consulta_id=ultima_consulta_id),
         "orientacoes": listar_orientacoes(db, paciente_id, consulta_id=ultima_consulta_id),
@@ -1940,6 +1939,7 @@ def get_ficha_completa_paciente(db: firestore.client, paciente_id: str, consulta
     # Garantir checklist sem duplicatas (modelo + diário)
     ficha['checklist'] = _dedup_checklist_items(ficha.get('checklist', []))
     return ficha
+
 
 # =================================================================================
 # FUNÇÕES DE UPDATE/DELETE DA FICHA DO PACIENTE
