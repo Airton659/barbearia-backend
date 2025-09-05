@@ -270,14 +270,26 @@ class ExameBase(BaseModel):
     negocio_id: str
     paciente_id: str
     nome_exame: str
-    # ***** A CORREÇÃO ESTÁ AQUI *****
-    data_exame: datetime # Alterado de volta para datetime
+    data_exame: datetime
     horario_exame: Optional[str] = Field(None, description="Horário do exame (ex: '14:30').")
     descricao: Optional[str] = Field(None, description="Instruções ou observações sobre o exame.")
     url_anexo: Optional[str] = None
+    
+    # --- NOVOS CAMPOS DE AUDITORIA ADICIONADOS AQUI ---
+    criado_por: Optional[str] = Field(None, description="Firebase UID do usuário que criou o exame.")
+    data_criacao: Optional[datetime] = None
+    data_atualizacao: Optional[datetime] = None
 
-class ExameCreate(ExameBase):
-    pass
+
+class ExameCreate(BaseModel):
+    # Schema para criação, não inclui campos de auditoria que são gerados pelo backend
+    negocio_id: str
+    paciente_id: str
+    nome_exame: str
+    data_exame: datetime
+    horario_exame: Optional[str] = None
+    descricao: Optional[str] = None
+    url_anexo: Optional[str] = None
 
 class ExameResponse(ExameBase):
     id: str

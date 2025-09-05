@@ -1730,13 +1730,20 @@ def criar_consulta(db: firestore.client, consulta_data: schemas.ConsultaCreate) 
     consulta_dict['id'] = doc_ref.id
     return consulta_dict
 
-def adicionar_exame(db: firestore.client, exame_data: schemas.ExameCreate) -> Dict:
-    """Salva um novo exame na subcoleção de um paciente, agora sem vínculo com consulta."""
-    exame_dict = exame_data.model_dump(mode='json') # Garante que a data seja serializada corretamente
-    # Remove a necessidade de 'consulta_id'
+def adicionar_exame(db: firestore.client, exame_data: schemas.ExameCreate, criador_uid: str) -> Dict:
+    """Salva um novo exame, adicionando os campos de auditoria."""
+    exame_dict = exame_data.model_dump(mode='json')
+    now = datetime.utcnow()
+    
+    # Adiciona os campos de auditoria
+    exame_dict['criado_por'] = criador_uid
+    exame_dict['data_criacao'] = now
+    exame_dict['data_atualizacao'] = now
+    
     paciente_ref = db.collection('usuarios').document(exame_data.paciente_id)
     doc_ref = paciente_ref.collection('exames').document()
     doc_ref.set(exame_dict)
+    
     exame_dict['id'] = doc_ref.id
     return exame_dict
 
@@ -1992,11 +1999,67 @@ def delete_consulta(db: firestore.client, paciente_id: str, consulta_id: str) ->
     return _delete_subcollection_item(db, paciente_id, "consultas", consulta_id)
 
 # --- Exames ---
-def update_exame(db: firestore.client, paciente_id: str, exame_id: str, update_data: schemas.ExameUpdate) -> Optional[Dict]:
-    return _update_subcollection_item(db, paciente_id, "exames", exame_id, update_data)
+def update_exame(
+    db: firestore.client, 
+    paciente_id: str, 
+    exame_id: str, 
+    update_data: schemas.ExameUpdate, 
+    current_user: schemas.UsuarioProfile, 
+    negocio_id: str
+) -> Optional[Dict]:
+    """Atualiza um exame existente, validando as permissões de edição."""
+    exame_ref = db.collection('usuarios').document(paciente_id).collection('exames').document(exame_id)
+    exame_doc = exame_ref.get()
 
-def delete_exame(db: firestore.client, paciente_id: str, exame_id: str) -> bool:
-    return _delete_subcollection_item(db, paciente_id, "exames", exame_id)
+    if not exame_doc.exists:
+        return None
+
+    exame_atual = exame_doc.to_dict()
+    user_role = current_user.roles.get(negocio_id)
+
+    # REGRA DE PERMISSÃO: Admin pode tudo, Enfermeiro só o que ele criou.
+    if user_role != 'admin' and exame_atual.get('criado_por') != current_user.firebase_uid:
+        raise HTTPException(
+            status_code=403, 
+            detail="Acesso negado: Enfermeiros só podem editar os exames que criaram."
+        )
+
+    update_dict = update_data.model_dump(exclude_unset=True, mode='json')
+    update_dict['data_atualizacao'] = datetime.utcnow()
+    
+    exame_ref.update(update_dict)
+    
+    updated_doc = exame_ref.get()
+    data = updated_doc.to_dict()
+    data['id'] = updated_doc.id
+    return data
+
+def delete_exame(
+    db: firestore.client, 
+    paciente_id: str, 
+    exame_id: str, 
+    current_user: schemas.UsuarioProfile, 
+    negocio_id: str
+) -> bool:
+    """Deleta um exame, validando as permissões de exclusão."""
+    exame_ref = db.collection('usuarios').document(paciente_id).collection('exames').document(exame_id)
+    exame_doc = exame_ref.get()
+
+    if not exame_doc.exists:
+        return False
+
+    exame_atual = exame_doc.to_dict()
+    user_role = current_user.roles.get(negocio_id)
+
+    # REGRA DE PERMISSÃO: Admin pode tudo, Enfermeiro só o que ele criou.
+    if user_role != 'admin' and exame_atual.get('criado_por') != current_user.firebase_uid:
+        raise HTTPException(
+            status_code=403, 
+            detail="Acesso negado: Enfermeiros só podem deletar os exames que criaram."
+        )
+
+    exame_ref.delete()
+    return True
 
 # --- Medicações ---
 def update_medicacao(db: firestore.client, paciente_id: str, medicacao_id: str, update_data: schemas.MedicacaoUpdate) -> Optional[Dict]:

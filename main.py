@@ -359,13 +359,13 @@ def adicionar_consulta(
 def adicionar_exame(
     paciente_id: str,
     exame_data: schemas.ExameCreate,
-    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
-    """(Autorizado) Adiciona um novo exame à ficha do paciente."""
+    """(Admin ou Enfermeiro) Adiciona um novo exame à ficha do paciente."""
     exame_data.paciente_id = paciente_id
-    # A lógica de 'consulta_id' foi removida
-    return crud.adicionar_exame(db, exame_data)
+    # Passa o firebase_uid do criador para a função do CRUD
+    return crud.adicionar_exame(db, exame_data, current_user.firebase_uid)
 
 @app.post("/pacientes/{paciente_id}/medicacoes", response_model=schemas.MedicacaoResponse, status_code=status.HTTP_201_CREATED, tags=["Ficha do Paciente"])
 def adicionar_medicacao(
@@ -444,17 +444,19 @@ def update_exame(
     paciente_id: str,
     exame_id: str,
     update_data: schemas.ExameUpdate,
-    # Permissão: Apenas Admin ou Profissional (Enfermeiro) podem editar
+    negocio_id: str = Depends(validate_negocio_id),
     current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
-    """
-    (Admin ou Enfermeiro) Atualiza um exame existente na ficha do paciente.
-    """
-    exame_atualizado = crud.update_exame(db, paciente_id, exame_id, update_data)
-    if not exame_atualizado:
-        raise HTTPException(status_code=404, detail="Exame não encontrado.")
-    return exame_atualizado
+    """(Admin ou Enfermeiro) Atualiza um exame, com verificação de permissão."""
+    try:
+        exame_atualizado = crud.update_exame(db, paciente_id, exame_id, update_data, current_user, negocio_id)
+        if not exame_atualizado:
+            raise HTTPException(status_code=404, detail="Exame não encontrado.")
+        return exame_atualizado
+    except HTTPException as e:
+        # Re-lança a exceção de permissão vinda do CRUD
+        raise e
 
 @app.get("/pacientes/{paciente_id}/medicacoes", response_model=List[schemas.MedicacaoResponse], tags=["Ficha do Paciente"])
 def get_medicacoes(
@@ -530,12 +532,17 @@ def update_exame(
 def delete_exame(
     paciente_id: str,
     exame_id: str,
-    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    negocio_id: str = Depends(validate_negocio_id),
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
-    """(Autorizado) Deleta um exame da ficha do paciente."""
-    if not crud.delete_exame(db, paciente_id, exame_id):
-        raise HTTPException(status_code=404, detail="Exame não encontrada.")
+    """(Admin ou Enfermeiro) Deleta um exame, com verificação de permissão."""
+    try:
+        if not crud.delete_exame(db, paciente_id, exame_id, current_user, negocio_id):
+            raise HTTPException(status_code=404, detail="Exame não encontrado.")
+    except HTTPException as e:
+        # Re-lança a exceção de permissão vinda do CRUD
+        raise e
     return
 
 @app.patch("/pacientes/{paciente_id}/medicacoes/{medicacao_id}", response_model=schemas.MedicacaoResponse, tags=["Ficha do Paciente"])
