@@ -1759,3 +1759,26 @@ def update_user_consent(
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
         
     return usuario_atualizado
+
+
+# Em main.py, adicione este novo endpoint
+
+@app.patch("/me/consent", response_model=schemas.UsuarioProfile, tags=["Usuários"])
+def update_my_consent(
+    consent_data: schemas.ConsentimentoLGPDUpdate,
+    # Permissão: Qualquer usuário autenticado pode dar consentimento em seu próprio perfil.
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db: firestore.client = Depends(get_db)
+):
+    """
+    (Qualquer Usuário Autenticado) Atualiza os dados de consentimento LGPD do próprio usuário.
+    """
+    # A função CRUD é a mesma, apenas passamos o ID do usuário logado.
+    usuario_atualizado = crud.atualizar_consentimento_lgpd(db, current_user.id, consent_data)
+    
+    # A verificação de "não encontrado" não é estritamente necessária aqui,
+    # pois o usuário já foi encontrado pela dependência, mas mantemos por segurança.
+    if not usuario_atualizado:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+        
+    return usuario_atualizado
