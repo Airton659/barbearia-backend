@@ -270,8 +270,8 @@ class ExameBase(BaseModel):
     negocio_id: str
     paciente_id: str
     nome_exame: str
-    data_exame: date # Alterado de datetime para date para simplicidade
-    # --- NOVOS CAMPOS ADICIONADOS AQUI ---
+    # ***** A CORREÇÃO ESTÁ AQUI *****
+    data_exame: datetime # Alterado de volta para datetime
     horario_exame: Optional[str] = Field(None, description="Horário do exame (ex: '14:30').")
     descricao: Optional[str] = Field(None, description="Instruções ou observações sobre o exame.")
     url_anexo: Optional[str] = None
@@ -284,7 +284,7 @@ class ExameResponse(ExameBase):
 
 class ExameUpdate(BaseModel):
     nome_exame: Optional[str] = None
-    data_exame: Optional[date] = None
+    data_exame: Optional[datetime] = None # Também corrigido aqui
     horario_exame: Optional[str] = None
     descricao: Optional[str] = None
     url_anexo: Optional[str] = None
