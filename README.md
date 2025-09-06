@@ -8,7 +8,7 @@ Esta API foi desenvolvida para ser o backend de múltiplas aplicações. Ela nas
 
 O projeto utiliza **FastAPI**, **Firebase Authentication**, **Firestore** e está hospedado no **Google Cloud Run**, garantindo alta performance e escalabilidade.
 
-**URL Base da API:** `https://barbearia-backend-service-198513369137.southamerica-east1.run.app`
+**URL Base da API:** `https://barbearia-backend-service-862082955632.southamerica-east1.run.app`
 
 -----
 

@@ -298,6 +298,28 @@ def vincular_tecnicos_ao_paciente(
         logger.error(f"Erro inesperado ao vincular técnicos: {e}")
         raise HTTPException(status_code=500, detail="Ocorreu um erro interno no servidor.")
 
+@app.post("/negocios/{negocio_id}/pacientes/{paciente_id}/vincular-medico", response_model=schemas.UsuarioProfile, tags=["Admin - Gestão do Negócio"])
+def vincular_medico_ao_paciente(
+    negocio_id: str = Depends(validate_path_negocio_id),
+    paciente_id: str = Path(..., description="ID do paciente a ser modificado."),
+    vinculo_data: schemas.MedicoVincularRequest = ...,
+    admin_or_profissional: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin ou Enfermeiro) Vincula ou desvincula um médico de um paciente."""
+    try:
+        paciente_atualizado = crud.vincular_paciente_medico(
+            db, negocio_id, paciente_id, vinculo_data.medico_id, admin_or_profissional.firebase_uid
+        )
+        if not paciente_atualizado:
+            raise HTTPException(status_code=404, detail="Paciente não encontrado.")
+        return paciente_atualizado
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Erro inesperado ao vincular médico: {e}")
+        raise HTTPException(status_code=500, detail="Ocorreu um erro interno no servidor.")
+
 # @app.patch("/negocios/{negocio_id}/usuarios/{tecnico_id}/vincular-supervisor", response_model=schemas.UsuarioProfile, tags=["Admin - Gestão do Negócio"])
 # def vincular_supervisor_ao_tecnico(
 #     negocio_id: str = Depends(validate_path_negocio_id),
