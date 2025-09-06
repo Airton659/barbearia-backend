@@ -6,7 +6,7 @@ from firebase_admin import auth
 import schemas
 import crud
 from database import get_db
-from typing import Optional
+from typing import Optional, Dict
 
 # O OAuth2PasswordBearer ainda pode ser útil para a documentação interativa (botão "Authorize")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False) # auto_error=False é importante para dependências opcionais
