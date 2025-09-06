@@ -1,10 +1,10 @@
 # barbearia-backend/main.py (Versão estável com Checklist do Técnico)
 
 from fastapi import FastAPI, Depends, HTTPException, status, Header, Path, Query, UploadFile, File
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict
 import schemas, crud
 import logging
-from datetime import date
+from datetime import date, timedelta
 from database import initialize_firebase_app, get_db
 from auth import (
     get_current_user_firebase, get_super_admin_user, get_current_admin_user,

@@ -1,7 +1,7 @@
 # barbearia-backend/schemas.py (Versão Definitiva)
 
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
-from datetime import datetime, time, date
+from datetime import datetime, time, date, timedelta
 from typing import Optional, List, Dict, Union
 from enum import Enum
 # =================================================================================
