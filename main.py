@@ -824,9 +824,19 @@ def listar_tecnicos_supervisionados_por_paciente_endpoint(
             tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
             if tecnico_doc.exists:
                 tecnico_data = tecnico_doc.to_dict()
+                
+                # Descriptografa o nome do técnico
+                nome_tecnico = tecnico_data.get('nome', 'Nome não disponível')
+                if nome_tecnico and nome_tecnico != 'Nome não disponível':
+                    try:
+                        nome_tecnico = decrypt_data(nome_tecnico)
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar nome do técnico {tecnico_id}: {e}")
+                        nome_tecnico = "[Erro na descriptografia]"
+                
                 tecnicos_perfil.append(schemas.TecnicoProfileReduzido(
                     id=tecnico_doc.id,
-                    nome=tecnico_data.get('nome', 'Nome não disponível'),
+                    nome=nome_tecnico,
                     email=tecnico_data.get('email', 'Email não disponível')
                 ))
         return tecnicos_perfil
