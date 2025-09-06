@@ -80,7 +80,7 @@ class FCMTokenUpdate(BaseModel):
     fcm_token: str
 
 class RoleUpdateRequest(BaseModel):
-    role: str = Field(..., description="O novo papel do usuário (ex: 'cliente', 'profissional', 'admin', 'tecnico').")
+    role: str = Field(..., description="O novo papel do usuário (ex: 'cliente', 'profissional', 'admin', 'tecnico', 'medico').")
 
 # Em PacienteCreateByAdmin, use o novo modelo Endereco
 class PacienteCreateByAdmin(BaseModel):
@@ -288,7 +288,7 @@ class ExameCreate(BaseModel):
     horario_exame: Optional[str] = None
     descricao: Optional[str] = None
     url_anexo: Optional[str] = None
-    
+
 class ExameResponse(ExameBase):
     id: str
 
@@ -706,6 +706,38 @@ class ConsentimentoLGPDUpdate(BaseModel):
     data_consentimento_lgpd: datetime
     tipo_consentimento: TipoConsentimentoEnum
 
+
+# =================================================================================
+# SCHEMAS DE RELATÓRIO MÉDICO
+# =================================================================================
+
+class RelatorioMedicoBase(BaseModel):
+    paciente_id: str
+    negocio_id: str
+    criado_por_id: str
+    medico_id: str
+    consulta_id: str
+    status: str = "pendente"
+    fotos: List[str] = Field(default_factory=list)
+    motivo_recusa: Optional[str] = None
+    data_criacao: datetime
+    data_revisao: Optional[datetime] = None
+
+class RelatorioMedicoCreate(BaseModel):
+    medico_id: str = Field(..., description="ID do usuário médico que avaliará o relatório.")
+    negocio_id: str = Field(..., description="ID do negócio ao qual o relatório pertence.")
+
+class RelatorioMedicoResponse(RelatorioMedicoBase):
+    id: str
+
+class RecusarRelatorioRequest(BaseModel):
+    motivo: str = Field(..., description="Justificativa da recusa.")
+
+class RelatorioCompletoResponse(BaseModel):
+    relatorio: RelatorioMedicoResponse
+    paciente: UsuarioProfile
+    planoCuidado: FichaCompletaResponse
+    registrosDiarios: List[RegistroDiarioResponse]
 
 ProfissionalResponse.model_rebuild()
 DiarioTecnicoResponse.model_rebuild()

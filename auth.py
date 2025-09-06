@@ -295,3 +295,59 @@ def get_paciente_autorizado_anamnese(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Acesso negado: seu perfil não tem permissão para visualizar ou modificar a Ficha de Avaliação."
     )
+
+def get_current_medico_user(
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    negocio_id: Optional[str] = Header(None, description="ID do Negócio no qual o médico está atuando")
+) -> schemas.UsuarioProfile:
+    """
+    Verifica se o usuário atual tem a role 'medico' em algum dos negócios.
+    """
+    if not negocio_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="O header 'negocio-id' é obrigatório para esta operação."
+        )
+
+    user_role_for_negocio = current_user.roles.get(negocio_id)
+    if user_role_for_negocio != "medico":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado: você não tem a permissão de Médico para este negócio."
+        )
+    return current_user
+
+def get_relatorio_autorizado(
+    relatorio_id: str = Path(..., description="ID do relatório a ser acessado."),
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db = Depends(get_db)
+) -> Dict:
+    """
+    Dependência que busca um relatório e valida se o usuário atual tem permissão para acessá-lo.
+    Permite acesso ao Admin/Profissional do negócio ou ao Médico atribuído.
+    Retorna o dicionário do relatório se autorizado.
+    """
+    relatorio_doc = db.collection('relatorios_medicos').document(relatorio_id).get()
+    if not relatorio_doc.exists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Relatório não encontrado.")
+    
+    relatorio_data = relatorio_doc.to_dict()
+    relatorio_data['id'] = relatorio_doc.id
+    negocio_id = relatorio_data.get('negocio_id')
+    medico_id = relatorio_data.get('medico_id')
+
+    user_roles = current_user.roles
+    
+    # 1. Admin ou Profissional do negócio têm acesso
+    if user_roles.get(negocio_id) in ['admin', 'profissional']:
+        return relatorio_data
+
+    # 2. O médico atribuído ao relatório tem acesso
+    if user_roles.get(negocio_id) == 'medico' and current_user.id == medico_id:
+        return relatorio_data
+
+    # 3. Nega o acesso para todos os outros casos
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Acesso negado: você não tem permissão para visualizar este relatório."
+    )

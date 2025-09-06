@@ -286,7 +286,6 @@ def admin_listar_negocios(db: firestore.client) -> List[Dict]:
 #         return data
 #     return None
 
-# Em crud.py, SUBSTITUA a função 'admin_listar_usuarios_por_negocio' inteira por esta:
 
 def admin_listar_usuarios_por_negocio(db: firestore.client, negocio_id: str, status: str = 'ativo') -> List[Dict]:
     """
@@ -295,7 +294,7 @@ def admin_listar_usuarios_por_negocio(db: firestore.client, negocio_id: str, sta
     """
     usuarios = []
     try:
-        query = db.collection('usuarios').where(f'roles.{negocio_id}', 'in', ['cliente', 'profissional', 'admin', 'tecnico'])
+        query = db.collection('usuarios').where(f'roles.{negocio_id}', 'in', ['cliente', 'profissional', 'admin', 'tecnico', 'medico'])
 
         for doc in query.stream():
             usuario_data = doc.to_dict()
@@ -373,9 +372,9 @@ def admin_atualizar_role_usuario(db: firestore.client, negocio_id: str, user_id:
     Atualiza a role de um usuário dentro de um negócio específico.
     Cria/desativa o perfil profissional conforme necessário.
     """
-    # --- ALTERAÇÃO AQUI: Adicionando 'tecnico' à lista de roles válidas ---
-    if novo_role not in ['cliente', 'profissional', 'admin', 'tecnico']:
-        raise ValueError("Role inválida. As roles permitidas são 'cliente', 'profissional', 'admin' e 'tecnico'.")
+    # --- ALTERAÇÃO AQUI: Adicionando 'medico' à lista de roles válidas ---
+    if novo_role not in ['cliente', 'profissional', 'admin', 'tecnico', 'medico']:
+        raise ValueError("Role inválida. As roles permitidas são 'cliente', 'profissional', 'admin', 'tecnico' e 'medico'.")
     # --- FIM DA ALTERAÇÃO ---
 
     user_ref = db.collection('usuarios').document(user_id)
@@ -426,7 +425,7 @@ def admin_atualizar_role_usuario(db: firestore.client, negocio_id: str, user_id:
             prof_ref.update({"ativo": True})
             logger.info(f"Perfil profissional reativado para o usuário {user_data['email']} no negócio {negocio_id}.")
 
-    elif novo_role == 'cliente' or novo_role == 'tecnico': # Desativa perfil se virar cliente OU tecnico
+    elif novo_role == 'cliente' or novo_role == 'tecnico' or novo_role == 'medico': # Desativa perfil se virar cliente, tecnico ou medico
         if perfil_profissional and perfil_profissional.get('ativo'):
             # Desativa o perfil profissional se existir e estiver ativo
             prof_ref = db.collection('profissionais').document(perfil_profissional['id'])
@@ -3091,6 +3090,146 @@ def atualizar_consentimento_lgpd(db: firestore.client, user_id: str, consent_dat
 
     # Retorna o documento completo e atualizado
     updated_doc = user_ref.get()
+    data = updated_doc.to_dict()
+    data['id'] = updated_doc.id
+    return data
+
+
+# =================================================================================
+# FUNÇÕES DE RELATÓRIO MÉDICO
+# =================================================================================
+
+def criar_relatorio_medico(db: firestore.client, paciente_id: str, relatorio_data: schemas.RelatorioMedicoCreate, autor: schemas.UsuarioProfile) -> Dict:
+    """
+    Cria um novo relatório médico para um paciente.
+    """
+    # 1. Encontrar a consulta mais recente (plano de cuidado ativo)
+    consultas = listar_consultas(db, paciente_id)
+    if not consultas:
+        raise HTTPException(status_code=404, detail="Nenhum plano de cuidado (consulta) encontrado para este paciente.")
+    
+    consulta_id_recente = consultas[0]['id']
+
+    # 2. Montar o dicionário do novo relatório
+    relatorio_dict = {
+        "paciente_id": paciente_id,
+        "negocio_id": relatorio_data.negocio_id,
+        "criado_por_id": autor.id,
+        "medico_id": relatorio_data.medico_id,
+        "consulta_id": consulta_id_recente,
+        "status": "pendente",
+        "fotos": [],
+        "motivo_recusa": None,
+        "data_criacao": datetime.utcnow(),
+        "data_revisao": None,
+    }
+
+    # 3. Salvar no Firestore
+    doc_ref = db.collection('relatorios_medicos').document()
+    doc_ref.set(relatorio_dict)
+
+    # 4. Retornar o objeto completo
+    relatorio_dict['id'] = doc_ref.id
+    logger.info(f"Relatório médico {doc_ref.id} criado para o paciente {paciente_id} pelo usuário {autor.id}.")
+    
+    return relatorio_dict
+
+def listar_relatorios_por_paciente(db: firestore.client, paciente_id: str) -> List[Dict]:
+    """
+    Lista todos os relatórios médicos de um paciente específico, ordenados por data de criação.
+    """
+    relatorios = []
+    try:
+        query = db.collection('relatorios_medicos') \
+            .where('paciente_id', '==', paciente_id) \
+            .order_by('data_criacao', direction=firestore.Query.DESCENDING)
+        
+        for doc in query.stream():
+            data = doc.to_dict()
+            data['id'] = doc.id
+            relatorios.append(data)
+            
+    except Exception as e:
+        logger.error(f"Erro ao listar relatórios para o paciente {paciente_id}: {e}")
+        
+    return relatorios
+
+def adicionar_foto_relatorio(db: firestore.client, relatorio_id: str, foto_url: str) -> Optional[Dict]:
+    """
+    Adiciona a URL de uma foto ao array 'fotos' de um relatório médico.
+    """
+    relatorio_ref = db.collection('relatorios_medicos').document(relatorio_id)
+    
+    # Usa ArrayUnion para adicionar a URL de forma atômica, evitando duplicatas
+    relatorio_ref.update({
+        "fotos": firestore.ArrayUnion([foto_url])
+    })
+    
+    updated_doc = relatorio_ref.get()
+    if updated_doc.exists:
+        data = updated_doc.to_dict()
+        data['id'] = updated_doc.id
+        logger.info(f"Foto adicionada ao relatório {relatorio_id}.")
+        return data
+    return None
+
+def listar_relatorios_pendentes_medico(db: firestore.client, medico_id: str, negocio_id: str) -> List[Dict]:
+    """
+    Lista todos os relatórios com status 'pendente' atribuídos a um médico específico.
+    """
+    relatorios = []
+    try:
+        query = db.collection('relatorios_medicos') \
+            .where('negocio_id', '==', negocio_id) \
+            .where('medico_id', '==', medico_id) \
+            .where('status', '==', 'pendente') \
+            .order_by('data_criacao', direction=firestore.Query.DESCENDING)
+        
+        for doc in query.stream():
+            data = doc.to_dict()
+            data['id'] = doc.id
+            relatorios.append(data)
+    except Exception as e:
+        logger.error(f"Erro ao listar relatórios pendentes para o médico {medico_id}: {e}")
+    return relatorios
+
+def aprovar_relatorio(db: firestore.client, relatorio_id: str, medico_id: str) -> Optional[Dict]:
+    """
+    Muda o status de um relatório para 'aprovado'.
+    """
+    relatorio_ref = db.collection('relatorios_medicos').document(relatorio_id)
+    relatorio_doc = relatorio_ref.get()
+
+    if not relatorio_doc.exists or relatorio_doc.to_dict().get('medico_id') != medico_id:
+        raise HTTPException(status_code=403, detail="Acesso negado: este relatório não está atribuído a você.")
+
+    relatorio_ref.update({
+        "status": "aprovado",
+        "data_revisao": datetime.utcnow()
+    })
+    
+    updated_doc = relatorio_ref.get()
+    data = updated_doc.to_dict()
+    data['id'] = updated_doc.id
+    return data
+
+def recusar_relatorio(db: firestore.client, relatorio_id: str, medico_id: str, motivo: str) -> Optional[Dict]:
+    """
+    Muda o status de um relatório para 'recusado' e adiciona o motivo.
+    """
+    relatorio_ref = db.collection('relatorios_medicos').document(relatorio_id)
+    relatorio_doc = relatorio_ref.get()
+
+    if not relatorio_doc.exists or relatorio_doc.to_dict().get('medico_id') != medico_id:
+        raise HTTPException(status_code=403, detail="Acesso negado: este relatório não está atribuído a você.")
+
+    relatorio_ref.update({
+        "status": "recusado",
+        "data_revisao": datetime.utcnow(),
+        "motivo_recusa": motivo
+    })
+    
+    updated_doc = relatorio_ref.get()
     data = updated_doc.to_dict()
     data['id'] = updated_doc.id
     return data

@@ -11,7 +11,7 @@ from auth import (
     get_current_profissional_user, get_optional_current_user_firebase,
     validate_negocio_id, validate_path_negocio_id, get_paciente_autorizado,
     get_current_admin_or_profissional_user, get_current_tecnico_user,
-    get_paciente_autorizado_anamnese  # <<<--- ADICIONA A FUNÇÃO QUE FALTAVA AQUI
+    get_paciente_autorizado_anamnese, get_current_medico_user, get_relatorio_autorizado # <<<--- ADICIONE AQUI
 )
 from firebase_admin import firestore
 from pydantic import BaseModel
@@ -1691,7 +1691,135 @@ def atualizar_endereco_paciente(
     return paciente_atualizado
 
 
+# =================================================================================
+# ENDPOINTS DE RELATÓRIOS MÉDICOS
+# =================================================================================
 
+@app.post("/pacientes/{paciente_id}/relatorios", response_model=schemas.RelatorioMedicoResponse, status_code=status.HTTP_201_CREATED, tags=["Relatórios Médicos"])
+def criar_relatorio_medico_endpoint(
+    paciente_id: str,
+    relatorio_data: schemas.RelatorioMedicoCreate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin ou Profissional) Cria um novo relatório médico para um paciente."""
+    try:
+        novo_relatorio = crud.criar_relatorio_medico(db, paciente_id, relatorio_data, current_user)
+        return novo_relatorio
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Erro inesperado ao criar relatório médico: {e}")
+        raise HTTPException(status_code=500, detail="Ocorreu um erro interno no servidor.")
+
+@app.get("/pacientes/{paciente_id}/relatorios", response_model=List[schemas.RelatorioMedicoResponse], tags=["Relatórios Médicos"])
+def listar_relatorios_paciente_endpoint(
+    paciente_id: str,
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin ou Profissional) Lista todos os relatórios médicos de um paciente."""
+    return crud.listar_relatorios_por_paciente(db, paciente_id)
+
+@app.post("/relatorios/{relatorio_id}/fotos", response_model=schemas.RelatorioMedicoResponse, tags=["Relatórios Médicos"])
+async def upload_foto_relatorio(
+    relatorio_id: str,
+    file: UploadFile = File(...),
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin ou Profissional) Faz upload de uma foto para um relatório médico."""
+    if not CLOUD_STORAGE_BUCKET_NAME_GLOBAL:
+        raise HTTPException(status_code=500, detail="Bucket do Cloud Storage não configurado.")
+    try:
+        file_content = await file.read()
+        
+        # Reutiliza a função de upload genérico que já existe
+        uploaded_url = await upload_generic_file(
+            file_content=file_content,
+            filename=file.filename,
+            bucket_name=CLOUD_STORAGE_BUCKET_NAME_GLOBAL,
+            content_type=file.content_type
+        )
+        
+        relatorio_atualizado = crud.adicionar_foto_relatorio(db, relatorio_id, uploaded_url)
+        if not relatorio_atualizado:
+            raise HTTPException(status_code=404, detail="Relatório não encontrado após o upload.")
+            
+        return relatorio_atualizado
+    except Exception as e:
+        logger.error(f"ERRO CRÍTICO NO UPLOAD DE FOTO PARA RELATÓRIO: {e}")
+        raise HTTPException(status_code=500, detail=f"Ocorreu um erro interno no servidor: {e}")
+
+@app.get("/medico/relatorios/pendentes", response_model=List[schemas.RelatorioMedicoResponse], tags=["Relatórios Médicos - Médico"])
+def listar_relatorios_pendentes_medico_endpoint(
+    negocio_id: str = Header(..., description="ID do Negócio no qual o médico está atuando."),
+    current_user: schemas.UsuarioProfile = Depends(get_current_medico_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Médico) Lista os relatórios pendentes de avaliação para o médico logado."""
+    return crud.listar_relatorios_pendentes_medico(db, current_user.id, negocio_id)
+
+@app.get("/relatorios/{relatorio_id}", response_model=schemas.RelatorioCompletoResponse, tags=["Relatórios Médicos"])
+def get_relatorio_completo_endpoint(
+    relatorio: Dict = Depends(get_relatorio_autorizado),
+    db: firestore.client = Depends(get_db)
+):
+    """(Autorizado) Retorna a visão completa e consolidada de um relatório."""
+    paciente_id = relatorio.get("paciente_id")
+    consulta_id = relatorio.get("consulta_id")
+
+    paciente_doc = db.collection('usuarios').document(paciente_id).get()
+    if not paciente_doc.exists:
+        raise HTTPException(status_code=404, detail="Paciente associado ao relatório não encontrado.")
+    
+    paciente_data = paciente_doc.to_dict()
+    paciente_data['id'] = paciente_doc.id
+
+    # Busca registros dos últimos 30 dias
+    data_inicio = datetime.utcnow() - timedelta(days=30)
+    registros_diarios = crud.listar_registros_diario_estruturado(db, paciente_id, data=data_inicio)
+
+    return {
+        "relatorio": relatorio,
+        "paciente": paciente_data,
+        "planoCuidado": crud.get_ficha_completa_paciente(db, paciente_id, consulta_id),
+        "registrosDiarios": registros_diarios
+    }
+
+@app.post("/relatorios/{relatorio_id}/aprovar", response_model=schemas.RelatorioMedicoResponse, tags=["Relatórios Médicos - Médico"])
+def aprovar_relatorio_endpoint(
+    relatorio_id: str,
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase), # Usamos a geral para pegar o ID
+    db: firestore.client = Depends(get_db)
+):
+    """(Médico) Aprova um relatório médico."""
+    try:
+        relatorio_aprovado = crud.aprovar_relatorio(db, relatorio_id, current_user.id)
+        return relatorio_aprovado
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Erro ao aprovar relatório: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno ao aprovar o relatório.")
+
+@app.post("/relatorios/{relatorio_id}/recusar", response_model=schemas.RelatorioMedicoResponse, tags=["Relatórios Médicos - Médico"])
+def recusar_relatorio_endpoint(
+    relatorio_id: str,
+    recusa_data: schemas.RecusarRelatorioRequest,
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db: firestore.client = Depends(get_db)
+):
+    """(Médico) Recusa um relatório médico com uma justificativa."""
+    try:
+        relatorio_recusado = crud.recusar_relatorio(db, relatorio_id, current_user.id, recusa_data.motivo)
+        return relatorio_recusado
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Erro ao recusar relatório: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno ao recusar o relatório.")
+    
 # =================================================================================
 # ENDPOINTS DE SUPORTE PSICOLÓGICO
 # =================================================================================
