@@ -3,6 +3,7 @@
 import schemas
 from datetime import datetime, date, time, timedelta
 from typing import Optional, List, Dict, Union
+from crypto_utils import encrypt_data, decrypt_data
 
 # --- INÍCIO DA CORREÇÃO ---
 from fastapi import HTTPException
@@ -34,40 +35,62 @@ logger = logging.getLogger(__name__)
 # =================================================================================
 
 def buscar_usuario_por_firebase_uid(db: firestore.client, firebase_uid: str) -> Optional[Dict]:
-    """Busca um usuário na coleção 'usuarios' pelo seu firebase_uid."""
+    """Busca um usuário na coleção 'usuarios' pelo seu firebase_uid e descriptografa os dados sensíveis."""
     try:
         query = db.collection('usuarios').where('firebase_uid', '==', firebase_uid).limit(1)
         docs = list(query.stream())
         if docs:
             user_doc = docs[0].to_dict()
             user_doc['id'] = docs[0].id
+
+            # Descriptografa os campos
+            if 'nome' in user_doc:
+                user_doc['nome'] = decrypt_data(user_doc['nome'])
+            if 'telefone' in user_doc and user_doc['telefone']:
+                user_doc['telefone'] = decrypt_data(user_doc['telefone'])
+            if 'endereco' in user_doc and user_doc['endereco']:
+                user_doc['endereco'] = {k: decrypt_data(v) for k, v in user_doc['endereco'].items()}
+
             return user_doc
         return None
     except Exception as e:
-        logger.error(f"Erro ao buscar usuário por firebase_uid {firebase_uid}: {e}")
+        logger.error(f"Erro ao buscar/descriptografar usuário por firebase_uid {firebase_uid}: {e}")
+        # Se a descriptografia falhar (ex: chave errada), não retorna dados corrompidos
         return None
+
 
 def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioSync) -> Dict:
     """
-    Cria ou atualiza um usuário no Firestore.
+    Cria ou atualiza um usuário no Firestore, criptografando dados sensíveis.
     Esta função é a única fonte da verdade para a lógica de onboarding.
     """
     negocio_id = user_data.negocio_id
+
+    # Criptografa os dados antes de salvar
+    nome_criptografado = encrypt_data(user_data.nome)
+    telefone_criptografado = encrypt_data(user_data.telefone) if user_data.telefone else None
 
     # Fluxo de Super Admin (sem negocio_id)
     is_super_admin_flow = not negocio_id
     if is_super_admin_flow:
         if not db.collection('usuarios').limit(1).get():
             user_dict = {
-                "nome": user_data.nome, "email": user_data.email, "firebase_uid": user_data.firebase_uid,
-                "roles": {"platform": "super_admin"}, "fcm_tokens": []
+                "nome": nome_criptografado, 
+                "email": user_data.email, 
+                "firebase_uid": user_data.firebase_uid,
+                "roles": {"platform": "super_admin"}, 
+                "fcm_tokens": []
             }
-            if hasattr(user_data, 'telefone') and user_data.telefone:
-                user_dict['telefone'] = user_data.telefone
+            if telefone_criptografado:
+                user_dict['telefone'] = telefone_criptografado
             doc_ref = db.collection('usuarios').document()
             doc_ref.set(user_dict)
             user_dict['id'] = doc_ref.id
             logger.info(f"Novo usuário {user_data.email} criado como Super Admin.")
+            
+            # Descriptografa para retornar ao usuário
+            user_dict['nome'] = user_data.nome
+            user_dict['telefone'] = user_data.telefone
             return user_dict
         else:
             raise ValueError("Não é possível se registrar sem um negócio específico.")
@@ -75,6 +98,7 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
     # Fluxo multi-tenant
     @firestore.transactional
     def transaction_sync_user(transaction):
+        # A função buscar_usuario_por_firebase_uid precisa ser ajustada para descriptografar
         user_existente = buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
         
         negocio_doc_ref = db.collection('negocios').document(negocio_id)
@@ -86,39 +110,31 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
         negocio_data = negocio_doc.to_dict()
         has_admin = negocio_data.get('admin_uid') is not None
         
-        # --- LÓGICA DE PROMOÇÃO CORRIGIDA ---
         role = "cliente"
         if not has_admin and user_data.codigo_convite and user_data.codigo_convite == negocio_data.get('codigo_convite'):
             role = "admin"
-        # --- FIM DA CORREÇÃO ---
         
-        # Se o usuário já existe
         if user_existente:
             user_ref = db.collection('usuarios').document(user_existente['id'])
-            
-            # Atualiza a role apenas se ele não tiver uma para este negócio
             if negocio_id not in user_existente.get("roles", {}):
                 transaction.update(user_ref, {f'roles.{negocio_id}': role})
                 user_existente["roles"][negocio_id] = role
-                
-                # Se foi promovido a admin, atualiza o negócio
                 if role == "admin":
                     transaction.update(negocio_doc_ref, {'admin_uid': user_data.firebase_uid})
-                    logger.info(f"Usuário existente {user_data.email} promovido a ADMIN do negócio {negocio_id}.")
-                else:
-                    logger.info(f"Usuário existente {user_data.email} vinculado como CLIENTE ao negócio {negocio_id}.")
-            
             return user_existente
 
-        # Se é um novo usuário
         user_dict = {
-            "nome": user_data.nome, "email": user_data.email, "firebase_uid": user_data.firebase_uid,
-            "roles": {negocio_id: role}, "fcm_tokens": []
+            "nome": nome_criptografado, 
+            "email": user_data.email, 
+            "firebase_uid": user_data.firebase_uid,
+            "roles": {negocio_id: role}, 
+            "fcm_tokens": []
         }
-        if hasattr(user_data, 'telefone') and user_data.telefone:
-            user_dict['telefone'] = user_data.telefone
+        if telefone_criptografado:
+            user_dict['telefone'] = telefone_criptografado
         if hasattr(user_data, 'endereco') and user_data.endereco:
-            user_dict['endereco'] = user_data.endereco
+            # O ideal é criptografar campo a campo do endereço
+            user_dict['endereco'] = {k: encrypt_data(v) for k, v in user_data.endereco.dict().items()}
         
         new_user_ref = db.collection('usuarios').document()
         transaction.set(new_user_ref, user_dict)
@@ -126,10 +142,13 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
 
         if role == "admin":
             transaction.update(negocio_doc_ref, {'admin_uid': user_data.firebase_uid})
-            logger.info(f"Novo usuário {user_data.email} criado como ADMIN do negócio {negocio_id}.")
-        else:
-            logger.info(f"Novo usuário {user_data.email} criado como CLIENTE do negócio {negocio_id}.")
         
+        # Descriptografa para retornar ao usuário
+        user_dict['nome'] = user_data.nome
+        user_dict['telefone'] = user_data.telefone
+        if 'endereco' in user_dict and user_dict['endereco']:
+             user_dict['endereco'] = user_data.endereco.dict()
+
         return user_dict
     
     return transaction_sync_user(db.transaction())
@@ -311,6 +330,34 @@ def admin_listar_usuarios_por_negocio(db: firestore.client, negocio_id: str, sta
 
             if deve_incluir:
                 usuario_data['id'] = doc.id
+                
+                # Descriptografa campos sensíveis do usuário
+                if 'nome' in usuario_data and usuario_data['nome']:
+                    try:
+                        usuario_data['nome'] = decrypt_data(usuario_data['nome'])
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar nome do usuário {doc.id}: {e}")
+                        usuario_data['nome'] = "[Erro na descriptografia]"
+                
+                if 'telefone' in usuario_data and usuario_data['telefone']:
+                    try:
+                        usuario_data['telefone'] = decrypt_data(usuario_data['telefone'])
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar telefone do usuário {doc.id}: {e}")
+                        usuario_data['telefone'] = "[Erro na descriptografia]"
+                
+                if 'endereco' in usuario_data and usuario_data['endereco']:
+                    endereco_descriptografado = {}
+                    for key, value in usuario_data['endereco'].items():
+                        if value and isinstance(value, str) and value.strip():
+                            try:
+                                endereco_descriptografado[key] = decrypt_data(value)
+                            except Exception as e:
+                                logger.error(f"Erro ao descriptografar campo de endereço {key} do usuário {doc.id}: {e}")
+                                endereco_descriptografado[key] = "[Erro na descriptografia]"
+                        else:
+                            endereco_descriptografado[key] = value
+                    usuario_data['endereco'] = endereco_descriptografado
                 
                 # ***** A CORREÇÃO ESTÁ AQUI *****
                 # Adiciona o status do negócio ao dicionário de resposta.
@@ -2114,8 +2161,18 @@ def criar_log_auditoria(db: firestore.client, autor_uid: str, negocio_id: str, a
 # =================================================================================
 
 def criar_registro_diario(db: firestore.client, registro_data: schemas.DiarioTecnicoCreate, tecnico: schemas.UsuarioProfile) -> Dict:
-    """Salva um novo registro do técnico na subcoleção de um paciente."""
+    """Salva um novo registro do técnico na subcoleção de um paciente, criptografando dados sensíveis."""
     registro_dict = registro_data.model_dump()
+    
+    # Define campos sensíveis que precisam ser criptografados
+    sensitive_fields = ['anotacao_geral', 'medicamentos', 'atividades', 'intercorrencias']
+    
+    # Criptografa campos sensíveis antes de salvar
+    for field in sensitive_fields:
+        if field in registro_dict and registro_dict[field] is not None:
+            if isinstance(registro_dict[field], str) and registro_dict[field].strip():
+                registro_dict[field] = encrypt_data(registro_dict[field])
+    
     registro_dict.update({
         "data_ocorrencia": datetime.utcnow(),
         "tecnico_id": tecnico.id,
@@ -2127,6 +2184,17 @@ def criar_registro_diario(db: firestore.client, registro_data: schemas.DiarioTec
     doc_ref.set(registro_dict)
     
     registro_dict['id'] = doc_ref.id
+    
+    # Descriptografa campos sensíveis para a resposta da API
+    for field in sensitive_fields:
+        if field in registro_dict and registro_dict[field] is not None:
+            if isinstance(registro_dict[field], str) and registro_dict[field].strip():
+                try:
+                    registro_dict[field] = decrypt_data(registro_dict[field])
+                except Exception as e:
+                    logger.error(f"Erro ao descriptografar campo {field} do registro diário: {e}")
+                    registro_dict[field] = "[Erro na descriptografia]"
+    
     return registro_dict
 
 def listar_registros_diario(db: firestore.client, paciente_id: str) -> List[schemas.DiarioTecnicoResponse]:
@@ -2140,9 +2208,23 @@ def listar_registros_diario(db: firestore.client, paciente_id: str) -> List[sche
         
         tecnicos_cache = {}
 
+        # Define campos sensíveis que precisam ser descriptografados
+        sensitive_fields = ['anotacao_geral', 'medicamentos', 'atividades', 'intercorrencias']
+
         for doc in query.stream():
             registro_data = doc.to_dict()
             registro_data['id'] = doc.id
+            
+            # Descriptografa campos sensíveis
+            for field in sensitive_fields:
+                if field in registro_data and registro_data[field] is not None:
+                    if isinstance(registro_data[field], str) and registro_data[field].strip():
+                        try:
+                            registro_data[field] = decrypt_data(registro_data[field])
+                        except Exception as e:
+                            logger.error(f"Erro ao descriptografar campo {field} do registro diário {doc.id}: {e}")
+                            registro_data[field] = "[Erro na descriptografia]"
+            
             tecnico_id = registro_data.get('tecnico_id')
 
             if tecnico_id:
@@ -2716,7 +2798,7 @@ def get_checklist_diario_plano_ativo(db: firestore.client, paciente_id: str, dia
 
 def criar_registro_diario_estruturado(db: firestore.client, registro_data: schemas.RegistroDiarioCreate, tecnico_id: str) -> Dict:
     """
-    Adiciona um novo registro estruturado ao diário de acompanhamento de um paciente.
+    Adiciona um novo registro estruturado ao diário de acompanhamento de um paciente, criptografando dados sensíveis.
     AGORA SIMPLIFICADO: Aceita um payload de texto livre para todos os tipos e
     respeita o timestamp enviado pelo cliente.
     """
@@ -2724,13 +2806,19 @@ def criar_registro_diario_estruturado(db: firestore.client, registro_data: schem
         # A validação agora é feita diretamente pelo Pydantic no schema.
         # O conteúdo sempre será do tipo AnotacaoConteudo.
         conteudo_ok = registro_data.conteudo
+        conteudo_dict = conteudo_ok.model_dump()
+        
+        # Criptografa o campo sensível 'descricao' dentro do conteúdo
+        if 'descricao' in conteudo_dict and conteudo_dict['descricao'] is not None:
+            if isinstance(conteudo_dict['descricao'], str) and conteudo_dict['descricao'].strip():
+                conteudo_dict['descricao'] = encrypt_data(conteudo_dict['descricao'])
 
         # Monta o dicionário para salvar no Firestore
         registro_dict_para_salvar = {
             "negocio_id": registro_data.negocio_id,
             "paciente_id": registro_data.paciente_id,
             "tipo": registro_data.tipo,
-            "conteudo": conteudo_ok.model_dump(),
+            "conteudo": conteudo_dict,
             "tecnico_id": tecnico_id,
             # CORREÇÃO: Usa o timestamp enviado pelo app em vez de gerar um novo.
             "data_registro": registro_data.data_hora,
@@ -2756,6 +2844,17 @@ def criar_registro_diario_estruturado(db: firestore.client, registro_data: schem
         resposta_dict = registro_dict_para_salvar.copy()
         resposta_dict['id'] = doc_ref.id
         resposta_dict['tecnico'] = tecnico_perfil
+        
+        # Descriptografa o campo sensível 'descricao' para a resposta da API
+        if 'conteudo' in resposta_dict and resposta_dict['conteudo'] is not None:
+            if 'descricao' in resposta_dict['conteudo'] and resposta_dict['conteudo']['descricao'] is not None:
+                if isinstance(resposta_dict['conteudo']['descricao'], str) and resposta_dict['conteudo']['descricao'].strip():
+                    try:
+                        resposta_dict['conteudo']['descricao'] = decrypt_data(resposta_dict['conteudo']['descricao'])
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar conteúdo do registro diário estruturado: {e}")
+                        resposta_dict['conteudo']['descricao'] = "[Erro na descriptografia]"
+        
         return resposta_dict
 
     except Exception as e:
@@ -2802,6 +2901,14 @@ def listar_registros_diario_estruturado(
             if 'descricao' in conteudo_bruto:
                 # Se for um registro novo ou um antigo que já tinha descrição, usa ela
                 descricao_final = conteudo_bruto.get('descricao', '')
+                
+                # Descriptografa a descrição se necessário
+                if descricao_final and isinstance(descricao_final, str) and descricao_final.strip():
+                    try:
+                        descricao_final = decrypt_data(descricao_final)
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar descrição do registro diário estruturado {doc.id}: {e}")
+                        descricao_final = "[Erro na descriptografia]"
             else:
                 # Se for um registro antigo e estruturado, monta uma descrição a partir dos dados
                 partes = []
@@ -2926,11 +3033,27 @@ def deletar_registro_diario_estruturado(
 # =================================================================================
 
 def criar_anamnese(db: firestore.client, paciente_id: str, anamnese_data: schemas.AnamneseEnfermagemCreate) -> Dict:
-    """Cria um novo registro de anamnese para um paciente."""
+    """Cria um novo registro de anamnese para um paciente, criptografando dados sensíveis."""
     anamnese_dict = anamnese_data.model_dump(mode='json')
+    
+    # Define campos sensíveis que precisam ser criptografados
+    sensitive_fields = [
+        'nome_paciente', 'queixa_principal', 'historia_doenca_atual', 'antecedentes_outros',
+        'cirurgias_anteriores', 'alergias', 'medicamentos_continuos', 'habitos_outros',
+        'historia_familiar', 'sistema_respiratorio', 'sistema_cardiovascular', 'abdome',
+        'eliminacoes_fisiologicas', 'drenos_sondas_cateteres', 'pele_mucosas',
+        'apoio_familiar_social', 'necessidades_emocionais_espirituais'
+    ]
+    
+    # Criptografa campos sensíveis antes de salvar
+    for field in sensitive_fields:
+        if field in anamnese_dict and anamnese_dict[field] is not None:
+            if isinstance(anamnese_dict[field], str) and anamnese_dict[field].strip():
+                anamnese_dict[field] = encrypt_data(anamnese_dict[field])
+    
     anamnese_dict.update({
         "paciente_id": paciente_id,
-        "created_at": firestore.SERVER_TIMESTAMP, # Usa o timestamp do servidor para o DB
+        "created_at": firestore.SERVER_TIMESTAMP,
         "updated_at": None,
     })
     
@@ -2941,30 +3064,92 @@ def criar_anamnese(db: firestore.client, paciente_id: str, anamnese_data: schema
     # Para a RESPOSTA da API, não podemos retornar o 'SERVER_TIMESTAMP'.
     # Substituímos pelo horário atual do servidor da aplicação, que é válido para o schema.
     anamnese_dict['id'] = doc_ref.id
-    anamnese_dict['created_at'] = datetime.utcnow() # Garante que a resposta seja um datetime válido
+    anamnese_dict['created_at'] = datetime.utcnow()
+    
+    # Descriptografa os campos sensíveis para retornar dados legíveis na resposta da API
+    for field in sensitive_fields:
+        if field in anamnese_dict and anamnese_dict[field] is not None:
+            if isinstance(anamnese_dict[field], str) and anamnese_dict[field].strip():
+                try:
+                    anamnese_dict[field] = decrypt_data(anamnese_dict[field])
+                except Exception as e:
+                    logger.error(f"Erro ao descriptografar campo {field} da anamnese: {e}")
+                    anamnese_dict[field] = "[Erro na descriptografia]"
     # --- FIM DA CORREÇÃO ---
     
     return anamnese_dict
 
 def listar_anamneses_por_paciente(db: firestore.client, paciente_id: str) -> List[Dict]:
+    """Lista todas as anamneses de um paciente, descriptografando dados sensíveis."""
     anamneses = []
     query = db.collection('usuarios').document(paciente_id).collection('anamneses').order_by('data_avaliacao', direction=firestore.Query.DESCENDING)
+    
+    # Define campos sensíveis que precisam ser descriptografados
+    sensitive_fields = [
+        'nome_paciente', 'queixa_principal', 'historia_doenca_atual', 'antecedentes_outros',
+        'cirurgias_anteriores', 'alergias', 'medicamentos_continuos', 'habitos_outros',
+        'historia_familiar', 'sistema_respiratorio', 'sistema_cardiovascular', 'abdome',
+        'eliminacoes_fisiologicas', 'drenos_sondas_cateteres', 'pele_mucosas',
+        'apoio_familiar_social', 'necessidades_emocionais_espirituais'
+    ]
+    
     for doc in query.stream():
         data = doc.to_dict()
         data['id'] = doc.id
+        
+        # Descriptografa campos sensíveis
+        for field in sensitive_fields:
+            if field in data and data[field] is not None:
+                if isinstance(data[field], str) and data[field].strip():
+                    try:
+                        data[field] = decrypt_data(data[field])
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar campo {field} da anamnese {doc.id}: {e}")
+                        data[field] = "[Erro na descriptografia]"
+        
         anamneses.append(data)
     return anamneses
 
 def atualizar_anamnese(db: firestore.client, anamnese_id: str, paciente_id: str, update_data: schemas.AnamneseEnfermagemUpdate) -> Optional[Dict]:
+    """Atualiza uma anamnese existente, criptografando novos dados sensíveis e descriptografando para resposta."""
     anamnese_ref = db.collection('usuarios').document(paciente_id).collection('anamneses').document(anamnese_id)
     if not anamnese_ref.get().exists:
         return None
+    
     update_dict = update_data.model_dump(exclude_unset=True, mode='json')
+    
+    # Define campos sensíveis que precisam ser criptografados
+    sensitive_fields = [
+        'nome_paciente', 'queixa_principal', 'historia_doenca_atual', 'antecedentes_outros',
+        'cirurgias_anteriores', 'alergias', 'medicamentos_continuos', 'habitos_outros',
+        'historia_familiar', 'sistema_respiratorio', 'sistema_cardiovascular', 'abdome',
+        'eliminacoes_fisiologicas', 'drenos_sondas_cateteres', 'pele_mucosas',
+        'apoio_familiar_social', 'necessidades_emocionais_espirituais'
+    ]
+    
+    # Criptografa campos sensíveis que estão sendo atualizados
+    for field in sensitive_fields:
+        if field in update_dict and update_dict[field] is not None:
+            if isinstance(update_dict[field], str) and update_dict[field].strip():
+                update_dict[field] = encrypt_data(update_dict[field])
+    
     update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
     anamnese_ref.update(update_dict)
+    
     updated_doc = anamnese_ref.get()
     data = updated_doc.to_dict()
     data['id'] = updated_doc.id
+    
+    # Descriptografa campos sensíveis para a resposta da API
+    for field in sensitive_fields:
+        if field in data and data[field] is not None:
+            if isinstance(data[field], str) and data[field].strip():
+                try:
+                    data[field] = decrypt_data(data[field])
+                except Exception as e:
+                    logger.error(f"Erro ao descriptografar campo {field} da anamnese {anamnese_id}: {e}")
+                    data[field] = "[Erro na descriptografia]"
+    
     return data
 
 # =================================================================================
@@ -2972,13 +3157,39 @@ def atualizar_anamnese(db: firestore.client, anamnese_id: str, paciente_id: str,
 # =================================================================================
 
 def atualizar_endereco_paciente(db: firestore.client, paciente_id: str, endereco_data: schemas.EnderecoUpdate) -> Optional[Dict]:
+    """Atualiza o endereço de um paciente, criptografando dados sensíveis."""
     paciente_ref = db.collection('usuarios').document(paciente_id)
     if not paciente_ref.get().exists:
         return None
-    paciente_ref.update({"endereco": endereco_data.model_dump()})
+    
+    # Criptografa os dados do endereço antes de salvar
+    endereco_dict = endereco_data.model_dump()
+    endereco_criptografado = {}
+    for key, value in endereco_dict.items():
+        if value is not None and isinstance(value, str) and value.strip():
+            endereco_criptografado[key] = encrypt_data(value)
+        else:
+            endereco_criptografado[key] = value
+    
+    paciente_ref.update({"endereco": endereco_criptografado})
     updated_doc = paciente_ref.get()
     data = updated_doc.to_dict()
     data['id'] = updated_doc.id
+    
+    # Descriptografa o endereço para a resposta da API
+    if 'endereco' in data and data['endereco']:
+        endereco_descriptografado = {}
+        for key, value in data['endereco'].items():
+            if value is not None and isinstance(value, str) and value.strip():
+                try:
+                    endereco_descriptografado[key] = decrypt_data(value)
+                except Exception as e:
+                    logger.error(f"Erro ao descriptografar campo de endereço {key} do paciente {paciente_id}: {e}")
+                    endereco_descriptografado[key] = "[Erro na descriptografia]"
+            else:
+                endereco_descriptografado[key] = value
+        data['endereco'] = endereco_descriptografado
+    
     return data
 
 
@@ -2999,13 +3210,21 @@ def criar_suporte_psicologico(
     suporte_data: schemas.SuportePsicologicoCreate,
     criado_por_id: str
 ) -> Dict:
-    """Cria um novo recurso de suporte psicológico para um paciente."""
+    """Cria um novo recurso de suporte psicológico para um paciente, criptografando dados sensíveis."""
     suporte_dict = suporte_data.model_dump()
+    
+    # Criptografa campos sensíveis antes de salvar
+    sensitive_fields = ['titulo', 'conteudo']
+    for field in sensitive_fields:
+        if field in suporte_dict and suporte_dict[field] is not None:
+            if isinstance(suporte_dict[field], str) and suporte_dict[field].strip():
+                suporte_dict[field] = encrypt_data(suporte_dict[field])
+    
     suporte_dict.update({
         "paciente_id": paciente_id,
         "negocio_id": negocio_id,
         "criado_por": criado_por_id,
-        "tipo": _detectar_tipo_conteudo(suporte_data.conteudo),
+        "tipo": _detectar_tipo_conteudo(suporte_data.conteudo),  # Usa o conteúdo original para detectar o tipo
         "data_criacao": firestore.SERVER_TIMESTAMP,
         "data_atualizacao": firestore.SERVER_TIMESTAMP,
     })
@@ -3013,21 +3232,46 @@ def criar_suporte_psicologico(
     doc_ref = db.collection('usuarios').document(paciente_id).collection('suporte_psicologico').document()
     doc_ref.set(suporte_dict)
     
-    # Para a resposta, substituímos o ServerTimestamp por um datetime real
+    # Para a resposta, substituímos o ServerTimestamp por um datetime real e descriptografamos
     suporte_dict['id'] = doc_ref.id
     now = datetime.utcnow()
     suporte_dict['data_criacao'] = now
     suporte_dict['data_atualizacao'] = now
     
+    # Descriptografa campos sensíveis para a resposta da API
+    for field in sensitive_fields:
+        if field in suporte_dict and suporte_dict[field] is not None:
+            if isinstance(suporte_dict[field], str) and suporte_dict[field].strip():
+                try:
+                    suporte_dict[field] = decrypt_data(suporte_dict[field])
+                except Exception as e:
+                    logger.error(f"Erro ao descriptografar campo {field} do suporte psicológico: {e}")
+                    suporte_dict[field] = "[Erro na descriptografia]"
+    
     return suporte_dict
 
 def listar_suportes_psicologicos(db: firestore.client, paciente_id: str) -> List[Dict]:
-    """Lista todos os recursos de suporte psicológico de um paciente."""
+    """Lista todos os recursos de suporte psicológico de um paciente, descriptografando dados sensíveis."""
     suportes = []
     query = db.collection('usuarios').document(paciente_id).collection('suporte_psicologico').order_by('data_criacao', direction=firestore.Query.DESCENDING)
+    
+    # Define campos sensíveis que precisam ser descriptografados
+    sensitive_fields = ['titulo', 'conteudo']
+    
     for doc in query.stream():
         data = doc.to_dict()
         data['id'] = doc.id
+        
+        # Descriptografa campos sensíveis
+        for field in sensitive_fields:
+            if field in data and data[field] is not None:
+                if isinstance(data[field], str) and data[field].strip():
+                    try:
+                        data[field] = decrypt_data(data[field])
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar campo {field} do suporte psicológico {doc.id}: {e}")
+                        data[field] = "[Erro na descriptografia]"
+        
         suportes.append(data)
     return suportes
 
@@ -3037,16 +3281,25 @@ def atualizar_suporte_psicologico(
     suporte_id: str,
     update_data: schemas.SuportePsicologicoUpdate
 ) -> Optional[Dict]:
-    """Atualiza um recurso de suporte psicológico existente."""
+    """Atualiza um recurso de suporte psicológico existente, criptografando novos dados sensíveis."""
     suporte_ref = db.collection('usuarios').document(paciente_id).collection('suporte_psicologico').document(suporte_id)
     if not suporte_ref.get().exists:
         return None
         
     update_dict = update_data.model_dump(exclude_unset=True)
     
-    # Se o conteúdo for atualizado, reavalia o tipo
+    # Define campos sensíveis que precisam ser criptografados
+    sensitive_fields = ['titulo', 'conteudo']
+    
+    # Se o conteúdo for atualizado, reavalia o tipo usando o conteúdo original antes da criptografia
     if 'conteudo' in update_dict:
         update_dict['tipo'] = _detectar_tipo_conteudo(update_dict['conteudo'])
+    
+    # Criptografa campos sensíveis que estão sendo atualizados
+    for field in sensitive_fields:
+        if field in update_dict and update_dict[field] is not None:
+            if isinstance(update_dict[field], str) and update_dict[field].strip():
+                update_dict[field] = encrypt_data(update_dict[field])
         
     update_dict['data_atualizacao'] = firestore.SERVER_TIMESTAMP
     suporte_ref.update(update_dict)
@@ -3054,6 +3307,17 @@ def atualizar_suporte_psicologico(
     updated_doc = suporte_ref.get()
     data = updated_doc.to_dict()
     data['id'] = updated_doc.id
+    
+    # Descriptografa campos sensíveis para a resposta da API
+    for field in sensitive_fields:
+        if field in data and data[field] is not None:
+            if isinstance(data[field], str) and data[field].strip():
+                try:
+                    data[field] = decrypt_data(data[field])
+                except Exception as e:
+                    logger.error(f"Erro ao descriptografar campo {field} do suporte psicológico {suporte_id}: {e}")
+                    data[field] = "[Erro na descriptografia]"
+    
     return data
 
 def deletar_suporte_psicologico(db: firestore.client, paciente_id: str, suporte_id: str) -> bool:
