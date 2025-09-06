@@ -1301,6 +1301,22 @@ def listar_agendamentos_por_cliente(db: firestore.client, negocio_id: str, clien
     for doc in query.stream():
         ag_data = doc.to_dict()
         ag_data['id'] = doc.id
+        
+        # Descriptografa nomes se presentes
+        if 'cliente_nome' in ag_data and ag_data['cliente_nome']:
+            try:
+                ag_data['cliente_nome'] = decrypt_data(ag_data['cliente_nome'])
+            except Exception as e:
+                logger.error(f"Erro ao descriptografar cliente_nome no agendamento {doc.id}: {e}")
+                ag_data['cliente_nome'] = "[Erro na descriptografia]"
+        
+        if 'profissional_nome' in ag_data and ag_data['profissional_nome']:
+            try:
+                ag_data['profissional_nome'] = decrypt_data(ag_data['profissional_nome'])
+            except Exception as e:
+                logger.error(f"Erro ao descriptografar profissional_nome no agendamento {doc.id}: {e}")
+                ag_data['profissional_nome'] = "[Erro na descriptografia]"
+        
         agendamentos.append(ag_data)
     
     return agendamentos
@@ -1313,6 +1329,22 @@ def listar_agendamentos_por_profissional(db: firestore.client, negocio_id: str, 
     for doc in query.stream():
         ag_data = doc.to_dict()
         ag_data['id'] = doc.id
+        
+        # Descriptografa nomes se presentes
+        if 'cliente_nome' in ag_data and ag_data['cliente_nome']:
+            try:
+                ag_data['cliente_nome'] = decrypt_data(ag_data['cliente_nome'])
+            except Exception as e:
+                logger.error(f"Erro ao descriptografar cliente_nome no agendamento {doc.id}: {e}")
+                ag_data['cliente_nome'] = "[Erro na descriptografia]"
+        
+        if 'profissional_nome' in ag_data and ag_data['profissional_nome']:
+            try:
+                ag_data['profissional_nome'] = decrypt_data(ag_data['profissional_nome'])
+            except Exception as e:
+                logger.error(f"Erro ao descriptografar profissional_nome no agendamento {doc.id}: {e}")
+                ag_data['profissional_nome'] = "[Erro na descriptografia]"
+        
         agendamentos.append(ag_data)
         
     return agendamentos
@@ -2074,9 +2106,18 @@ def listar_tecnicos_supervisionados_por_paciente(db: firestore.client, paciente_
             tecnico_data = tecnico_doc.to_dict()
             # 3. Se o supervisor_id do técnico bate com o ID do enfermeiro, adiciona à lista.
             if tecnico_data.get('supervisor_id') == enfermeiro_id:
+                # Descriptografa o nome do técnico
+                nome_tecnico = tecnico_data.get('nome', 'Nome não disponível')
+                if nome_tecnico and nome_tecnico != 'Nome não disponível':
+                    try:
+                        nome_tecnico = decrypt_data(nome_tecnico)
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar nome do técnico {tecnico_doc.id}: {e}")
+                        nome_tecnico = "[Erro na descriptografia]"
+                
                 tecnicos_finais.append({
                     "id": tecnico_doc.id,
-                    "nome": tecnico_data.get('nome', 'Nome não disponível'),
+                    "nome": nome_tecnico,
                     "email": tecnico_data.get('email', 'Email não disponível')
                 })
         
@@ -2450,10 +2491,19 @@ def listar_registros_diario(db: firestore.client, paciente_id: str) -> List[sche
                 else:
                     tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
                     if tecnico_doc.exists:
+                        tecnico_data = tecnico_doc.to_dict()
+                        nome_tecnico = tecnico_data.get('nome')
+                        if nome_tecnico:
+                            try:
+                                nome_tecnico = decrypt_data(nome_tecnico)
+                            except Exception as e:
+                                logger.error(f"Erro ao descriptografar nome do técnico {tecnico_id}: {e}")
+                                nome_tecnico = "[Erro na descriptografia]"
+                        
                         tecnico_perfil = {
                             "id": tecnico_doc.id,
-                            "nome": tecnico_doc.to_dict().get('nome'),
-                            "email": tecnico_doc.to_dict().get('email')
+                            "nome": nome_tecnico,
+                            "email": tecnico_data.get('email')
                         }
                         tecnicos_cache[tecnico_id] = tecnico_perfil
                     else:
@@ -3157,7 +3207,15 @@ def listar_registros_diario_estruturado(
                     tdoc = db.collection('usuarios').document(tecnico_id).get()
                     if tdoc.exists:
                         tdat = tdoc.to_dict() or {}
-                        tecnico_perfil = {'id': tdoc.id, 'nome': tdat.get('nome'), 'email': tdat.get('email')}
+                        nome_tecnico = tdat.get('nome')
+                        if nome_tecnico:
+                            try:
+                                nome_tecnico = decrypt_data(nome_tecnico)
+                            except Exception as e:
+                                logger.error(f"Erro ao descriptografar nome do técnico {tecnico_id}: {e}")
+                                nome_tecnico = "[Erro na descriptografia]"
+                        
+                        tecnico_perfil = {'id': tdoc.id, 'nome': nome_tecnico, 'email': tdat.get('email')}
                     else:
                         tecnico_perfil = {'id': tecnico_id, 'nome': 'Técnico Desconhecido', 'email': ''}
                     tecnicos_cache[tecnico_id] = tecnico_perfil
@@ -3654,9 +3712,56 @@ def listar_relatorios_por_paciente(db: firestore.client, paciente_id: str) -> Li
             .where('paciente_id', '==', paciente_id) \
             .order_by('data_criacao', direction=firestore.Query.DESCENDING)
         
+        profissionais_cache = {}
+        
         for doc in query.stream():
             data = doc.to_dict()
             data['id'] = doc.id
+            
+            # Adiciona informações do médico se disponível
+            medico_id = data.get('medico_id')
+            if medico_id:
+                if medico_id in profissionais_cache:
+                    data['medico_nome'] = profissionais_cache[medico_id]['nome']
+                else:
+                    medico_doc = db.collection('usuarios').document(medico_id).get()
+                    if medico_doc.exists:
+                        medico_data = medico_doc.to_dict()
+                        nome_medico = medico_data.get('nome', 'Médico desconhecido')
+                        if nome_medico and nome_medico != 'Médico desconhecido':
+                            try:
+                                nome_medico = decrypt_data(nome_medico)
+                            except Exception as e:
+                                logger.error(f"Erro ao descriptografar nome do médico {medico_id}: {e}")
+                                nome_medico = "[Erro na descriptografia]"
+                        
+                        profissionais_cache[medico_id] = {'nome': nome_medico}
+                        data['medico_nome'] = nome_medico
+                    else:
+                        data['medico_nome'] = 'Médico não encontrado'
+            
+            # Adiciona informações do criador se disponível
+            criado_por_id = data.get('criado_por_id')
+            if criado_por_id and criado_por_id != medico_id:
+                if criado_por_id in profissionais_cache:
+                    data['criado_por_nome'] = profissionais_cache[criado_por_id]['nome']
+                else:
+                    criador_doc = db.collection('usuarios').document(criado_por_id).get()
+                    if criador_doc.exists:
+                        criador_data = criador_doc.to_dict()
+                        nome_criador = criador_data.get('nome', 'Criador desconhecido')
+                        if nome_criador and nome_criador != 'Criador desconhecido':
+                            try:
+                                nome_criador = decrypt_data(nome_criador)
+                            except Exception as e:
+                                logger.error(f"Erro ao descriptografar nome do criador {criado_por_id}: {e}")
+                                nome_criador = "[Erro na descriptografia]"
+                        
+                        profissionais_cache[criado_por_id] = {'nome': nome_criador}
+                        data['criado_por_nome'] = nome_criador
+                    else:
+                        data['criado_por_nome'] = 'Criador não encontrado'
+            
             relatorios.append(data)
             
     except Exception as e:
