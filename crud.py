@@ -411,6 +411,35 @@ def admin_set_usuario_status(db: firestore.client, negocio_id: str, user_id: str
     if doc.exists:
         data = doc.to_dict()
         data['id'] = doc.id
+        
+        # Descriptografa campos sensíveis do usuário
+        if 'nome' in data and data['nome']:
+            try:
+                data['nome'] = decrypt_data(data['nome'])
+            except Exception as e:
+                logger.error(f"Erro ao descriptografar nome do usuário {doc.id}: {e}")
+                data['nome'] = "[Erro na descriptografia]"
+        
+        if 'telefone' in data and data['telefone']:
+            try:
+                data['telefone'] = decrypt_data(data['telefone'])
+            except Exception as e:
+                logger.error(f"Erro ao descriptografar telefone do usuário {doc.id}: {e}")
+                data['telefone'] = "[Erro na descriptografia]"
+        
+        if 'endereco' in data and data['endereco']:
+            endereco_descriptografado = {}
+            for key, value in data['endereco'].items():
+                if value and isinstance(value, str) and value.strip():
+                    try:
+                        endereco_descriptografado[key] = decrypt_data(value)
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar campo de endereço {key} do usuário {doc.id}: {e}")
+                        endereco_descriptografado[key] = "[Erro na descriptografia]"
+                else:
+                    endereco_descriptografado[key] = value
+            data['endereco'] = endereco_descriptografado
+        
         return data
     return None
 
@@ -484,6 +513,35 @@ def admin_atualizar_role_usuario(db: firestore.client, negocio_id: str, user_id:
     updated_user_doc = user_ref.get()
     updated_user_data = updated_user_doc.to_dict()
     updated_user_data['id'] = updated_user_doc.id
+    
+    # Descriptografa campos sensíveis do usuário
+    if 'nome' in updated_user_data and updated_user_data['nome']:
+        try:
+            updated_user_data['nome'] = decrypt_data(updated_user_data['nome'])
+        except Exception as e:
+            logger.error(f"Erro ao descriptografar nome do usuário {updated_user_doc.id}: {e}")
+            updated_user_data['nome'] = "[Erro na descriptografia]"
+    
+    if 'telefone' in updated_user_data and updated_user_data['telefone']:
+        try:
+            updated_user_data['telefone'] = decrypt_data(updated_user_data['telefone'])
+        except Exception as e:
+            logger.error(f"Erro ao descriptografar telefone do usuário {updated_user_doc.id}: {e}")
+            updated_user_data['telefone'] = "[Erro na descriptografia]"
+    
+    if 'endereco' in updated_user_data and updated_user_data['endereco']:
+        endereco_descriptografado = {}
+        for key, value in updated_user_data['endereco'].items():
+            if value and isinstance(value, str) and value.strip():
+                try:
+                    endereco_descriptografado[key] = decrypt_data(value)
+                except Exception as e:
+                    logger.error(f"Erro ao descriptografar campo de endereço {key} do usuário {updated_user_doc.id}: {e}")
+                    endereco_descriptografado[key] = "[Erro na descriptografia]"
+            else:
+                endereco_descriptografado[key] = value
+        updated_user_data['endereco'] = endereco_descriptografado
+    
     return updated_user_data
 
 def admin_criar_paciente(db: firestore.client, negocio_id: str, paciente_data: schemas.PacienteCreateByAdmin) -> Dict:
@@ -554,6 +612,34 @@ def admin_listar_clientes_por_negocio(db: firestore.client, negocio_id: str, sta
 
             if status_no_negocio == status:
                 cliente_data['id'] = doc.id
+                
+                # Descriptografa campos sensíveis do cliente
+                if 'nome' in cliente_data and cliente_data['nome']:
+                    try:
+                        cliente_data['nome'] = decrypt_data(cliente_data['nome'])
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar nome do cliente {doc.id}: {e}")
+                        cliente_data['nome'] = "[Erro na descriptografia]"
+                
+                if 'telefone' in cliente_data and cliente_data['telefone']:
+                    try:
+                        cliente_data['telefone'] = decrypt_data(cliente_data['telefone'])
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar telefone do cliente {doc.id}: {e}")
+                        cliente_data['telefone'] = "[Erro na descriptografia]"
+                
+                if 'endereco' in cliente_data and cliente_data['endereco']:
+                    endereco_descriptografado = {}
+                    for key, value in cliente_data['endereco'].items():
+                        if value and isinstance(value, str) and value.strip():
+                            try:
+                                endereco_descriptografado[key] = decrypt_data(value)
+                            except Exception as e:
+                                logger.error(f"Erro ao descriptografar campo de endereço {key} do cliente {doc.id}: {e}")
+                                endereco_descriptografado[key] = "[Erro na descriptografia]"
+                        else:
+                            endereco_descriptografado[key] = value
+                    cliente_data['endereco'] = endereco_descriptografado
                 
                 # CORREÇÃO: Busca o ID do perfil profissional a partir do ID do usuário (enfermeiro)
                 enfermeiro_user_id = cliente_data.get('enfermeiro_id')
@@ -1606,6 +1692,35 @@ def vincular_paciente_enfermeiro(db: firestore.client, negocio_id: str, paciente
     if doc.exists:
         data = doc.to_dict()
         data['id'] = doc.id
+        
+        # Descriptografa campos sensíveis do paciente
+        if 'nome' in data and data['nome']:
+            try:
+                data['nome'] = decrypt_data(data['nome'])
+            except Exception as e:
+                logger.error(f"Erro ao descriptografar nome do paciente {doc.id}: {e}")
+                data['nome'] = "[Erro na descriptografia]"
+        
+        if 'telefone' in data and data['telefone']:
+            try:
+                data['telefone'] = decrypt_data(data['telefone'])
+            except Exception as e:
+                logger.error(f"Erro ao descriptografar telefone do paciente {doc.id}: {e}")
+                data['telefone'] = "[Erro na descriptografia]"
+        
+        if 'endereco' in data and data['endereco']:
+            endereco_descriptografado = {}
+            for key, value in data['endereco'].items():
+                if value and isinstance(value, str) and value.strip():
+                    try:
+                        endereco_descriptografado[key] = decrypt_data(value)
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar campo de endereço {key} do paciente {doc.id}: {e}")
+                        endereco_descriptografado[key] = "[Erro na descriptografia]"
+                else:
+                    endereco_descriptografado[key] = value
+            data['endereco'] = endereco_descriptografado
+        
         return data
     return None
 
@@ -1762,6 +1877,35 @@ def vincular_supervisor_tecnico(db: firestore.client, tecnico_id: str, superviso
     if doc.exists:
         data = doc.to_dict()
         data['id'] = doc.id
+        
+        # Descriptografa campos sensíveis do técnico
+        if 'nome' in data and data['nome']:
+            try:
+                data['nome'] = decrypt_data(data['nome'])
+            except Exception as e:
+                logger.error(f"Erro ao descriptografar nome do técnico {doc.id}: {e}")
+                data['nome'] = "[Erro na descriptografia]"
+        
+        if 'telefone' in data and data['telefone']:
+            try:
+                data['telefone'] = decrypt_data(data['telefone'])
+            except Exception as e:
+                logger.error(f"Erro ao descriptografar telefone do técnico {doc.id}: {e}")
+                data['telefone'] = "[Erro na descriptografia]"
+        
+        if 'endereco' in data and data['endereco']:
+            endereco_descriptografado = {}
+            for key, value in data['endereco'].items():
+                if value and isinstance(value, str) and value.strip():
+                    try:
+                        endereco_descriptografado[key] = decrypt_data(value)
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar campo de endereço {key} do técnico {doc.id}: {e}")
+                        endereco_descriptografado[key] = "[Erro na descriptografia]"
+                else:
+                    endereco_descriptografado[key] = value
+            data['endereco'] = endereco_descriptografado
+        
         return data
     return None
 
@@ -1797,6 +1941,35 @@ def listar_pacientes_por_profissional_ou_tecnico(db: firestore.client, negocio_i
             
             if status_no_negocio == 'ativo':
                 paciente_data['id'] = doc.id
+                
+                # Descriptografa campos sensíveis do paciente
+                if 'nome' in paciente_data and paciente_data['nome']:
+                    try:
+                        paciente_data['nome'] = decrypt_data(paciente_data['nome'])
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar nome do paciente {doc.id}: {e}")
+                        paciente_data['nome'] = "[Erro na descriptografia]"
+                
+                if 'telefone' in paciente_data and paciente_data['telefone']:
+                    try:
+                        paciente_data['telefone'] = decrypt_data(paciente_data['telefone'])
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar telefone do paciente {doc.id}: {e}")
+                        paciente_data['telefone'] = "[Erro na descriptografia]"
+                
+                if 'endereco' in paciente_data and paciente_data['endereco']:
+                    endereco_descriptografado = {}
+                    for key, value in paciente_data['endereco'].items():
+                        if value and isinstance(value, str) and value.strip():
+                            try:
+                                endereco_descriptografado[key] = decrypt_data(value)
+                            except Exception as e:
+                                logger.error(f"Erro ao descriptografar campo de endereço {key} do paciente {doc.id}: {e}")
+                                endereco_descriptografado[key] = "[Erro na descriptografia]"
+                        else:
+                            endereco_descriptografado[key] = value
+                    paciente_data['endereco'] = endereco_descriptografado
+                
                 pacientes.append(paciente_data)
         
         return pacientes
@@ -3400,6 +3573,35 @@ def atualizar_consentimento_lgpd(db: firestore.client, user_id: str, consent_dat
     updated_doc = user_ref.get()
     data = updated_doc.to_dict()
     data['id'] = updated_doc.id
+    
+    # Descriptografa campos sensíveis do usuário
+    if 'nome' in data and data['nome']:
+        try:
+            data['nome'] = decrypt_data(data['nome'])
+        except Exception as e:
+            logger.error(f"Erro ao descriptografar nome do usuário {updated_doc.id}: {e}")
+            data['nome'] = "[Erro na descriptografia]"
+    
+    if 'telefone' in data and data['telefone']:
+        try:
+            data['telefone'] = decrypt_data(data['telefone'])
+        except Exception as e:
+            logger.error(f"Erro ao descriptografar telefone do usuário {updated_doc.id}: {e}")
+            data['telefone'] = "[Erro na descriptografia]"
+    
+    if 'endereco' in data and data['endereco']:
+        endereco_descriptografado = {}
+        for key, value in data['endereco'].items():
+            if value and isinstance(value, str) and value.strip():
+                try:
+                    endereco_descriptografado[key] = decrypt_data(value)
+                except Exception as e:
+                    logger.error(f"Erro ao descriptografar campo de endereço {key} do usuário {updated_doc.id}: {e}")
+                    endereco_descriptografado[key] = "[Erro na descriptografia]"
+            else:
+                endereco_descriptografado[key] = value
+        data['endereco'] = endereco_descriptografado
+    
     return data
 
 
