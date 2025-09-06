@@ -1748,10 +1748,20 @@ def criar_relatorio_medico_endpoint(
 @app.get("/pacientes/{paciente_id}/relatorios", response_model=List[schemas.RelatorioMedicoResponse], tags=["Relatórios Médicos"])
 def listar_relatorios_paciente_endpoint(
     paciente_id: str,
-    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    negocio_id: str = Depends(validate_negocio_id), # 1. Pega e valida o negocio_id do header
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase), # 2. Pega o usuário logado
     db: firestore.client = Depends(get_db)
 ):
     """(Admin ou Profissional) Lista todos os relatórios médicos de um paciente."""
+    # 3. Faz a verificação de permissão (role) manualmente
+    user_role = current_user.roles.get(negocio_id)
+    if user_role not in ["admin", "profissional"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado: você não tem permissão de Gestor ou Enfermeiro para esta operação."
+        )
+    
+    # 4. Chama a sua função original do CRUD, que já funciona
     return crud.listar_relatorios_por_paciente(db, paciente_id)
 
 @app.post("/relatorios/{relatorio_id}/fotos", response_model=schemas.RelatorioMedicoResponse, tags=["Relatórios Médicos"])
