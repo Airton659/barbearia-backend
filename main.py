@@ -5,6 +5,7 @@ from typing import List, Optional, Union, Dict
 import schemas, crud
 import logging
 from datetime import date, timedelta
+from crypto_utils import decrypt_data
 from database import initialize_firebase_app, get_db
 from auth import (
     get_current_user_firebase, get_super_admin_user, get_current_admin_user,
