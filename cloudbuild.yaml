@@ -35,7 +35,7 @@ steps:
     - 'FIREBASE_ADMIN_CREDENTIALS=firebase-admin-credentials:latest'
     - '--set-env-vars'
     # Verifique se o nome do bucket é o mesmo que você criou na Etapa 1.4
-    - 'CLOUD_STORAGE_BUCKET_NAME=barbearia-app-fotos,GCP_PROJECT_ID=teste-notificacao-barbearia,KMS_CRYPTO_KEY_NAME=projects/teste-notificacao-barbearia/locations/southamerica-east1/keyRings/barbearia-app-keys/cryptoKeys/firestore-data-key/cryptoKeyVersions/1'
+    - 'CLOUD_STORAGE_BUCKET_NAME=barbearia-app-fotoss,GCP_PROJECT_ID=teste-notificacao-barbearia,KMS_CRYPTO_KEY_NAME=projects/teste-notificacao-barbearia/locations/southamerica-east1/keyRings/barbearia-app-keys/cryptoKeys/firestore-data-key/cryptoKeyVersions/1'
 
 # Define a imagem que foi construída
 images:
