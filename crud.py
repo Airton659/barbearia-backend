@@ -3859,11 +3859,71 @@ def listar_relatorios_pendentes_medico(db: firestore.client, medico_id: str, neg
         for doc in query.stream():
             data = doc.to_dict()
             data['id'] = doc.id
+            
+            # Buscar e incluir dados do paciente
+            paciente_id = data.get('paciente_id')
+            if paciente_id:
+                try:
+                    paciente_doc = db.collection('usuarios').document(paciente_id).get()
+                    if paciente_doc.exists:
+                        paciente_data = paciente_doc.to_dict()
+                        
+                        # Descriptografar dados sensíveis do paciente
+                        paciente_info = {
+                            'id': paciente_id,
+                            'email': paciente_data.get('email', '')
+                        }
+                        
+                        # Descriptografar nome
+                        if 'nome' in paciente_data and paciente_data['nome']:
+                            try:
+                                paciente_info['nome'] = decrypt_data(paciente_data['nome'])
+                            except Exception as e:
+                                logger.error(f"Erro ao descriptografar nome do paciente {paciente_id}: {e}")
+                                paciente_info['nome'] = "[Erro na descriptografia]"
+                        else:
+                            paciente_info['nome'] = "Nome não disponível"
+                        
+                        # Descriptografar telefone se disponível
+                        if 'telefone' in paciente_data and paciente_data['telefone']:
+                            try:
+                                paciente_info['telefone'] = decrypt_data(paciente_data['telefone'])
+                            except Exception as e:
+                                logger.error(f"Erro ao descriptografar telefone do paciente {paciente_id}: {e}")
+                                paciente_info['telefone'] = "[Erro na descriptografia]"
+                        
+                        # Adicionar dados pessoais básicos se disponíveis
+                        if 'data_nascimento' in paciente_data:
+                            paciente_info['data_nascimento'] = paciente_data['data_nascimento']
+                        if 'sexo' in paciente_data:
+                            paciente_info['sexo'] = paciente_data['sexo']
+                        if 'estado_civil' in paciente_data:
+                            paciente_info['estado_civil'] = paciente_data['estado_civil']
+                        if 'profissao' in paciente_data:
+                            paciente_info['profissao'] = paciente_data['profissao']
+                        
+                        data['paciente'] = paciente_info
+                    else:
+                        data['paciente'] = {
+                            'id': paciente_id,
+                            'nome': 'Paciente não encontrado',
+                            'email': ''
+                        }
+                        logger.warning(f"Paciente {paciente_id} não encontrado para relatório {doc.id}")
+                except Exception as e:
+                    logger.error(f"Erro ao buscar dados do paciente {paciente_id}: {e}")
+                    data['paciente'] = {
+                        'id': paciente_id,
+                        'nome': 'Erro ao carregar dados',
+                        'email': ''
+                    }
+            
             relatorios.append(data)
             logger.info(f"✅ Relatório encontrado: {doc.id}")
             logger.info(f"   - medico_id: {data.get('medico_id')}")
             logger.info(f"   - negocio_id: {data.get('negocio_id')}")
             logger.info(f"   - status: {data.get('status')}")
+            logger.info(f"   - paciente: {data.get('paciente', {}).get('nome', 'N/A')}")
         
         # Ordenar manualmente por data_criacao (mais recente primeiro)
         relatorios.sort(key=lambda x: x.get('data_criacao', datetime.min), reverse=True)
