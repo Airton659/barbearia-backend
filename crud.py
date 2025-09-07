@@ -15,7 +15,7 @@ from fastapi import HTTPException
 
 from pydantic import BaseModel
 
-from firebase_admin import firestore, messaging, auth, transactional
+from firebase_admin import firestore, messaging, auth
 import logging
 import secrets
 from firebase_admin.firestore import transactional
