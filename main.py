@@ -1774,13 +1774,12 @@ from auth import get_current_user_firebase, validate_negocio_id
 @app.post("/relatorios/{relatorio_id}/fotos", response_model=schemas.RelatorioMedicoResponse, tags=["Relatórios Médicos"])
 async def upload_foto_relatorio(
     relatorio_id: str,
-    file: UploadFile = File(...),
-    negocio_id: str = Depends(validate_negocio_id), # <<-- CORREÇÃO 1: Valida o negocio_id do HEADER
-    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase), # <<-- CORREÇÃO 2: Pega o usuário
+    files: List[UploadFile] = File(...),
+    negocio_id: str = Depends(validate_negocio_id),
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
     db: firestore.client = Depends(get_db)
 ):
-    """(Admin ou Profissional) Faz upload de uma foto para um relatório médico."""
-    # CORREÇÃO 3: Verificação manual da permissão (role)
+    """(Admin ou Profissional) Faz upload de múltiplas fotos para um relatório médico."""
     user_role = current_user.roles.get(negocio_id)
     if user_role not in ["admin", "profissional"]:
         raise HTTPException(
@@ -1790,20 +1789,28 @@ async def upload_foto_relatorio(
 
     if not CLOUD_STORAGE_BUCKET_NAME_GLOBAL:
         raise HTTPException(status_code=500, detail="Bucket do Cloud Storage não configurado.")
+    
     try:
-        file_content = await file.read()
+        uploaded_urls = []
         
-        uploaded_url = await upload_generic_file(
-            file_content=file_content,
-            filename=file.filename,
-            bucket_name=CLOUD_STORAGE_BUCKET_NAME_GLOBAL,
-            content_type=file.content_type
-        )
-        
-        relatorio_atualizado = crud.adicionar_foto_relatorio(db, relatorio_id, uploaded_url)
-        if not relatorio_atualizado:
-            raise HTTPException(status_code=404, detail="Relatório não encontrado após o upload.")
+        for file in files:
+            file_content = await file.read()
             
+            uploaded_url = await upload_generic_file(
+                file_content=file_content,
+                filename=file.filename,
+                bucket_name=CLOUD_STORAGE_BUCKET_NAME_GLOBAL,
+                content_type=file.content_type
+            )
+            uploaded_urls.append(uploaded_url)
+        
+        relatorio_atualizado = None
+        for url in uploaded_urls:
+            relatorio_atualizado = crud.adicionar_foto_relatorio(db, relatorio_id, url)
+            if not relatorio_atualizado:
+                raise HTTPException(status_code=404, detail="Relatório não encontrado após o upload.")
+        
+        logger.info(f"Upload concluído. Fotos={len(uploaded_urls)}")
         return relatorio_atualizado
     except Exception as e:
         logger.error(f"ERRO CRÍTICO NO UPLOAD DE FOTO PARA RELATÓRIO: {e}")
