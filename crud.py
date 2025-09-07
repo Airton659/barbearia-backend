@@ -3829,12 +3829,12 @@ def listar_relatorios_pendentes_medico(db: firestore.client, medico_id: str, neg
         count_pendentes = len(list(query_pendentes.stream()))
         logger.info(f"   - Total de relatórios pendentes no sistema: {count_pendentes}")
         
-        # Agora a query completa
+        # Query sem ordenação para evitar erro de índice
+        # TODO: Criar índice composto no Firestore para incluir order_by
         query = db.collection('relatorios_medicos') \
             .where('negocio_id', '==', negocio_id) \
             .where('medico_id', '==', medico_id) \
-            .where('status', '==', 'pendente') \
-            .order_by('data_criacao', direction=firestore.Query.DESCENDING)
+            .where('status', '==', 'pendente')
         
         for doc in query.stream():
             data = doc.to_dict()
@@ -3844,6 +3844,9 @@ def listar_relatorios_pendentes_medico(db: firestore.client, medico_id: str, neg
             logger.info(f"   - medico_id: {data.get('medico_id')}")
             logger.info(f"   - negocio_id: {data.get('negocio_id')}")
             logger.info(f"   - status: {data.get('status')}")
+        
+        # Ordenar manualmente por data_criacao (mais recente primeiro)
+        relatorios.sort(key=lambda x: x.get('data_criacao', datetime.min), reverse=True)
         
         logger.info(f"📊 RESULTADO FINAL: {len(relatorios)} relatórios pendentes encontrados")
         
