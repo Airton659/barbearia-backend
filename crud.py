@@ -4183,11 +4183,27 @@ def listar_historico_relatorios_medico(db: firestore.client, medico_id: str, neg
         Lista de relatórios com dados do paciente descriptografados
     """
     try:
-        logger.info(f"Buscando histórico de relatórios para médico {medico_id}, negócio {negocio_id}")
+        logger.info(f"🔍 DEBUG HISTÓRICO RELATÓRIOS:")
+        logger.info(f"   - medico_id: {medico_id}")
+        logger.info(f"   - negocio_id: {negocio_id}")
+        logger.info(f"   - status_filter: {status_filter}")
+        
+        # Verificar se existem relatórios para este médico em geral
+        query_medico = db.collection('relatorios_medicos').where('medico_id', '==', medico_id)
+        count_medico = len(list(query_medico.stream()))
+        logger.info(f"   - Total de relatórios para este médico: {count_medico}")
+        
+        # Verificar relatórios aprovados/recusados para este médico
+        query_aprovados_geral = db.collection('relatorios_medicos').where('medico_id', '==', medico_id).where('status', '==', 'aprovado')
+        count_aprovados = len(list(query_aprovados_geral.stream()))
+        query_recusados_geral = db.collection('relatorios_medicos').where('medico_id', '==', medico_id).where('status', '==', 'recusado')
+        count_recusados = len(list(query_recusados_geral.stream()))
+        logger.info(f"   - Relatórios aprovados para este médico: {count_aprovados}")
+        logger.info(f"   - Relatórios recusados para este médico: {count_recusados}")
         
         # Query base - relatórios avaliados pelo médico no negócio
         query = db.collection("relatorios_medicos") \
-            .where("avaliado_por_id", "==", medico_id) \
+            .where("medico_id", "==", medico_id) \
             .where("negocio_id", "==", negocio_id)
         
         # Se status específico foi fornecido, filtrar por ele
