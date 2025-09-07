@@ -3989,10 +3989,36 @@ def atualizar_dados_pessoais_paciente(db: firestore.client, paciente_id: str, da
             # Retornar dados atuais descriptografados
             current_data = user_doc.to_dict()
             current_data["id"] = user_doc.id
-            return descriptografar_dados_usuario(current_data)
+            # Descriptografar dados sensíveis manualmente
+            if "nome" in current_data and current_data["nome"]:
+                try:
+                    current_data["nome"] = decrypt_data(current_data["nome"])
+                except Exception as e:
+                    logger.error(f"Erro ao descriptografar nome: {e}")
+                    current_data["nome"] = "[Erro na descriptografia]"
+            if "telefone" in current_data and current_data["telefone"]:
+                try:
+                    current_data["telefone"] = decrypt_data(current_data["telefone"])
+                except Exception as e:
+                    logger.error(f"Erro ao descriptografar telefone: {e}")
+                    current_data["telefone"] = "[Erro na descriptografia]"
+            if "endereco" in current_data and current_data["endereco"]:
+                endereco_descriptografado = {}
+                for key, value in current_data["endereco"].items():
+                    if value and isinstance(value, str) and value.strip():
+                        try:
+                            endereco_descriptografado[key] = decrypt_data(value)
+                        except Exception as e:
+                            logger.error(f"Erro ao descriptografar campo {key} do endereço: {e}")
+                            endereco_descriptografado[key] = "[Erro na descriptografia]"
+                    else:
+                        endereco_descriptografado[key] = value
+                current_data["endereco"] = endereco_descriptografado
+            return current_data
         
         # Atualizar documento
         user_ref.update(update_data)
+        logger.info(f"Paciente {paciente_id} atualizado com sucesso: {list(update_data.keys())}")
         
         # Retornar documento atualizado
         updated_doc = user_ref.get()
@@ -4000,7 +4026,32 @@ def atualizar_dados_pessoais_paciente(db: firestore.client, paciente_id: str, da
         updated_data["id"] = updated_doc.id
         
         # Descriptografar dados sensíveis para resposta
-        return descriptografar_dados_usuario(updated_data)
+        if "nome" in updated_data and updated_data["nome"]:
+            try:
+                updated_data["nome"] = decrypt_data(updated_data["nome"])
+            except Exception as e:
+                logger.error(f"Erro ao descriptografar nome: {e}")
+                updated_data["nome"] = "[Erro na descriptografia]"
+        if "telefone" in updated_data and updated_data["telefone"]:
+            try:
+                updated_data["telefone"] = decrypt_data(updated_data["telefone"])
+            except Exception as e:
+                logger.error(f"Erro ao descriptografar telefone: {e}")
+                updated_data["telefone"] = "[Erro na descriptografia]"
+        if "endereco" in updated_data and updated_data["endereco"]:
+            endereco_descriptografado = {}
+            for key, value in updated_data["endereco"].items():
+                if value and isinstance(value, str) and value.strip():
+                    try:
+                        endereco_descriptografado[key] = decrypt_data(value)
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar campo {key} do endereço: {e}")
+                        endereco_descriptografado[key] = "[Erro na descriptografia]"
+                else:
+                    endereco_descriptografado[key] = value
+            updated_data["endereco"] = endereco_descriptografado
+        
+        return updated_data
         
     except Exception as e:
         logger.error(f"Erro ao atualizar dados pessoais do paciente {paciente_id}: {e}")
