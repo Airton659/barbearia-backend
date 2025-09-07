@@ -298,17 +298,16 @@ def get_paciente_autorizado_anamnese(
 
 def get_current_medico_user(
     current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
-    negocio_id: Optional[str] = Header(None, description="ID do Negócio no qual o médico está atuando")
+    # CORREÇÃO APLICADA AQUI:
+    # O header 'negocio-id' foi definido como obrigatório, removendo a ambiguidade
+    # de 'Optional[str]' e o default 'None'.
+    negocio_id: str = Header(..., description="ID do Negócio no qual o médico está atuando")
 ) -> schemas.UsuarioProfile:
     """
     Verifica se o usuário atual tem a role 'medico' em algum dos negócios.
     """
-    if not negocio_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="O header 'negocio-id' é obrigatório para esta operação."
-        )
-
+    # Como o Header agora é obrigatório (definido com ...), o FastAPI garante que ele existe.
+    # A verificação 'if not negocio_id:' pode ser removida para um código mais limpo.
     user_role_for_negocio = current_user.roles.get(negocio_id)
     if user_role_for_negocio != "medico":
         raise HTTPException(
