@@ -751,6 +751,7 @@ class RelatorioMedicoBase(BaseModel):
     criado_por_id: str
     medico_id: str
     consulta_id: str
+    conteudo: Optional[str] = Field(None, description="Conteúdo/texto livre do relatório médico")
     status: str = "pendente"
     fotos: List[str] = Field(default_factory=list)
     motivo_recusa: Optional[str] = None
@@ -760,6 +761,12 @@ class RelatorioMedicoBase(BaseModel):
 class RelatorioMedicoCreate(BaseModel):
     medico_id: str = Field(..., description="ID do usuário médico que avaliará o relatório.")
     negocio_id: str = Field(..., description="ID do negócio ao qual o relatório pertence.")
+    conteudo: Optional[str] = Field(None, description="Conteúdo/texto livre do relatório médico")
+
+class RelatorioMedicoUpdate(BaseModel):
+    conteudo: Optional[str] = Field(None, description="Conteúdo/texto livre do relatório médico")
+    status: Optional[str] = Field(None, description="Status do relatório")
+    motivo_recusa: Optional[str] = Field(None, description="Motivo de recusa se aplicável")
 
 class RelatorioMedicoResponse(RelatorioMedicoBase):
     id: str

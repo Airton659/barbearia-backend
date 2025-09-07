@@ -3706,6 +3706,7 @@ def criar_relatorio_medico(db: firestore.client, paciente_id: str, relatorio_dat
         "criado_por_id": autor.id,
         "medico_id": relatorio_data.medico_id,
         "consulta_id": consulta_id_recente,
+        "conteudo": relatorio_data.conteudo,  # Campo de texto livre
         "status": "pendente",
         "fotos": [],
         "motivo_recusa": None,
@@ -4055,4 +4056,54 @@ def atualizar_dados_pessoais_paciente(db: firestore.client, paciente_id: str, da
         
     except Exception as e:
         logger.error(f"Erro ao atualizar dados pessoais do paciente {paciente_id}: {e}")
+        return None
+
+
+def atualizar_relatorio_medico(db: firestore.client, relatorio_id: str, update_data: schemas.RelatorioMedicoUpdate, usuario_id: str) -> Optional[Dict]:
+    """
+    Atualiza um relatório médico com novos dados.
+    """
+    try:
+        relatorio_ref = db.collection("relatorios_medicos").document(relatorio_id)
+        relatorio_doc = relatorio_ref.get()
+        
+        if not relatorio_doc.exists:
+            logger.error(f"Relatório {relatorio_id} não encontrado.")
+            return None
+        
+        # Verificar se o usuário tem permissão para editar
+        relatorio_data = relatorio_doc.to_dict()
+        if relatorio_data.get("criado_por_id") != usuario_id:
+            logger.warning(f"Usuário {usuario_id} tentou editar relatório {relatorio_id} de outro usuário.")
+            raise HTTPException(status_code=403, detail="Acesso negado: você só pode editar seus próprios relatórios.")
+        
+        # Preparar dados para atualização
+        update_dict = {}
+        
+        if update_data.conteudo is not None:
+            update_dict["conteudo"] = update_data.conteudo
+        if update_data.status is not None:
+            update_dict["status"] = update_data.status
+        if update_data.motivo_recusa is not None:
+            update_dict["motivo_recusa"] = update_data.motivo_recusa
+        
+        if not update_dict:
+            logger.info(f"Nenhum campo para atualizar no relatório {relatorio_id}")
+            current_data = relatorio_doc.to_dict()
+            current_data["id"] = relatorio_doc.id
+            return current_data
+        
+        # Atualizar documento
+        relatorio_ref.update(update_dict)
+        logger.info(f"Relatório {relatorio_id} atualizado com sucesso: {list(update_dict.keys())}")
+        
+        # Retornar documento atualizado
+        updated_doc = relatorio_ref.get()
+        updated_data = updated_doc.to_dict()
+        updated_data["id"] = updated_doc.id
+        
+        return updated_data
+        
+    except Exception as e:
+        logger.error(f"Erro ao atualizar relatório {relatorio_id}: {e}")
         return None

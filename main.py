@@ -1853,6 +1853,21 @@ def get_relatorio_completo_endpoint(
     
     paciente_data = paciente_doc.to_dict()
     paciente_data['id'] = paciente_doc.id
+    
+    # Descriptografar dados sensíveis do paciente para médicos
+    if 'nome' in paciente_data and paciente_data['nome']:
+        try:
+            paciente_data['nome'] = decrypt_data(paciente_data['nome'])
+        except Exception as e:
+            logger.error(f"Erro ao descriptografar nome do paciente {paciente_id}: {e}")
+            paciente_data['nome'] = "[Erro na descriptografia]"
+    
+    if 'telefone' in paciente_data and paciente_data['telefone']:
+        try:
+            paciente_data['telefone'] = decrypt_data(paciente_data['telefone'])
+        except Exception as e:
+            logger.error(f"Erro ao descriptografar telefone do paciente {paciente_id}: {e}")
+            paciente_data['telefone'] = "[Erro na descriptografia]"
 
     # Busca registros dos últimos 30 dias
     data_inicio = datetime.utcnow() - timedelta(days=30)
@@ -1897,6 +1912,25 @@ def recusar_relatorio_endpoint(
     except Exception as e:
         logger.error(f"Erro ao recusar relatório: {e}")
         raise HTTPException(status_code=500, detail="Erro interno ao recusar o relatório.")
+
+@app.put("/relatorios/{relatorio_id}", response_model=schemas.RelatorioMedicoResponse, tags=["Relatórios Médicos"])
+def atualizar_relatorio_endpoint(
+    relatorio_id: str,
+    update_data: schemas.RelatorioMedicoUpdate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin ou Profissional) Atualiza o conteúdo de um relatório médico."""
+    try:
+        relatorio_atualizado = crud.atualizar_relatorio_medico(db, relatorio_id, update_data, current_user.id)
+        if not relatorio_atualizado:
+            raise HTTPException(status_code=404, detail="Relatório não encontrado.")
+        return relatorio_atualizado
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Erro ao atualizar relatório: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno ao atualizar o relatório.")
     
 # =================================================================================
 # ENDPOINTS DE SUPORTE PSICOLÓGICO
