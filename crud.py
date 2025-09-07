@@ -4167,3 +4167,109 @@ def atualizar_relatorio_medico(db: firestore.client, relatorio_id: str, update_d
     except Exception as e:
         logger.error(f"Erro ao atualizar relatório {relatorio_id}: {e}")
         return None
+
+
+def listar_historico_relatorios_medico(db: firestore.client, medico_id: str, negocio_id: str, status_filter: Optional[str] = None) -> List[Dict]:
+    """
+    Lista o histórico de relatórios já avaliados pelo médico (aprovados + recusados).
+    
+    Args:
+        db: Cliente Firestore
+        medico_id: ID do médico
+        negocio_id: ID do negócio
+        status_filter: Filtro opcional por status ('aprovado' ou 'recusado')
+    
+    Returns:
+        Lista de relatórios com dados do paciente descriptografados
+    """
+    try:
+        logger.info(f"Buscando histórico de relatórios para médico {medico_id}, negócio {negocio_id}")
+        
+        # Query base - relatórios avaliados pelo médico no negócio
+        query = db.collection("relatorios_medicos") \
+            .where("avaliado_por_id", "==", medico_id) \
+            .where("negocio_id", "==", negocio_id)
+        
+        # Se status específico foi fornecido, filtrar por ele
+        if status_filter and status_filter.lower() in ['aprovado', 'recusado']:
+            query = query.where("status", "==", status_filter.lower())
+        else:
+            # Sem filtro específico - buscar apenas aprovados e recusados
+            # Como Firestore não suporta "IN" com outros filtros, fazemos duas queries
+            query_aprovados = query.where("status", "==", "aprovado")
+            query_recusados = query.where("status", "==", "recusado")
+            
+            # Executar ambas as queries e combinar resultados
+            docs_aprovados = list(query_aprovados.stream())
+            docs_recusados = list(query_recusados.stream())
+            docs = docs_aprovados + docs_recusados
+        
+        if status_filter:
+            docs = list(query.stream())
+        
+        logger.info(f"Encontrados {len(docs)} relatórios avaliados")
+        
+        if not docs:
+            return []
+        
+        relatorios = []
+        
+        for doc in docs:
+            relatorio_data = doc.to_dict()
+            relatorio_data["id"] = doc.id
+            
+            # Buscar dados do paciente
+            paciente_id = relatorio_data.get("paciente_id")
+            if paciente_id:
+                try:
+                    paciente_ref = db.collection("usuarios").document(paciente_id)
+                    paciente_doc = paciente_ref.get()
+                    
+                    if paciente_doc.exists:
+                        paciente_data = paciente_doc.to_dict()
+                        
+                        # Descriptografar dados sensíveis do paciente para médicos
+                        if 'nome' in paciente_data and paciente_data['nome']:
+                            try:
+                                paciente_data['nome'] = decrypt_data(paciente_data['nome'])
+                            except Exception as e:
+                                logger.error(f"Erro ao descriptografar nome do paciente {paciente_id}: {e}")
+                                paciente_data['nome'] = "[Erro na descriptografia]"
+                        
+                        if 'email' in paciente_data and paciente_data['email']:
+                            try:
+                                paciente_data['email'] = decrypt_data(paciente_data['email'])
+                            except Exception as e:
+                                logger.error(f"Erro ao descriptografar email do paciente {paciente_id}: {e}")
+                                paciente_data['email'] = "[Erro na descriptografia]"
+                        
+                        if 'telefone' in paciente_data and paciente_data['telefone']:
+                            try:
+                                paciente_data['telefone'] = decrypt_data(paciente_data['telefone'])
+                            except Exception as e:
+                                logger.error(f"Erro ao descriptografar telefone do paciente {paciente_id}: {e}")
+                                paciente_data['telefone'] = "[Erro na descriptografia]"
+                        
+                        # Adicionar dados do paciente ao relatório
+                        relatorio_data["paciente"] = paciente_data
+                    else:
+                        logger.warning(f"Paciente {paciente_id} não encontrado")
+                        relatorio_data["paciente"] = {"nome": "[Paciente não encontrado]"}
+                        
+                except Exception as e:
+                    logger.error(f"Erro ao buscar dados do paciente {paciente_id}: {e}")
+                    relatorio_data["paciente"] = {"nome": "[Erro ao carregar paciente]"}
+            else:
+                relatorio_data["paciente"] = {"nome": "[ID do paciente não informado]"}
+            
+            relatorios.append(relatorio_data)
+        
+        # Ordenar por data de avaliação (mais recentes primeiro)
+        relatorios.sort(key=lambda x: x.get('data_avaliacao', datetime.min), reverse=True)
+        
+        logger.info(f"Retornando {len(relatorios)} relatórios do histórico")
+        return relatorios
+        
+    except Exception as e:
+        logger.error(f"Erro ao listar histórico de relatórios do médico {medico_id}: {e}")
+        return []

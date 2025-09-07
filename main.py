@@ -1838,6 +1838,16 @@ def listar_relatorios_pendentes_medico_endpoint(
     """(Médico) Lista os relatórios pendentes de avaliação para o médico logado."""
     return crud.listar_relatorios_pendentes_medico(db, current_user.id, negocio_id)
 
+@app.get("/medico/relatorios", response_model=List[schemas.RelatorioMedicoResponse], tags=["Relatórios Médicos - Médico"])
+def listar_historico_relatorios_medico_endpoint(
+    negocio_id: str = Header(..., description="ID do Negócio no qual o médico está atuando."),
+    status: Optional[str] = Query(None, description="Filtro por status: 'aprovado', 'recusado' ou omitir para todos"),
+    current_user: schemas.UsuarioProfile = Depends(get_current_medico_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Médico) Lista o histórico de relatórios já avaliados pelo médico (aprovados + recusados)."""
+    return crud.listar_historico_relatorios_medico(db, current_user.id, negocio_id, status)
+
 @app.get("/relatorios/{relatorio_id}", response_model=schemas.RelatorioCompletoResponse, tags=["Relatórios Médicos"])
 def get_relatorio_completo_endpoint(
     relatorio: Dict = Depends(get_relatorio_autorizado),
