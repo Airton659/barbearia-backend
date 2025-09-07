@@ -3769,48 +3769,26 @@ def listar_relatorios_por_paciente(db: firestore.client, paciente_id: str) -> Li
     except Exception as e:
         logger.error(f"Erro ao listar relatórios para o paciente {paciente_id}: {e}")
         
-    return relatorios
-
 def adicionar_foto_relatorio(db: firestore.client, relatorio_id: str, foto_url: str) -> Optional[Dict]:
-    """
-    Adiciona a URL de uma foto ao array 'fotos' de um relatório médico usando uma transação para garantir atomicidade.
-    """
-    relatorio_ref = db.collection('relatorios_medicos').document(relatorio_id)
-    transaction = db.transaction()
-
-    @transactional
-    def update_in_transaction(transaction, doc_ref, new_url):
-        snapshot = doc_ref.get(transaction=transaction)
+    """Adiciona a URL de uma foto ao array 'fotos' de um relatório médico usando operação atômica (ArrayUnion)."""
+    try:
+        relatorio_ref = db.collection('relatorios_medicos').document(relatorio_id)
+        snapshot = relatorio_ref.get()
         if not snapshot.exists:
-            logger.error(f"Relatório {relatorio_id} não encontrado dentro da transação.")
+            logger.error(f"Relatório {relatorio_id} não encontrado.")
             return None
 
-        # 1. Lê o estado ATUAL do array de fotos dentro da transação
-        current_fotos = snapshot.to_dict().get("fotos", [])
-        
-        # 2. Adiciona a nova URL ao array em memória
-        if new_url not in current_fotos:
-            current_fotos.append(new_url)
-        
-        # 3. Escreve o array COMPLETO e atualizado de volta ao banco
-        transaction.update(doc_ref, {"fotos": current_fotos})
-        
-        # Prepara os dados para a resposta da API
-        updated_data = snapshot.to_dict()
-        updated_data["fotos"] = current_fotos
-        updated_data["id"] = doc_ref.id
-        return updated_data
+        # Operação atômica no servidor: evita sobrescrita do array e é segura em concorrência
+        relatorio_ref.update({ "fotos": firestore.ArrayUnion([foto_url]) })
 
-    try:
-        # Executa a função transacional
-        resultado = update_in_transaction(transaction, relatorio_ref, foto_url)
-        if resultado:
-            logger.info(f"Foto adicionada (via transação) ao relatório {relatorio_id}.")
-        return resultado
+        # Retorna documento atualizado
+        updated = relatorio_ref.get()
+        data = updated.to_dict() or {}
+        data["id"] = updated.id
+        return data
     except Exception as e:
-        logger.error(f"Erro na transação ao adicionar foto ao relatório {relatorio_id}: {e}")
-        # Lançar a exceção ajuda a depurar problemas futuros
-        raise e
+        logger.error(f"Erro ao adicionar foto (ArrayUnion) ao relatório {relatorio_id}: {e}")
+        raise
 
 def listar_relatorios_pendentes_medico(db: firestore.client, medico_id: str, negocio_id: str) -> List[Dict]:
     """
