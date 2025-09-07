@@ -3808,6 +3808,28 @@ def listar_relatorios_pendentes_medico(db: firestore.client, medico_id: str, neg
     """
     relatorios = []
     try:
+        # Log dos parâmetros de entrada
+        logger.info(f"🔍 DEBUG RELATÓRIOS PENDENTES:")
+        logger.info(f"   - medico_id: {medico_id}")
+        logger.info(f"   - negocio_id: {negocio_id}")
+        logger.info(f"   - status: pendente")
+        
+        # Primeiro, vamos verificar se existem relatórios com esse médico em geral
+        query_medico = db.collection('relatorios_medicos').where('medico_id', '==', medico_id)
+        count_medico = len(list(query_medico.stream()))
+        logger.info(f"   - Total de relatórios para este médico: {count_medico}")
+        
+        # Verificar se existem relatórios com esse negócio
+        query_negocio = db.collection('relatorios_medicos').where('negocio_id', '==', negocio_id)
+        count_negocio = len(list(query_negocio.stream()))
+        logger.info(f"   - Total de relatórios para este negócio: {count_negocio}")
+        
+        # Verificar se existem relatórios pendentes em geral
+        query_pendentes = db.collection('relatorios_medicos').where('status', '==', 'pendente')
+        count_pendentes = len(list(query_pendentes.stream()))
+        logger.info(f"   - Total de relatórios pendentes no sistema: {count_pendentes}")
+        
+        # Agora a query completa
         query = db.collection('relatorios_medicos') \
             .where('negocio_id', '==', negocio_id) \
             .where('medico_id', '==', medico_id) \
@@ -3818,8 +3840,45 @@ def listar_relatorios_pendentes_medico(db: firestore.client, medico_id: str, neg
             data = doc.to_dict()
             data['id'] = doc.id
             relatorios.append(data)
+            logger.info(f"✅ Relatório encontrado: {doc.id}")
+            logger.info(f"   - medico_id: {data.get('medico_id')}")
+            logger.info(f"   - negocio_id: {data.get('negocio_id')}")
+            logger.info(f"   - status: {data.get('status')}")
+        
+        logger.info(f"📊 RESULTADO FINAL: {len(relatorios)} relatórios pendentes encontrados")
+        
+        # Se não encontrou nada, vamos verificar os relatórios específicos mencionados no bug report
+        if len(relatorios) == 0:
+            logger.warning("❌ Nenhum relatório encontrado! Verificando relatórios específicos...")
+            relatorio_ids_debug = ["6O75Oh2o9rHggN8oXUhj", "Qb0y0CeCADAlzdUxTtGN"]
+            
+            for relatorio_id in relatorio_ids_debug:
+                doc_ref = db.collection('relatorios_medicos').document(relatorio_id)
+                doc = doc_ref.get()
+                if doc.exists:
+                    data = doc.to_dict()
+                    logger.info(f"🔍 Relatório específico {relatorio_id}:")
+                    logger.info(f"   - medico_id: {data.get('medico_id')} (esperado: {medico_id})")
+                    logger.info(f"   - negocio_id: {data.get('negocio_id')} (esperado: {negocio_id})")
+                    logger.info(f"   - status: {data.get('status')} (esperado: pendente)")
+                    logger.info(f"   - data_criacao: {data.get('data_criacao')}")
+                    
+                    # Verificar se os valores são exatamente iguais
+                    medico_match = data.get('medico_id') == medico_id
+                    negocio_match = data.get('negocio_id') == negocio_id
+                    status_match = data.get('status') == 'pendente'
+                    
+                    logger.info(f"   - medico_id match: {medico_match}")
+                    logger.info(f"   - negocio_id match: {negocio_match}")
+                    logger.info(f"   - status match: {status_match}")
+                else:
+                    logger.warning(f"❌ Relatório {relatorio_id} não existe no banco!")
+            
     except Exception as e:
         logger.error(f"Erro ao listar relatórios pendentes para o médico {medico_id}: {e}")
+        # Log do stack trace completo para debug
+        import traceback
+        logger.error(f"Stack trace: {traceback.format_exc()}")
     return relatorios
 
 def aprovar_relatorio(db: firestore.client, relatorio_id: str, medico_id: str) -> Optional[Dict]:
