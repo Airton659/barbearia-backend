@@ -3328,17 +3328,22 @@ def deletar_registro_diario_estruturado(
 # 1. NOVAS FUNÇÕES: FICHA DE ANAMNESE
 # =================================================================================
 
-def criar_anamnese(db: firestore.client, paciente_id: str, anamnese_data: schemas.AnamneseEnfermagemCreate) -> Dict:
+def criar_anamnese(db: firestore.client, paciente_id: str, anamnese_data: schemas.AnamneseCreate) -> Dict:
     """Cria um novo registro de anamnese para um paciente, criptografando dados sensíveis."""
     anamnese_dict = anamnese_data.model_dump(mode='json')
     
     # Define campos sensíveis que precisam ser criptografados
     sensitive_fields = [
-        'nome_paciente', 'queixa_principal', 'historia_doenca_atual', 'antecedentes_outros',
-        'cirurgias_anteriores', 'alergias', 'medicamentos_continuos', 'habitos_outros',
-        'historia_familiar', 'sistema_respiratorio', 'sistema_cardiovascular', 'abdome',
+        'nome_paciente', 'queixa_principal', 'historico_doenca_atual', 'historia_familiar',
+        'sistema_respiratorio', 'sistema_cardiovascular', 'abdome', 'estado_nutricional',
         'eliminacoes_fisiologicas', 'drenos_sondas_cateteres', 'pele_mucosas',
         'apoio_familiar_social', 'necessidades_emocionais_espirituais'
+    ]
+    
+    # Campos sensíveis dentro do objeto antecedentes_pessoais
+    antecedentes_sensitive_fields = [
+        'outras_doencas_cronicas', 'cirurgias_anteriores', 'alergias', 
+        'medicamentos_uso_continuo', 'outros_habitos'
     ]
     
     # Criptografa campos sensíveis antes de salvar
@@ -3346,6 +3351,13 @@ def criar_anamnese(db: firestore.client, paciente_id: str, anamnese_data: schema
         if field in anamnese_dict and anamnese_dict[field] is not None:
             if isinstance(anamnese_dict[field], str) and anamnese_dict[field].strip():
                 anamnese_dict[field] = encrypt_data(anamnese_dict[field])
+    
+    # Criptografa campos sensíveis dentro de antecedentes_pessoais
+    if 'antecedentes_pessoais' in anamnese_dict and anamnese_dict['antecedentes_pessoais'] is not None:
+        for field in antecedentes_sensitive_fields:
+            if field in anamnese_dict['antecedentes_pessoais'] and anamnese_dict['antecedentes_pessoais'][field] is not None:
+                if isinstance(anamnese_dict['antecedentes_pessoais'][field], str) and anamnese_dict['antecedentes_pessoais'][field].strip():
+                    anamnese_dict['antecedentes_pessoais'][field] = encrypt_data(anamnese_dict['antecedentes_pessoais'][field])
     
     anamnese_dict.update({
         "paciente_id": paciente_id,
@@ -3371,6 +3383,17 @@ def criar_anamnese(db: firestore.client, paciente_id: str, anamnese_data: schema
                 except Exception as e:
                     logger.error(f"Erro ao descriptografar campo {field} da anamnese: {e}")
                     anamnese_dict[field] = "[Erro na descriptografia]"
+    
+    # Descriptografa campos sensíveis dentro de antecedentes_pessoais
+    if 'antecedentes_pessoais' in anamnese_dict and anamnese_dict['antecedentes_pessoais'] is not None:
+        for field in antecedentes_sensitive_fields:
+            if field in anamnese_dict['antecedentes_pessoais'] and anamnese_dict['antecedentes_pessoais'][field] is not None:
+                if isinstance(anamnese_dict['antecedentes_pessoais'][field], str) and anamnese_dict['antecedentes_pessoais'][field].strip():
+                    try:
+                        anamnese_dict['antecedentes_pessoais'][field] = decrypt_data(anamnese_dict['antecedentes_pessoais'][field])
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar campo {field} dos antecedentes pessoais: {e}")
+                        anamnese_dict['antecedentes_pessoais'][field] = "[Erro na descriptografia]"
     # --- FIM DA CORREÇÃO ---
     
     return anamnese_dict
@@ -3382,11 +3405,16 @@ def listar_anamneses_por_paciente(db: firestore.client, paciente_id: str) -> Lis
     
     # Define campos sensíveis que precisam ser descriptografados
     sensitive_fields = [
-        'nome_paciente', 'queixa_principal', 'historia_doenca_atual', 'antecedentes_outros',
-        'cirurgias_anteriores', 'alergias', 'medicamentos_continuos', 'habitos_outros',
-        'historia_familiar', 'sistema_respiratorio', 'sistema_cardiovascular', 'abdome',
+        'nome_paciente', 'queixa_principal', 'historico_doenca_atual', 'historia_familiar',
+        'sistema_respiratorio', 'sistema_cardiovascular', 'abdome', 'estado_nutricional',
         'eliminacoes_fisiologicas', 'drenos_sondas_cateteres', 'pele_mucosas',
         'apoio_familiar_social', 'necessidades_emocionais_espirituais'
+    ]
+    
+    # Campos sensíveis dentro do objeto antecedentes_pessoais
+    antecedentes_sensitive_fields = [
+        'outras_doencas_cronicas', 'cirurgias_anteriores', 'alergias', 
+        'medicamentos_uso_continuo', 'outros_habitos'
     ]
     
     for doc in query.stream():
@@ -3403,10 +3431,21 @@ def listar_anamneses_por_paciente(db: firestore.client, paciente_id: str) -> Lis
                         logger.error(f"Erro ao descriptografar campo {field} da anamnese {doc.id}: {e}")
                         data[field] = "[Erro na descriptografia]"
         
+        # Descriptografa campos sensíveis dentro de antecedentes_pessoais
+        if 'antecedentes_pessoais' in data and data['antecedentes_pessoais'] is not None:
+            for field in antecedentes_sensitive_fields:
+                if field in data['antecedentes_pessoais'] and data['antecedentes_pessoais'][field] is not None:
+                    if isinstance(data['antecedentes_pessoais'][field], str) and data['antecedentes_pessoais'][field].strip():
+                        try:
+                            data['antecedentes_pessoais'][field] = decrypt_data(data['antecedentes_pessoais'][field])
+                        except Exception as e:
+                            logger.error(f"Erro ao descriptografar campo {field} dos antecedentes pessoais da anamnese {doc.id}: {e}")
+                            data['antecedentes_pessoais'][field] = "[Erro na descriptografia]"
+        
         anamneses.append(data)
     return anamneses
 
-def atualizar_anamnese(db: firestore.client, anamnese_id: str, paciente_id: str, update_data: schemas.AnamneseEnfermagemUpdate) -> Optional[Dict]:
+def atualizar_anamnese(db: firestore.client, anamnese_id: str, paciente_id: str, update_data: schemas.AnamneseUpdate) -> Optional[Dict]:
     """Atualiza uma anamnese existente, criptografando novos dados sensíveis e descriptografando para resposta."""
     anamnese_ref = db.collection('usuarios').document(paciente_id).collection('anamneses').document(anamnese_id)
     if not anamnese_ref.get().exists:
@@ -3416,11 +3455,16 @@ def atualizar_anamnese(db: firestore.client, anamnese_id: str, paciente_id: str,
     
     # Define campos sensíveis que precisam ser criptografados
     sensitive_fields = [
-        'nome_paciente', 'queixa_principal', 'historia_doenca_atual', 'antecedentes_outros',
-        'cirurgias_anteriores', 'alergias', 'medicamentos_continuos', 'habitos_outros',
-        'historia_familiar', 'sistema_respiratorio', 'sistema_cardiovascular', 'abdome',
+        'nome_paciente', 'queixa_principal', 'historico_doenca_atual', 'historia_familiar',
+        'sistema_respiratorio', 'sistema_cardiovascular', 'abdome', 'estado_nutricional',
         'eliminacoes_fisiologicas', 'drenos_sondas_cateteres', 'pele_mucosas',
         'apoio_familiar_social', 'necessidades_emocionais_espirituais'
+    ]
+    
+    # Campos sensíveis dentro do objeto antecedentes_pessoais
+    antecedentes_sensitive_fields = [
+        'outras_doencas_cronicas', 'cirurgias_anteriores', 'alergias', 
+        'medicamentos_uso_continuo', 'outros_habitos'
     ]
     
     # Criptografa campos sensíveis que estão sendo atualizados
@@ -3428,6 +3472,13 @@ def atualizar_anamnese(db: firestore.client, anamnese_id: str, paciente_id: str,
         if field in update_dict and update_dict[field] is not None:
             if isinstance(update_dict[field], str) and update_dict[field].strip():
                 update_dict[field] = encrypt_data(update_dict[field])
+    
+    # Criptografa campos sensíveis dentro de antecedentes_pessoais se está sendo atualizado
+    if 'antecedentes_pessoais' in update_dict and update_dict['antecedentes_pessoais'] is not None:
+        for field in antecedentes_sensitive_fields:
+            if field in update_dict['antecedentes_pessoais'] and update_dict['antecedentes_pessoais'][field] is not None:
+                if isinstance(update_dict['antecedentes_pessoais'][field], str) and update_dict['antecedentes_pessoais'][field].strip():
+                    update_dict['antecedentes_pessoais'][field] = encrypt_data(update_dict['antecedentes_pessoais'][field])
     
     update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
     anamnese_ref.update(update_dict)
@@ -3445,6 +3496,17 @@ def atualizar_anamnese(db: firestore.client, anamnese_id: str, paciente_id: str,
                 except Exception as e:
                     logger.error(f"Erro ao descriptografar campo {field} da anamnese {anamnese_id}: {e}")
                     data[field] = "[Erro na descriptografia]"
+    
+    # Descriptografa campos sensíveis dentro de antecedentes_pessoais para resposta
+    if 'antecedentes_pessoais' in data and data['antecedentes_pessoais'] is not None:
+        for field in antecedentes_sensitive_fields:
+            if field in data['antecedentes_pessoais'] and data['antecedentes_pessoais'][field] is not None:
+                if isinstance(data['antecedentes_pessoais'][field], str) and data['antecedentes_pessoais'][field].strip():
+                    try:
+                        data['antecedentes_pessoais'][field] = decrypt_data(data['antecedentes_pessoais'][field])
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar campo {field} dos antecedentes pessoais da anamnese {anamnese_id}: {e}")
+                        data['antecedentes_pessoais'][field] = "[Erro na descriptografia]"
     
     return data
 

@@ -612,79 +612,92 @@ class PlanoAckStatus(BaseModel):
 # Em schemas.py, SUBSTITUA todas as classes de Anamnese por este bloco:
 
 # =================================================================================
-# SCHEMAS DA FICHA DE AVALIAÇÃO DE ENFERMAGEM (ANAMNESE) - VERSÃO FINAL, COMPLETA E CORRETA
+# SCHEMAS DA ANAMNESE - VERSÃO CORRIGIDA PARA FRONTEND
 # =================================================================================
 
-class SinaisVitaisAnamnese(BaseModel):
-    # OBRIGATÓRIOS (Conforme Seção 4)
-    pa: str
-    fc: str
-    fr: str
-    temp: str
-    spo2: str
+class AntecedentesPessoais(BaseModel):
+    """Objeto completo dos antecedentes pessoais do paciente"""
+    has_has: bool = Field(..., description="Hipertensão Arterial Sistêmica")
+    has_dm: bool = Field(..., description="Diabetes Mellitus")
+    has_cardiopatias: bool = Field(..., description="Cardiopatias")
+    has_asma_dpoc: bool = Field(..., description="Asma/DPOC")
+    outras_doencas_cronicas: str = Field(..., description="Outras doenças crônicas")
+    cirurgias_anteriores: str = Field(..., description="Cirurgias anteriores")
+    alergias: str = Field(..., description="Alergias conhecidas")
+    medicamentos_uso_continuo: str = Field(..., description="Medicamentos em uso contínuo")
+    tem_tabagismo: bool = Field(..., description="Possui hábito de tabagismo")
+    tem_etilismo: bool = Field(..., description="Possui hábito de etilismo")
+    tem_sedentarismo: bool = Field(..., description="Possui sedentarismo")
+    outros_habitos: str = Field(..., description="Outros hábitos relevantes")
 
-class AnamneseEnfermagemBase(BaseModel):
-    # --- DADOS GERAIS OBRIGATÓRIOS ---
-    nome_paciente: str
-    data_avaliacao: datetime
-    responsavel_id: str
+class SinaisVitais(BaseModel):
+    """Sinais vitais do paciente - todos como string conforme enviado pelo frontend"""
+    pa: str = Field(..., description="Pressão Arterial")
+    fc: str = Field(..., description="Frequência Cardíaca")
+    fr: str = Field(..., description="Frequência Respiratória") 
+    temp: str = Field(..., description="Temperatura corporal")
+    spo2: str = Field(..., description="Saturação de oxigênio")
 
-    # --- SEÇÃO 1: Identificação do Paciente (OBRIGATÓRIO) ---
-    idade: int
-    sexo: str
-    estado_civil: str
-    profissao: str
+class AnamneseBase(BaseModel):
+    """Schema base da anamnese com TODOS os campos requeridos pelo frontend"""
+    # Identificação Básica
+    paciente_id: str = Field(..., description="ID do paciente")
+    responsavel_id: str = Field(..., description="ID do responsável pela anamnese")
+    nome_paciente: str = Field(..., description="Nome do paciente")
+    data_avaliacao: datetime = Field(..., description="Data e hora da avaliação")
+    
+    # Dados Pessoais (migrados para paciente, mas mantidos aqui por compatibilidade)
+    idade: Optional[int] = Field(None, description="Idade do paciente")
+    sexo: Optional[str] = Field(None, description="Sexo do paciente")
+    estado_civil: Optional[str] = Field(None, description="Estado civil do paciente")
+    profissao: Optional[str] = Field(None, description="Profissão do paciente")
+    data_nascimento: Optional[datetime] = Field(None, description="Data de nascimento")
+    
+    # Histórico Médico
+    queixa_principal: Optional[str] = Field(None, description="Queixa principal do paciente")
+    historico_doenca_atual: Optional[str] = Field(None, description="Histórico da doença atual")
+    historia_familiar: Optional[str] = Field(None, description="História familiar")
+    
+    # Antecedentes Pessoais (OBJETO COMPLETO)
+    antecedentes_pessoais: AntecedentesPessoais = Field(..., description="Antecedentes pessoais completos")
+    
+    # Sinais Vitais (OBJETO COMPLETO)
+    sinais_vitais: SinaisVitais = Field(..., description="Sinais vitais do paciente")
+    
+    # Avaliação Física
+    nivel_consciencia: str = Field(..., description="Nível de consciência")
+    estado_nutricional: Optional[str] = Field(None, description="Estado nutricional")
+    pele_mucosas: Optional[str] = Field(None, description="Avaliação de pele e mucosas")
+    sistema_respiratorio: Optional[str] = Field(None, description="Sistema respiratório")
+    sistema_cardiovascular: Optional[str] = Field(None, description="Sistema cardiovascular")
+    abdome: Optional[str] = Field(None, description="Avaliação do abdome")
+    eliminacoes_fisiologicas: Optional[str] = Field(None, description="Eliminações fisiológicas")
+    drenos_sondas_cateteres: Optional[str] = Field(None, description="Drenos, sondas e cateteres")
+    
+    # Aspectos Psicossociais
+    apoio_familiar_social: Optional[str] = Field(None, description="Apoio familiar e social")
+    necessidades_emocionais_espirituais: Optional[str] = Field(None, description="Necessidades emocionais e espirituais")
 
-    # --- SEÇÃO 3: Histórico de Enfermagem (OPCIONAL) ---
-    queixa_principal: Optional[str] = None
-    historia_doenca_atual: Optional[str] = None
-    antecedentes_doencas: List[str] = Field(default_factory=list)
-    antecedentes_outros: Optional[str] = None
-    cirurgias_anteriores: Optional[str] = None
-    alergias: Optional[str] = None
-    medicamentos_continuos: Optional[str] = None
-    habitos: List[str] = Field(default_factory=list)
-    habitos_outros: Optional[str] = None
-    historia_familiar: Optional[str] = None
-
-    # --- SEÇÃO 4: Avaliação do Estado Atual (OBRIGATÓRIO) ---
-    sinais_vitais: SinaisVitaisAnamnese
-    nivel_consciencia: str
-    estado_nutricional: str
-    pele_mucosas: str
-    sistema_respiratorio: str
-    sistema_cardiovascular: str
-    abdome: str
-    eliminacoes_fisiologicas: str
-    drenos_sondas_cateteres: str
-
-    # --- SEÇÃO 5: Aspectos Psicossociais (OPCIONAL) ---
-    apoio_familiar_social: Optional[str] = None
-    necessidades_emocionais_espirituais: Optional[str] = None
-
-class AnamneseEnfermagemCreate(AnamneseEnfermagemBase):
+class AnamneseCreate(AnamneseBase):
+    """Schema para criação de anamnese"""
     pass
 
-class AnamneseEnfermagemUpdate(BaseModel):
-    # CÓDIGO COMPLETO, SEM RESUMO
+class AnamneseUpdate(BaseModel):
+    """Schema para atualização de anamnese - todos os campos opcionais"""
+    paciente_id: Optional[str] = None
+    responsavel_id: Optional[str] = None
     nome_paciente: Optional[str] = None
     data_avaliacao: Optional[datetime] = None
-    responsavel_id: Optional[str] = None
     idade: Optional[int] = None
     sexo: Optional[str] = None
     estado_civil: Optional[str] = None
     profissao: Optional[str] = None
+    data_nascimento: Optional[datetime] = None
     queixa_principal: Optional[str] = None
-    historia_doenca_atual: Optional[str] = None
-    antecedentes_doencas: Optional[List[str]] = None
-    antecedentes_outros: Optional[str] = None
-    cirurgias_anteriores: Optional[str] = None
-    alergias: Optional[str] = None
-    medicamentos_continuos: Optional[str] = None
-    habitos: Optional[List[str]] = None
-    habitos_outros: Optional[str] = None
+    historico_doenca_atual: Optional[str] = None
     historia_familiar: Optional[str] = None
-    sinais_vitais: Optional[SinaisVitaisAnamnese] = None
+    antecedentes_pessoais: Optional[AntecedentesPessoais] = None
+    sinais_vitais: Optional[SinaisVitais] = None
     nivel_consciencia: Optional[str] = None
     estado_nutricional: Optional[str] = None
     pele_mucosas: Optional[str] = None
@@ -696,11 +709,11 @@ class AnamneseEnfermagemUpdate(BaseModel):
     apoio_familiar_social: Optional[str] = None
     necessidades_emocionais_espirituais: Optional[str] = None
 
-class AnamneseEnfermagemResponse(AnamneseEnfermagemBase):
-    id: str
-    paciente_id: str
-    created_at: datetime
-    updated_at: Optional[datetime] = None
+class AnamneseResponse(AnamneseBase):
+    """Schema para resposta da anamnese"""
+    id: str = Field(..., description="ID único da anamnese")
+    created_at: datetime = Field(..., description="Data de criação")
+    updated_at: Optional[datetime] = Field(None, description="Data da última atualização")
 
 
 # =================================================================================

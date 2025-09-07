@@ -1644,17 +1644,17 @@ def update_checklist_item_diario(
 # 1. NOVOS ENDPOINTS: ANAMNESE
 # =================================================================================
 
-@app.post("/pacientes/{paciente_id}/anamnese", response_model=schemas.AnamneseEnfermagemResponse, status_code=status.HTTP_201_CREATED, tags=["Anamnese"])
+@app.post("/pacientes/{paciente_id}/anamnese", response_model=schemas.AnamneseResponse, status_code=status.HTTP_201_CREATED, tags=["Anamnese"])
 def criar_anamnese(
     paciente_id: str,
-    anamnese_data: schemas.AnamneseEnfermagemCreate,
+    anamnese_data: schemas.AnamneseCreate,
     current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Admin ou Enfermeiro) Cria uma nova ficha de anamnese para um paciente."""
     return crud.criar_anamnese(db, paciente_id, anamnese_data)
 
-@app.get("/pacientes/{paciente_id}/anamnese", response_model=List[schemas.AnamneseEnfermagemResponse], tags=["Anamnese"])
+@app.get("/pacientes/{paciente_id}/anamnese", response_model=List[schemas.AnamneseResponse], tags=["Anamnese"])
 def listar_anamneses(
     paciente_id: str,
     # ***** A CORREÇÃO ESTÁ AQUI *****
@@ -1664,11 +1664,11 @@ def listar_anamneses(
     """(Autorizado, EXCETO Técnico) Lista todas as fichas de anamnese de um paciente."""
     return crud.listar_anamneses_por_paciente(db, paciente_id)
 
-@app.put("/anamnese/{anamnese_id}", response_model=schemas.AnamneseEnfermagemResponse, tags=["Anamnese"])
+@app.put("/anamnese/{anamnese_id}", response_model=schemas.AnamneseResponse, tags=["Anamnese"])
 def atualizar_anamnese(
     anamnese_id: str,
     paciente_id: str = Query(..., description="ID do paciente a quem a anamnese pertence."),
-    update_data: schemas.AnamneseEnfermagemUpdate = ...,
+    update_data: schemas.AnamneseUpdate = ...,
     current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
