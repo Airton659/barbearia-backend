@@ -1764,20 +1764,35 @@ def listar_relatorios_paciente_endpoint(
     # 4. Chama a sua função original do CRUD, que já funciona
     return crud.listar_relatorios_por_paciente(db, paciente_id)
 
+# main.py
+
+# Garanta que estas importações existam no topo do arquivo
+from auth import get_current_user_firebase, validate_negocio_id
+
+# ... (resto do arquivo)
+
 @app.post("/relatorios/{relatorio_id}/fotos", response_model=schemas.RelatorioMedicoResponse, tags=["Relatórios Médicos"])
 async def upload_foto_relatorio(
     relatorio_id: str,
     file: UploadFile = File(...),
-    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    negocio_id: str = Depends(validate_negocio_id), # <<-- CORREÇÃO 1: Valida o negocio_id do HEADER
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase), # <<-- CORREÇÃO 2: Pega o usuário
     db: firestore.client = Depends(get_db)
 ):
     """(Admin ou Profissional) Faz upload de uma foto para um relatório médico."""
+    # CORREÇÃO 3: Verificação manual da permissão (role)
+    user_role = current_user.roles.get(negocio_id)
+    if user_role not in ["admin", "profissional"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado: você não tem permissão de Gestor ou Enfermeiro para esta operação."
+        )
+
     if not CLOUD_STORAGE_BUCKET_NAME_GLOBAL:
         raise HTTPException(status_code=500, detail="Bucket do Cloud Storage não configurado.")
     try:
         file_content = await file.read()
         
-        # Reutiliza a função de upload genérico que já existe
         uploaded_url = await upload_generic_file(
             file_content=file_content,
             filename=file.filename,
@@ -1793,7 +1808,7 @@ async def upload_foto_relatorio(
     except Exception as e:
         logger.error(f"ERRO CRÍTICO NO UPLOAD DE FOTO PARA RELATÓRIO: {e}")
         raise HTTPException(status_code=500, detail=f"Ocorreu um erro interno no servidor: {e}")
-
+    
 @app.get("/medico/relatorios/pendentes", response_model=List[schemas.RelatorioMedicoResponse], tags=["Relatórios Médicos - Médico"])
 def listar_relatorios_pendentes_medico_endpoint(
     negocio_id: str = Header(..., description="ID do Negócio no qual o médico está atuando."),
