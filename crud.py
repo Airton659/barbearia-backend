@@ -3704,6 +3704,8 @@ def criar_relatorio_medico(db: firestore.client, paciente_id: str, relatorio_dat
     
     return relatorio_dict
 
+# crud.py
+
 def listar_relatorios_por_paciente(db: firestore.client, paciente_id: str) -> List[Dict]:
     """
     Lista todos os relatórios médicos de um paciente específico, ordenados por data de criação.
@@ -3730,12 +3732,14 @@ def listar_relatorios_por_paciente(db: firestore.client, paciente_id: str) -> Li
                     if medico_doc.exists:
                         medico_data = medico_doc.to_dict()
                         nome_medico = medico_data.get('nome', 'Médico desconhecido')
+                        # --- INÍCIO DA CORREÇÃO ---
                         if nome_medico and nome_medico != 'Médico desconhecido':
                             try:
                                 nome_medico = decrypt_data(nome_medico)
                             except Exception as e:
                                 logger.error(f"Erro ao descriptografar nome do médico {medico_id}: {e}")
                                 nome_medico = "[Erro na descriptografia]"
+                        # --- FIM DA CORREÇÃO ---
                         
                         profissionais_cache[medico_id] = {'nome': nome_medico}
                         data['medico_nome'] = nome_medico
@@ -3752,12 +3756,14 @@ def listar_relatorios_por_paciente(db: firestore.client, paciente_id: str) -> Li
                     if criador_doc.exists:
                         criador_data = criador_doc.to_dict()
                         nome_criador = criador_data.get('nome', 'Criador desconhecido')
+                        # --- INÍCIO DA CORREÇÃO ---
                         if nome_criador and nome_criador != 'Criador desconhecido':
                             try:
                                 nome_criador = decrypt_data(nome_criador)
                             except Exception as e:
                                 logger.error(f"Erro ao descriptografar nome do criador {criado_por_id}: {e}")
                                 nome_criador = "[Erro na descriptografia]"
+                        # --- FIM DA CORREÇÃO ---
                         
                         profissionais_cache[criado_por_id] = {'nome': nome_criador}
                         data['criado_por_nome'] = nome_criador
@@ -3765,10 +3771,16 @@ def listar_relatorios_por_paciente(db: firestore.client, paciente_id: str) -> Li
                         data['criado_por_nome'] = 'Criador não encontrado'
             
             relatorios.append(data)
+        
+        # --- CORREÇÃO ADICIONAL: MOVER O RETURN PARA FORA DO LOOP ---
+        return relatorios
             
     except Exception as e:
         logger.error(f"Erro ao listar relatórios para o paciente {paciente_id}: {e}")
-        
+        # --- CORREÇÃO ADICIONAL: RETORNAR LISTA VAZIA EM CASO DE ERRO NA QUERY ---
+        return []
+    
+            
 def adicionar_foto_relatorio(db: firestore.client, relatorio_id: str, foto_url: str) -> Optional[Dict]:
     """Adiciona a URL de uma foto ao array 'fotos' de um relatório médico usando operação atômica (ArrayUnion)."""
     try:
