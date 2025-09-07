@@ -1707,6 +1707,19 @@ def atualizar_endereco_paciente(
     if not paciente_atualizado:
         raise HTTPException(status_code=404, detail="Paciente não encontrado.")
     return paciente_atualizado
+
+@app.put("/pacientes/{paciente_id}/dados-pessoais", response_model=schemas.PacienteProfile, tags=["Pacientes"])
+def atualizar_dados_pessoais_paciente(
+    paciente_id: str,
+    dados_pessoais: schemas.PacienteUpdateDadosPessoais,
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin ou Enfermeiro) Atualiza dados pessoais básicos do paciente (migrados da anamnese)."""
+    paciente_atualizado = crud.atualizar_dados_pessoais_paciente(db, paciente_id, dados_pessoais)
+    if not paciente_atualizado:
+        raise HTTPException(status_code=404, detail="Paciente não encontrado.")
+    return paciente_atualizado
     
 @app.put("/pacientes/{paciente_id}/endereco", response_model=schemas.UsuarioProfile, tags=["Pacientes"])
 def atualizar_endereco_paciente(

@@ -587,6 +587,25 @@ def admin_criar_paciente(db: firestore.client, negocio_id: str, paciente_data: s
             atualizar_endereco_paciente(db, user_profile['id'], paciente_data.endereco)
             # Adiciona o endereço ao dicionário de resposta para consistência
             user_profile['endereco'] = paciente_data.endereco.model_dump()
+        
+        # 4. Adicionar dados pessoais básicos se fornecidos
+        dados_pessoais_update = {}
+        if paciente_data.data_nascimento:
+            dados_pessoais_update['data_nascimento'] = paciente_data.data_nascimento
+        if paciente_data.sexo:
+            dados_pessoais_update['sexo'] = paciente_data.sexo
+        if paciente_data.estado_civil:
+            dados_pessoais_update['estado_civil'] = paciente_data.estado_civil
+        if paciente_data.profissao:
+            dados_pessoais_update['profissao'] = paciente_data.profissao
+            
+        if dados_pessoais_update:
+            logger.info(f"Adicionando dados pessoais ao paciente recém-criado: {user_profile['id']}")
+            # Atualizar documento com dados pessoais
+            user_ref = db.collection('usuarios').document(user_profile['id'])
+            user_ref.update(dados_pessoais_update)
+            # Adicionar aos dados de resposta
+            user_profile.update(dados_pessoais_update)
 
         logger.info(f"Perfil do paciente {paciente_data.email} sincronizado com sucesso no Firestore.")
         return user_profile
@@ -3924,3 +3943,65 @@ def recusar_relatorio(db: firestore.client, relatorio_id: str, medico_id: str, m
     data = updated_doc.to_dict()
     data['id'] = updated_doc.id
     return data
+
+def atualizar_dados_pessoais_paciente(db: firestore.client, paciente_id: str, dados_pessoais: schemas.PacienteUpdateDadosPessoais) -> Optional[Dict]:
+    """
+    Atualiza os dados pessoais básicos de um paciente.
+    Estes campos foram migrados da anamnese para centralizar no nível do paciente.
+    """
+    try:
+        user_ref = db.collection("usuarios").document(paciente_id)
+        user_doc = user_ref.get()
+        
+        if not user_doc.exists:
+            logger.error(f"Paciente {paciente_id} não encontrado.")
+            return None
+        
+        # Preparar dados para atualização (apenas campos não-None)
+        update_data = {}
+        
+        if dados_pessoais.data_nascimento is not None:
+            update_data["data_nascimento"] = dados_pessoais.data_nascimento
+        if dados_pessoais.sexo is not None:
+            update_data["sexo"] = dados_pessoais.sexo  
+        if dados_pessoais.estado_civil is not None:
+            update_data["estado_civil"] = dados_pessoais.estado_civil
+        if dados_pessoais.profissao is not None:
+            update_data["profissao"] = dados_pessoais.profissao
+        if dados_pessoais.nome is not None:
+            update_data["nome"] = encrypt_data(dados_pessoais.nome)
+        if dados_pessoais.telefone is not None:
+            update_data["telefone"] = encrypt_data(dados_pessoais.telefone) if dados_pessoais.telefone else None
+        
+        # Atualizar endereço se fornecido
+        if dados_pessoais.endereco is not None:
+            endereco_criptografado = {
+                "rua": encrypt_data(dados_pessoais.endereco.rua),
+                "numero": encrypt_data(dados_pessoais.endereco.numero),
+                "cidade": encrypt_data(dados_pessoais.endereco.cidade),
+                "estado": encrypt_data(dados_pessoais.endereco.estado),
+                "cep": encrypt_data(dados_pessoais.endereco.cep)
+            }
+            update_data["endereco"] = endereco_criptografado
+        
+        if not update_data:
+            logger.info(f"Nenhum campo para atualizar no paciente {paciente_id}")
+            # Retornar dados atuais descriptografados
+            current_data = user_doc.to_dict()
+            current_data["id"] = user_doc.id
+            return descriptografar_dados_usuario(current_data)
+        
+        # Atualizar documento
+        user_ref.update(update_data)
+        
+        # Retornar documento atualizado
+        updated_doc = user_ref.get()
+        updated_data = updated_doc.to_dict()
+        updated_data["id"] = updated_doc.id
+        
+        # Descriptografar dados sensíveis para resposta
+        return descriptografar_dados_usuario(updated_data)
+        
+    except Exception as e:
+        logger.error(f"Erro ao atualizar dados pessoais do paciente {paciente_id}: {e}")
+        return None

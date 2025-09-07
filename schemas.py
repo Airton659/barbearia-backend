@@ -83,19 +83,49 @@ class FCMTokenUpdate(BaseModel):
 class RoleUpdateRequest(BaseModel):
     role: str = Field(..., description="O novo papel do usuário (ex: 'cliente', 'profissional', 'admin', 'tecnico', 'medico').")
 
-# Em PacienteCreateByAdmin, use o novo modelo Endereco
+# Em PacienteCreateByAdmin, use o novo modelo Endereco e adicione dados pessoais básicos
 class PacienteCreateByAdmin(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=6)
     nome: str
     telefone: Optional[str] = None
     endereco: Optional[Endereco] = None
+    
+    # --- DADOS PESSOAIS BÁSICOS ---
+    data_nascimento: Optional[datetime] = Field(None, description="Data de nascimento do paciente")
+    sexo: Optional[str] = Field(None, description="Sexo do paciente (ex: 'Masculino', 'Feminino', 'Outro')")
+    estado_civil: Optional[str] = Field(None, description="Estado civil do paciente")
+    profissao: Optional[str] = Field(None, description="Profissão do paciente")
 
 class StatusUpdateRequest(BaseModel):
     status: str = Field(..., description="O novo status do paciente (ex: 'ativo', 'arquivado').")
 
+# Schema para atualização dos dados pessoais básicos do paciente
+class PacienteUpdateDadosPessoais(BaseModel):
+    data_nascimento: Optional[datetime] = Field(None, description="Data de nascimento do paciente")
+    sexo: Optional[str] = Field(None, description="Sexo do paciente (ex: 'Masculino', 'Feminino', 'Outro')")
+    estado_civil: Optional[str] = Field(None, description="Estado civil do paciente")
+    profissao: Optional[str] = Field(None, description="Profissão do paciente")
+    nome: Optional[str] = Field(None, description="Nome do paciente")
+    telefone: Optional[str] = Field(None, description="Telefone do paciente")
+    endereco: Optional[Endereco] = Field(None, description="Endereço do paciente")
+
 class PacienteProfile(UsuarioProfile):
-    pass
+    # --- DADOS PESSOAIS BÁSICOS MIGRADOS DA ANAMNESE ---
+    data_nascimento: Optional[datetime] = Field(None, description="Data de nascimento do paciente")
+    sexo: Optional[str] = Field(None, description="Sexo do paciente (ex: 'Masculino', 'Feminino', 'Outro')")
+    estado_civil: Optional[str] = Field(None, description="Estado civil do paciente")
+    profissao: Optional[str] = Field(None, description="Profissão do paciente")
+    
+    # Método auxiliar para calcular idade (não será persistido no BD)
+    def calcular_idade(self) -> Optional[int]:
+        """Calcula idade baseada na data de nascimento"""
+        if self.data_nascimento:
+            from datetime import datetime
+            today = datetime.now().date()
+            nascimento = self.data_nascimento.date() if isinstance(self.data_nascimento, datetime) else self.data_nascimento
+            return today.year - nascimento.year - ((today.month, today.day) < (nascimento.month, nascimento.day))
+        return None
 
 # =================================================================================
 # SCHEMAS DE PROFISSIONAIS
