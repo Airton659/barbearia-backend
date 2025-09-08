@@ -8,7 +8,7 @@ from typing import Optional, List, Dict
 from firebase_admin import firestore
 import schemas
 from datetime import datetime, timedelta
-from .utils import add_timestamps
+from crud.utils import add_timestamps
 
 logger = logging.getLogger(__name__)
 

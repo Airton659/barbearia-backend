@@ -7,7 +7,7 @@ import logging
 from typing import Optional, List, Dict
 from firebase_admin import firestore
 import schemas
-from .utils import decrypt_user_sensitive_fields, add_timestamps
+from crud.utils import decrypt_user_sensitive_fields, add_timestamps
 
 logger = logging.getLogger(__name__)
 

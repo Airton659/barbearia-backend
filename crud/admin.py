@@ -7,7 +7,7 @@ import logging
 from typing import Optional, List, Dict
 from firebase_admin import firestore
 import schemas
-from .utils import (
+from crud.utils import (
     decrypt_user_sensitive_fields,
     encrypt_user_sensitive_fields,
     add_timestamps
@@ -166,7 +166,7 @@ def admin_criar_paciente(db: firestore.client, negocio_id: str, paciente_data: s
         
         # Adicionar endereço se fornecido
         if paciente_data.endereco:
-            from .utils import encrypt_endereco_fields
+            from crud.utils import encrypt_endereco_fields
             user_dict['endereco'] = encrypt_endereco_fields(paciente_data.endereco.model_dump())
         
         # Adicionar dados pessoais básicos se fornecidos

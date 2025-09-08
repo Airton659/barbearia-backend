@@ -8,7 +8,7 @@ from typing import Optional, Dict
 from firebase_admin import firestore
 import schemas
 from crypto_utils import encrypt_data, decrypt_data
-from .utils import (
+from crud.utils import (
     encrypt_user_sensitive_fields,
     decrypt_user_sensitive_fields,
     encrypt_endereco_fields,

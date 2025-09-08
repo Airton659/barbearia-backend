@@ -7,7 +7,7 @@ import logging
 from typing import Optional, List, Dict
 from firebase_admin import firestore
 import schemas
-from .utils import (
+from crud.utils import (
     decrypt_user_sensitive_fields,
     encrypt_endereco_fields,
     decrypt_endereco_fields,

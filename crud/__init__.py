@@ -4,7 +4,7 @@ Módulo CRUD organizado por domínios de negócio.
 """
 
 # Utilitários
-from .utils import (
+from crud.utils import (
     encrypt_user_sensitive_fields,
     decrypt_user_sensitive_fields,
     encrypt_endereco_fields,
@@ -16,7 +16,7 @@ from .utils import (
 )
 
 # Usuários e Autenticação
-from .usuarios import (
+from crud.usuarios import (
     buscar_usuario_por_firebase_uid,
     criar_ou_atualizar_usuario,
     adicionar_fcm_token,
@@ -25,7 +25,7 @@ from .usuarios import (
 )
 
 # Negócios
-from .negocios import (
+from crud.negocios import (
     admin_criar_negocio,
     admin_listar_negocios,
     buscar_negocio_por_id,
@@ -33,7 +33,7 @@ from .negocios import (
 )
 
 # Administração
-from .admin import (
+from crud.admin import (
     check_admin_status,
     admin_listar_usuarios_por_negocio,
     admin_set_usuario_status,
@@ -43,7 +43,7 @@ from .admin import (
 )
 
 # Profissionais
-from .profissionais import (
+from crud.profissionais import (
     buscar_profissional_por_uid,
     criar_profissional,
     listar_profissionais_por_negocio,
@@ -56,7 +56,7 @@ from .profissionais import (
 )
 
 # Médicos
-from .medicos import (
+from crud.medicos import (
     criar_medico,
     listar_medicos_por_negocio,
     criar_relatorio_medico,
@@ -67,7 +67,7 @@ from .medicos import (
 )
 
 # Pacientes
-from .pacientes import (
+from crud.pacientes import (
     listar_pacientes_por_profissional_ou_tecnico,
     atualizar_dados_pessoais_paciente,
     atualizar_endereco_paciente,
@@ -75,7 +75,7 @@ from .pacientes import (
 )
 
 # Agendamentos
-from .agendamentos import (
+from crud.agendamentos import (
     criar_agendamento,
     listar_agendamentos_por_cliente,
     listar_agendamentos_por_profissional,
@@ -87,7 +87,7 @@ from .agendamentos import (
 )
 
 # Anamneses e Consultas
-from .anamneses import (
+from crud.anamneses import (
     criar_anamnese,
     listar_anamneses_por_paciente,
     atualizar_anamnese,
