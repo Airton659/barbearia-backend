@@ -85,6 +85,9 @@ class UsuarioSync(BaseModel):
 class FCMTokenUpdate(BaseModel):
     fcm_token: str
 
+class FCMTokenRequest(BaseModel):
+    fcm_token: str
+
 class RoleUpdateRequest(BaseModel):
     role: str = Field(..., description="O novo papel do usuário (ex: 'cliente', 'profissional', 'admin', 'tecnico', 'medico').")
 
@@ -104,6 +107,12 @@ class PacienteCreateByAdmin(BaseModel):
 
 class StatusUpdateRequest(BaseModel):
     status: str = Field(..., description="O novo status do paciente (ex: 'ativo', 'arquivado').")
+
+class AlterarStatusRequest(BaseModel):
+    status: str = Field(..., description="O novo status do usuário (ex: 'ativo', 'inativo').")
+
+class AlterarRoleRequest(BaseModel):
+    role: str = Field(..., description="O novo papel do usuário (ex: 'cliente', 'profissional', 'admin', 'tecnico', 'medico').")
 
 # Schema para atualização dos dados pessoais básicos do paciente
 class PacienteUpdateDadosPessoais(BaseModel):
@@ -207,6 +216,13 @@ class AgendamentoResponse(BaseModel):
     servico_nome: str
     servico_preco: float
     servico_duracao_minutos: int
+
+class AgendamentoUpdate(BaseModel):
+    data_hora: Optional[datetime] = None
+    status: Optional[str] = None
+
+class CancelamentoAgendamento(BaseModel):
+    motivo: str = Field(..., description="Motivo do cancelamento do agendamento")
 
 # =================================================================================
 # SCHEMAS DE INTERAÇÕES (FEED)
@@ -431,6 +447,9 @@ class NotificacaoContagemResponse(BaseModel):
     count: int
 
 class MarcarLidaRequest(BaseModel):
+    notificacao_id: str
+
+class NotificacaoLidaRequest(BaseModel):
     notificacao_id: str
 
 class NotificacaoAgendadaCreate(BaseModel):
@@ -791,6 +810,12 @@ class RelatorioMedicoResponse(RelatorioMedicoBase):
 
 class RecusarRelatorioRequest(BaseModel):
     motivo: str = Field(..., description="Justificativa da recusa.")
+
+class RelatorioAprovacao(BaseModel):
+    observacoes: Optional[str] = Field(None, description="Observações da aprovação")
+
+class RelatorioRecusa(BaseModel):
+    motivo: str = Field(..., description="Motivo da recusa do relatório")
 
 class RelatorioCompletoResponse(BaseModel):
     relatorio: RelatorioMedicoResponse
