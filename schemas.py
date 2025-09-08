@@ -15,6 +15,10 @@ class NegocioBase(BaseModel):
 class NegocioCreate(NegocioBase):
     pass
 
+class NegocioUpdate(BaseModel):
+    nome: Optional[str] = Field(None, description="Nome do negócio.")
+    tipo_negocio: Optional[str] = Field(None, description="Tipo do negócio (ex: 'barbearia', 'clinica').")
+
 class NegocioResponse(NegocioBase):
     id: str = Field(..., description="ID único do negócio no Firestore.")
     owner_uid: str = Field(..., description="Firebase UID do dono do negócio.")
