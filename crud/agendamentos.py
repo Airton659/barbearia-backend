@@ -3,6 +3,7 @@
 CRUD para gestão de agendamentos
 """
 
+from __future__ import annotations
 import logging
 from typing import Optional, List, Dict
 from firebase_admin import firestore
