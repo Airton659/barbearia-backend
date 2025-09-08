@@ -199,7 +199,7 @@ def listar_minhas_pesquisas(
 @router.post("/me/pesquisas/{pesquisa_id}/submeter", response_model=schemas.PesquisaEnviadaResponse)
 def submeter_resposta_pesquisa(
     pesquisa_id: str,
-    resposta_data: schemas.PesquisaRespostaSubmit,
+    resposta_data: schemas.SubmeterPesquisaRequest,
     negocio_id: str = Depends(validate_negocio_id),
     current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
     db: firestore.client = Depends(get_db)
