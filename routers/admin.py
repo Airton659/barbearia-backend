@@ -118,6 +118,32 @@ def listar_medicos(
     """(Admin) Lista todos os médicos do negócio."""
     return crud.listar_medicos_por_negocio(db, negocio_id)
 
+@business_admin_router.patch("/medicos/{medico_id}", response_model=schemas.MedicoResponse)
+def atualizar_medico(
+    medico_id: str,
+    update_data: schemas.MedicoUpdate,
+    negocio_id: str = Depends(validate_path_negocio_id),
+    admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin) Atualiza dados de um médico."""
+    result = crud.atualizar_medico(db, medico_id, update_data)
+    if not result:
+        raise HTTPException(status_code=404, detail="Médico não encontrado")
+    return result
+
+@business_admin_router.delete("/medicos/{medico_id}", status_code=status.HTTP_204_NO_CONTENT)
+def deletar_medico(
+    medico_id: str,
+    negocio_id: str = Depends(validate_path_negocio_id),
+    admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin) Remove um médico do sistema."""
+    success = crud.deletar_medico(db, medico_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Médico não encontrado")
+
 @business_admin_router.get("/admin-status")
 def verificar_admin_status(
     negocio_id: str = Depends(validate_path_negocio_id),
@@ -140,3 +166,101 @@ def admin_atualizar_consentimento_lgpd(
     if not result:
         raise HTTPException(status_code=404, detail="Usuário não encontrado ou não foi possível atualizar o consentimento")
     return result
+
+@business_admin_router.post("/vincular-paciente", response_model=schemas.UsuarioProfile)
+def vincular_ou_desvincular_paciente(
+    vinculo_data: schemas.VinculoCreate,
+    negocio_id: str = Depends(validate_path_negocio_id),
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin ou Enfermeiro) Vincula um paciente a um enfermeiro ou desvincula ao enviar 'enfermeiro_id' como null."""
+    paciente_atualizado = crud.vincular_paciente_enfermeiro(
+        db,
+        negocio_id=negocio_id,
+        paciente_id=vinculo_data.paciente_id,
+        enfermeiro_id=vinculo_data.enfermeiro_id,
+        autor_uid=current_user.firebase_uid
+    )
+    if not paciente_atualizado:
+        raise HTTPException(status_code=404, detail="Paciente ou enfermeiro não encontrado")
+    return paciente_atualizado
+
+@business_admin_router.delete("/vincular-paciente", response_model=schemas.UsuarioProfile)
+def desvincular_paciente(
+    vinculo_data: schemas.VinculoCreate,
+    negocio_id: str = Depends(validate_path_negocio_id),
+    admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin de Negócio) Desvincula um paciente de seu enfermeiro."""
+    paciente_atualizado = crud.desvincular_paciente_enfermeiro(
+        db,
+        negocio_id=negocio_id,
+        paciente_id=vinculo_data.paciente_id,
+        autor_uid=admin.firebase_uid
+    )
+    if not paciente_atualizado:
+        raise HTTPException(status_code=404, detail="Paciente não encontrado")
+    return paciente_atualizado
+
+@business_admin_router.patch("/pacientes/{paciente_id}/vincular-tecnicos", response_model=schemas.UsuarioProfile)
+def vincular_tecnicos_ao_paciente(
+    paciente_id: str,
+    vinculo_data: schemas.TecnicosVincularRequest,
+    negocio_id: str = Depends(validate_path_negocio_id),
+    admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin de Negócio) Vincula ou atualiza a lista de técnicos associados a um paciente."""
+    try:
+        paciente_atualizado = crud.vincular_tecnicos_paciente(
+            db, paciente_id, vinculo_data.tecnicos_ids, admin.firebase_uid
+        )
+        if not paciente_atualizado:
+            raise HTTPException(status_code=404, detail="Paciente não encontrado")
+        return paciente_atualizado
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Ocorreu um erro interno no servidor")
+
+@business_admin_router.post("/pacientes/{paciente_id}/vincular-medico", response_model=schemas.UsuarioProfile)
+def vincular_medico_ao_paciente(
+    paciente_id: str,
+    vinculo_data: schemas.MedicoVincularRequest,
+    negocio_id: str = Depends(validate_path_negocio_id),
+    admin_or_profissional: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin ou Enfermeiro) Vincula ou desvincula um médico de um paciente."""
+    try:
+        paciente_atualizado = crud.vincular_paciente_medico(
+            db, negocio_id, paciente_id, vinculo_data.medico_id, admin_or_profissional.firebase_uid
+        )
+        if not paciente_atualizado:
+            raise HTTPException(status_code=404, detail="Paciente não encontrado")
+        return paciente_atualizado
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Erro inesperado ao vincular médico")
+
+@business_admin_router.patch("/usuarios/{tecnico_id}/vincular-supervisor", response_model=schemas.UsuarioProfile)
+def vincular_ou_desvincular_supervisor(
+    tecnico_id: str,
+    vinculo_data: schemas.SupervisorVincularRequest,
+    negocio_id: str = Depends(validate_path_negocio_id),
+    admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin de Negócio) Vincula um supervisor a um técnico ou desvincula ao enviar 'supervisor_id' como null."""
+    try:
+        tecnico_atualizado = crud.vincular_supervisor_tecnico(
+            db, tecnico_id, vinculo_data.supervisor_id, admin.firebase_uid
+        )
+        if not tecnico_atualizado:
+            raise HTTPException(status_code=404, detail="Técnico ou supervisor não encontrado")
+        return tecnico_atualizado
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

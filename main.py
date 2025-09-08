@@ -20,7 +20,8 @@ from routers import (
     medicos,
     interacoes,
     notifications,
-    utilitarios
+    utilitarios,
+    servicos
 )
 
 # --- Configuração da Aplicação ---
@@ -126,6 +127,9 @@ app.include_router(notifications.router)
 
 # Utilitários (Uploads, Pesquisas, etc.)
 app.include_router(utilitarios.router)
+
+# Serviços e Horários
+app.include_router(servicos.router)
 
 if __name__ == "__main__":
     import uvicorn

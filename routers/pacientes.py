@@ -22,6 +22,190 @@ router = APIRouter(tags=["Ficha do Paciente", "Pacientes", "Anamnese", "Fluxo do
 # ENDPOINTS DE FICHA DO PACIENTE
 # =================================================================================
 
+@router.get("/pacientes/{paciente_id}/ficha-completa", response_model=schemas.FichaCompletaResponse)
+def obter_ficha_completa(
+    paciente_id: str,
+    consulta_id: str = Query(None, description="Opcional: força o retorno da consulta informada"),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    db: firestore.client = Depends(get_db)
+):
+    """Retorna a ficha clínica completa do paciente (sem os exames)."""
+    if consulta_id:
+        return {
+            "consultas": crud.listar_consultas(db, paciente_id),
+            "medicacoes": crud.listar_medicacoes(db, paciente_id, consulta_id),
+            "checklist": crud.listar_checklist(db, paciente_id, consulta_id),
+            "orientacoes": crud.listar_orientacoes(db, paciente_id, consulta_id),
+        }
+    return crud.get_ficha_completa_paciente(db, paciente_id)
+
+@router.post("/pacientes/{paciente_id}/exames", response_model=schemas.ExameResponse, status_code=status.HTTP_201_CREATED)
+def criar_exame_paciente(
+    paciente_id: str,
+    exame_data: schemas.ExameCreate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """Cria um novo exame para um paciente."""
+    exame_data.paciente_id = paciente_id
+    return crud.criar_exame(db, exame_data)
+
+@router.put("/pacientes/{paciente_id}/exames/{exame_id}", response_model=schemas.ExameResponse)
+def atualizar_exame_paciente(
+    paciente_id: str,
+    exame_id: str,
+    update_data: schemas.ExameUpdate,
+    negocio_id: str = Depends(validate_negocio_id),
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """Atualiza um exame, com verificação de permissão."""
+    try:
+        exame_atualizado = crud.update_exame(db, paciente_id, exame_id, update_data, current_user, negocio_id)
+        if not exame_atualizado:
+            raise HTTPException(status_code=404, detail="Exame não encontrado")
+        return exame_atualizado
+    except HTTPException:
+        raise
+
+@router.delete("/pacientes/{paciente_id}/exames/{exame_id}", status_code=status.HTTP_204_NO_CONTENT)
+def deletar_exame_paciente(
+    paciente_id: str,
+    exame_id: str,
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """Remove um exame da ficha do paciente."""
+    success = crud.delete_exame(db, paciente_id, exame_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Exame não encontrado")
+
+@router.post("/pacientes/{paciente_id}/medicacoes", response_model=schemas.MedicacaoResponse, status_code=status.HTTP_201_CREATED)
+def criar_medicacao_paciente(
+    paciente_id: str,
+    medicacao_data: schemas.MedicacaoCreate,
+    consulta_id: str = Query(..., description="ID da consulta"),
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """Cria uma nova medicação para um paciente."""
+    return crud.criar_medicacao(db, medicacao_data, consulta_id)
+
+@router.patch("/pacientes/{paciente_id}/medicacoes/{medicacao_id}", response_model=schemas.MedicacaoResponse)
+def atualizar_medicacao_paciente(
+    paciente_id: str,
+    medicacao_id: str,
+    update_data: schemas.MedicacaoUpdate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """Atualiza uma medicação na ficha do paciente."""
+    medicacao_atualizada = crud.update_medicacao(db, paciente_id, medicacao_id, update_data)
+    if not medicacao_atualizada:
+        raise HTTPException(status_code=404, detail="Medicação não encontrada")
+    return medicacao_atualizada
+
+@router.delete("/pacientes/{paciente_id}/medicacoes/{medicacao_id}", status_code=status.HTTP_204_NO_CONTENT)
+def deletar_medicacao_paciente(
+    paciente_id: str,
+    medicacao_id: str,
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """Remove uma medicação da ficha do paciente."""
+    success = crud.delete_medicacao(db, paciente_id, medicacao_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Medicação não encontrada")
+
+@router.post("/pacientes/{paciente_id}/checklist-itens", response_model=schemas.ChecklistItemResponse, status_code=status.HTTP_201_CREATED)
+def criar_item_checklist_paciente(
+    paciente_id: str,
+    item_data: schemas.ChecklistItemCreate,
+    consulta_id: str = Query(..., description="ID da consulta"),
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """Cria um novo item do checklist para um paciente."""
+    return crud.criar_checklist_item(db, item_data, consulta_id)
+
+@router.patch("/pacientes/{paciente_id}/checklist-itens/{item_id}", response_model=schemas.ChecklistItemResponse)
+def atualizar_item_checklist_paciente(
+    paciente_id: str,
+    item_id: str,
+    update_data: schemas.ChecklistItemUpdate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """Atualiza um item do checklist na ficha do paciente."""
+    item_atualizado = crud.update_checklist_item(db, paciente_id, item_id, update_data)
+    if not item_atualizado:
+        raise HTTPException(status_code=404, detail="Item do checklist não encontrado")
+    return item_atualizado
+
+@router.delete("/pacientes/{paciente_id}/checklist-itens/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def deletar_item_checklist_paciente(
+    paciente_id: str,
+    item_id: str,
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """Remove um item do checklist da ficha do paciente."""
+    success = crud.delete_checklist_item(db, paciente_id, item_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Item do checklist não encontrado")
+
+@router.patch("/pacientes/{paciente_id}/consultas/{consulta_id}", response_model=schemas.ConsultaResponse)
+def atualizar_consulta_paciente(
+    paciente_id: str,
+    consulta_id: str,
+    update_data: schemas.ConsultaUpdate,
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    db: firestore.client = Depends(get_db)
+):
+    """Atualiza uma consulta na ficha do paciente."""
+    consulta_atualizada = crud.update_consulta(db, paciente_id, consulta_id, update_data)
+    if not consulta_atualizada:
+        raise HTTPException(status_code=404, detail="Consulta não encontrada")
+    return consulta_atualizada
+
+@router.delete("/pacientes/{paciente_id}/consultas/{consulta_id}", status_code=status.HTTP_204_NO_CONTENT)
+def deletar_consulta_paciente(
+    paciente_id: str,
+    consulta_id: str,
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """Remove uma consulta da ficha do paciente."""
+    success = crud.delete_consulta(db, paciente_id, consulta_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Consulta não encontrada")
+
+@router.patch("/pacientes/{paciente_id}/orientacoes/{orientacao_id}", response_model=schemas.OrientacaoResponse)
+def atualizar_orientacao_paciente(
+    paciente_id: str,
+    orientacao_id: str,
+    update_data: schemas.OrientacaoUpdate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """Atualiza uma orientação na ficha do paciente."""
+    orientacao_atualizada = crud.update_orientacao(db, paciente_id, orientacao_id, update_data)
+    if not orientacao_atualizada:
+        raise HTTPException(status_code=404, detail="Orientação não encontrada")
+    return orientacao_atualizada
+
+@router.delete("/pacientes/{paciente_id}/orientacoes/{orientacao_id}", status_code=status.HTTP_204_NO_CONTENT)
+def deletar_orientacao_paciente(
+    paciente_id: str,
+    orientacao_id: str,
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """Remove uma orientação da ficha do paciente."""
+    success = crud.delete_orientacao(db, paciente_id, orientacao_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Orientação não encontrada")
+
 @router.post("/pacientes/{paciente_id}/consultas", response_model=schemas.ConsultaResponse, status_code=status.HTTP_201_CREATED)
 def criar_consulta_paciente(
     paciente_id: str,
@@ -325,3 +509,59 @@ def deletar_suporte_psicologico_paciente(
     success = crud.deletar_suporte_psicologico(db, paciente_id, suporte_id)
     if not success:
         raise HTTPException(status_code=404, detail="Registro de suporte psicológico não encontrado")
+
+# =================================================================================
+# ENDPOINTS DE SUPERVISÃO
+# =================================================================================
+
+@router.get("/pacientes/{paciente_id}/tecnicos-supervisionados", response_model=List[schemas.TecnicoProfileReduzido])
+def listar_tecnicos_supervisionados_por_paciente(
+    paciente_id: str,
+    negocio_id: str = Depends(validate_negocio_id),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    db: firestore.client = Depends(get_db)
+):
+    """Lista os técnicos vinculados a um paciente que estão sob supervisão do usuário."""
+    # Obtém a role do usuário
+    user_roles = current_user.roles or {}
+    user_role = user_roles.get(negocio_id)
+    is_admin = user_role == 'admin'
+    
+    if is_admin:
+        # Admin vê todos os técnicos vinculados ao paciente
+        paciente_doc = db.collection('usuarios').document(paciente_id).get()
+        if not paciente_doc.exists:
+            raise HTTPException(status_code=404, detail="Paciente não encontrado")
+        
+        paciente_data = paciente_doc.to_dict()
+        tecnicos_vinculados_ids = paciente_data.get('tecnicos_ids', [])
+        
+        tecnicos_perfil = []
+        for tecnico_id in tecnicos_vinculados_ids:
+            tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
+            if tecnico_doc.exists:
+                tecnico_data = tecnico_doc.to_dict()
+                
+                # Descriptografar o nome do técnico
+                nome_tecnico = tecnico_data.get('nome', 'Nome não disponível')
+                if nome_tecnico and nome_tecnico != 'Nome não disponível':
+                    try:
+                        nome_tecnico = crud.decrypt_data(nome_tecnico)
+                    except Exception:
+                        nome_tecnico = "[Erro na descriptografia]"
+                
+                tecnicos_perfil.append(schemas.TecnicoProfileReduzido(
+                    id=tecnico_doc.id,
+                    nome=nome_tecnico,
+                    email=tecnico_data.get('email', 'Email não disponível')
+                ))
+        return tecnicos_perfil
+    else:
+        # Para enfermeiros, aplicar lógica de supervisão
+        if user_role not in ["profissional", "admin"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Acesso negado: apenas supervisores podem ver técnicos supervisionados"
+            )
+        
+        return crud.listar_tecnicos_supervisionados_por_paciente(db, paciente_id, current_user.id, negocio_id)
