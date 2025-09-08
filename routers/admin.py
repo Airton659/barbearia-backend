@@ -10,6 +10,7 @@ import crud
 from database import get_db
 from auth import (
     get_super_admin_user, get_current_admin_user,
+    get_current_admin_or_profissional_user,
     validate_path_negocio_id
 )
 from firebase_admin import firestore
@@ -45,7 +46,7 @@ business_admin_router = APIRouter(prefix="/negocios/{negocio_id}", tags=["Admin 
 def listar_usuarios_do_negocio(
     negocio_id: str = Depends(validate_path_negocio_id),
     status: str = Query('ativo', description="Filtre por status: 'ativo', 'inativo' ou 'all'."),
-    admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Admin) Lista todos os usuários de um negócio com filtro de status."""
@@ -78,7 +79,7 @@ def alterar_status_usuario(
 def criar_paciente_via_admin(
     paciente_data: schemas.PacienteCreateByAdmin,
     negocio_id: str = Depends(validate_path_negocio_id),
-    admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Admin) Cria um novo paciente via interface administrativa."""
@@ -131,7 +132,7 @@ def admin_atualizar_consentimento_lgpd(
     user_id: str,
     consent_data: schemas.ConsentimentoLGPDUpdate,
     negocio_id: str = Depends(validate_path_negocio_id),
-    admin: schemas.UsuarioProfile = Depends(get_current_admin_user),
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """(Admin) Atualiza o consentimento LGPD de um usuário."""
