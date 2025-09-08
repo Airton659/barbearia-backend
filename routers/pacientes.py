@@ -565,3 +565,36 @@ def listar_tecnicos_supervisionados_por_paciente(
             )
         
         return crud.listar_tecnicos_supervisionados_por_paciente(db, paciente_id, current_user.id, negocio_id)
+
+@router.get("/pacientes/{paciente_id}/dados-completos", response_model=schemas.UsuarioProfile)
+def obter_dados_completos_paciente(
+    paciente_id: str,
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    db: firestore.client = Depends(get_db)
+):
+    """Obtém dados completos de um paciente específico."""
+    # Buscar dados do paciente
+    paciente_doc = db.collection('usuarios').document(paciente_id).get()
+    if not paciente_doc.exists:
+        raise HTTPException(status_code=404, detail="Paciente não encontrado")
+    
+    paciente_data = paciente_doc.to_dict()
+    paciente_data['id'] = paciente_doc.id
+    
+    # Descriptografar dados sensíveis
+    paciente_data = crud.decrypt_user_sensitive_fields(paciente_data, ['nome', 'telefone'])
+    
+    return paciente_data
+
+@router.patch("/diario/{registro_id}", response_model=schemas.DiarioTecnicoResponse)
+def atualizar_registro_diario_tecnico(
+    registro_id: str,
+    update_data: schemas.DiarioTecnicoUpdate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    db: firestore.client = Depends(get_db)
+):
+    """Atualiza um registro específico do diário do técnico."""
+    result = crud.atualizar_registro_diario(db, registro_id, update_data, current_user.id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Registro do diário não encontrado")
+    return result

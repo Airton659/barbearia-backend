@@ -240,6 +240,27 @@ def recusar_relatorio_medico(
     
     return result
 
+# Endpoints com URLs diretas para compatibilidade com frontend
+@router.post("/relatorios/{relatorio_id}/aprovar", response_model=schemas.RelatorioMedicoResponse)
+def aprovar_relatorio_direto(
+    relatorio_id: str,
+    aprovacao_data: schemas.RelatorioAprovacao,
+    current_user: schemas.UsuarioProfile = Depends(get_current_medico_user),
+    db: firestore.client = Depends(get_db)
+):
+    """Endpoint direto para aprovar relatório (compatibilidade com frontend)."""
+    return aprovar_relatorio_medico(relatorio_id, aprovacao_data, current_user, db)
+
+@router.post("/relatorios/{relatorio_id}/recusar", response_model=schemas.RelatorioMedicoResponse) 
+def recusar_relatorio_direto(
+    relatorio_id: str,
+    recusa_data: schemas.RelatorioRecusa,
+    current_user: schemas.UsuarioProfile = Depends(get_current_medico_user),
+    db: firestore.client = Depends(get_db)
+):
+    """Endpoint direto para recusar relatório (compatibilidade com frontend)."""
+    return recusar_relatorio_medico(relatorio_id, recusa_data, current_user, db)
+
 @router.put("/relatorios/{relatorio_id}", response_model=schemas.RelatorioMedicoResponse)
 def atualizar_relatorio_medico_endpoint(
     relatorio_id: str,

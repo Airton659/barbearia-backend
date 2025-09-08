@@ -46,11 +46,24 @@ business_admin_router = APIRouter(prefix="/negocios/{negocio_id}", tags=["Admin 
 def listar_usuarios_do_negocio(
     negocio_id: str = Depends(validate_path_negocio_id),
     status: str = Query('ativo', description="Filtre por status: 'ativo', 'inativo' ou 'all'."),
+    role: str = Query(None, description="Filtre por role: 'admin', 'medico', 'profissional', etc."),
     current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
-    """(Admin) Lista todos os usuários de um negócio com filtro de status."""
-    return crud.admin_listar_usuarios_por_negocio(db, negocio_id, status)
+    """(Admin) Lista todos os usuários de um negócio com filtro de status e role."""
+    usuarios = crud.admin_listar_usuarios_por_negocio(db, negocio_id, status)
+    
+    # Filtrar por role se especificado
+    if role:
+        usuarios_filtrados = []
+        for usuario in usuarios:
+            user_roles = usuario.get('roles', {})
+            user_role = user_roles.get(negocio_id)
+            if user_role == role:
+                usuarios_filtrados.append(usuario)
+        return usuarios_filtrados
+    
+    return usuarios
 
 @business_admin_router.get("/clientes", response_model=List[schemas.UsuarioProfile])
 def listar_clientes_do_negocio(
