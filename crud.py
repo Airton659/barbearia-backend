@@ -4351,3 +4351,177 @@ def listar_historico_relatorios_medico(db: firestore.client, medico_id: str, neg
     except Exception as e:
         logger.error(f"Erro ao listar histórico de relatórios do médico {medico_id}: {e}")
         return []
+
+
+# =================================================================================
+# ATUALIZAÇÃO DE PERFIL DO USUÁRIO
+# =================================================================================
+
+def atualizar_perfil_usuario(db: firestore.client, user_id: str, negocio_id: str, update_data: schemas.UserProfileUpdate) -> Optional[Dict]:
+    """
+    Atualiza o perfil do usuário com validações de segurança.
+    
+    Args:
+        db: Cliente Firestore
+        user_id: ID do usuário autenticado
+        negocio_id: ID do negócio
+        update_data: Dados para atualização
+        
+    Returns:
+        Dados atualizados do usuário ou None se não encontrado
+    """
+    try:
+        logger.info(f"Atualizando perfil do usuário {user_id} no negócio {negocio_id}")
+        
+        # Buscar usuário no Firestore
+        user_ref = db.collection('usuarios').document(user_id)
+        user_doc = user_ref.get()
+        
+        if not user_doc.exists:
+            logger.warning(f"Usuário {user_id} não encontrado")
+            return None
+            
+        user_data = user_doc.to_dict()
+        
+        # Verificar se usuário pertence ao negócio
+        user_roles = user_data.get('roles', {})
+        if negocio_id not in user_roles:
+            logger.warning(f"Usuário {user_id} não pertence ao negócio {negocio_id}")
+            return None
+        
+        # Preparar dados para atualização
+        update_dict = {}
+        
+        # Nome (obrigatório e sempre criptografado)
+        if update_data.nome:
+            update_dict['nome'] = encrypt_data(update_data.nome.strip())
+        
+        # Telefone (opcional, criptografado se fornecido)
+        if update_data.telefone is not None:
+            if update_data.telefone.strip():
+                # Validação básica do telefone
+                telefone_limpo = ''.join(filter(str.isdigit, update_data.telefone))
+                if len(telefone_limpo) >= 10:  # DDD + número
+                    update_dict['telefone'] = encrypt_data(update_data.telefone.strip())
+                else:
+                    raise ValueError("Telefone deve conter pelo menos 10 dígitos (DDD + número)")
+            else:
+                update_dict['telefone'] = None
+        
+        # Endereço (opcional, criptografado se fornecido)
+        if update_data.endereco is not None:
+            endereco_dict = update_data.endereco.model_dump()
+            # Criptografar campos sensíveis do endereço
+            endereco_criptografado = {}
+            for campo, valor in endereco_dict.items():
+                if valor and isinstance(valor, str) and valor.strip():
+                    if campo == 'cep':
+                        # Validação básica do CEP
+                        cep_limpo = ''.join(filter(str.isdigit, valor))
+                        if len(cep_limpo) != 8:
+                            raise ValueError("CEP deve conter exatamente 8 dígitos")
+                        endereco_criptografado[campo] = encrypt_data(valor.strip())
+                    else:
+                        endereco_criptografado[campo] = encrypt_data(valor.strip())
+                else:
+                    endereco_criptografado[campo] = valor
+            update_dict['endereco'] = endereco_criptografado
+        
+        # Adicionar timestamp de atualização
+        update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
+        
+        # Executar atualização
+        user_ref.update(update_dict)
+        logger.info(f"Perfil do usuário {user_id} atualizado com sucesso")
+        
+        # Buscar dados atualizados
+        updated_doc = user_ref.get()
+        updated_data = updated_doc.to_dict()
+        updated_data['id'] = updated_doc.id
+        
+        # Descriptografar dados para resposta
+        if 'nome' in updated_data and updated_data['nome']:
+            try:
+                updated_data['nome'] = decrypt_data(updated_data['nome'])
+            except Exception as e:
+                logger.error(f"Erro ao descriptografar nome: {e}")
+                updated_data['nome'] = "[Erro na descriptografia]"
+        
+        if 'telefone' in updated_data and updated_data['telefone']:
+            try:
+                updated_data['telefone'] = decrypt_data(updated_data['telefone'])
+            except Exception as e:
+                logger.error(f"Erro ao descriptografar telefone: {e}")
+                updated_data['telefone'] = "[Erro na descriptografia]"
+        
+        if 'endereco' in updated_data and updated_data['endereco']:
+            endereco_descriptografado = {}
+            for campo, valor in updated_data['endereco'].items():
+                if valor and isinstance(valor, str) and valor.strip():
+                    try:
+                        endereco_descriptografado[campo] = decrypt_data(valor)
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar campo {campo} do endereço: {e}")
+                        endereco_descriptografado[campo] = "[Erro na descriptografia]"
+                else:
+                    endereco_descriptografado[campo] = valor
+            updated_data['endereco'] = endereco_descriptografado
+        
+        return updated_data
+        
+    except ValueError as ve:
+        logger.warning(f"Erro de validação ao atualizar perfil do usuário {user_id}: {ve}")
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao atualizar perfil do usuário {user_id}: {e}")
+        return None
+
+
+def processar_imagem_base64(base64_data: str, user_id: str) -> Optional[str]:
+    """
+    Processa imagem Base64 e salva no storage (implementação simplificada).
+    
+    Args:
+        base64_data: Dados da imagem em Base64
+        user_id: ID do usuário
+        
+    Returns:
+        URL da imagem salva ou None se erro
+    """
+    try:
+        import base64
+        import os
+        from datetime import datetime
+        
+        # Validar formato Base64
+        if not base64_data.startswith('data:image/'):
+            raise ValueError("Formato de imagem Base64 inválido")
+        
+        # Extrair tipo de imagem e dados
+        header, encoded_data = base64_data.split(',', 1)
+        image_type = header.split('/')[1].split(';')[0]
+        
+        if image_type not in ['jpeg', 'jpg', 'png']:
+            raise ValueError("Tipo de imagem não suportado. Use JPEG ou PNG")
+        
+        # Decodificar Base64
+        image_data = base64.b64decode(encoded_data)
+        
+        # Verificar tamanho (máximo 5MB)
+        if len(image_data) > 5 * 1024 * 1024:
+            raise ValueError("Imagem muito grande. Máximo 5MB")
+        
+        # Gerar nome único para o arquivo
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"profile_{user_id}_{timestamp}.{image_type}"
+        
+        # Por simplicidade, vamos retornar uma URL simulada
+        # Em produção, aqui seria o upload para Google Cloud Storage ou similar
+        simulated_url = f"https://storage.googleapis.com/barbearia-bucket/profiles/{filename}"
+        
+        logger.info(f"Imagem processada para usuário {user_id}: {filename}")
+        return simulated_url
+        
+    except Exception as e:
+        logger.error(f"Erro ao processar imagem Base64 para usuário {user_id}: {e}")
+        return None

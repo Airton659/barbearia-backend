@@ -793,5 +793,29 @@ class RelatorioCompletoResponse(BaseModel):
     planoCuidado: FichaCompletaResponse
     registrosDiarios: List[RegistroDiarioResponse]
 
+# =================================================================================
+# SCHEMAS PARA ATUALIZAÇÃO DE PERFIL DO USUÁRIO
+# =================================================================================
+
+class UserProfileUpdate(BaseModel):
+    """Schema para atualização do perfil do usuário"""
+    nome: str = Field(..., min_length=2, max_length=100, description="Nome completo do usuário")
+    telefone: Optional[str] = Field(None, description="Telefone com DDD (opcional)")
+    endereco: Optional[Endereco] = Field(None, description="Endereço completo (opcional)")
+    profile_image: Optional[str] = Field(None, description="Imagem do perfil em Base64 (opcional)")
+
+class UserProfileUpdateResponse(BaseModel):
+    """Schema de resposta para atualização de perfil"""
+    success: bool = Field(..., description="Status da operação")
+    message: str = Field(..., description="Mensagem de retorno")
+    user: UsuarioProfile = Field(..., description="Dados atualizados do usuário")
+    profile_image_url: Optional[str] = Field(None, description="URL da imagem de perfil se houver upload")
+
+class UserProfileUpdateError(BaseModel):
+    """Schema de erro para atualização de perfil"""
+    success: bool = Field(False, description="Status da operação")
+    message: str = Field(..., description="Mensagem de erro")
+    errors: Optional[Dict[str, List[str]]] = Field(None, description="Detalhes dos erros de validação")
+
 ProfissionalResponse.model_rebuild()
 DiarioTecnicoResponse.model_rebuild()

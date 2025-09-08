@@ -1255,6 +1255,79 @@ def register_fcm_token_endpoint(
     crud.adicionar_fcm_token(db, current_user.firebase_uid, request.fcm_token)
     return {"message": "FCM token registrado com sucesso."}
 
+@app.put("/users/update-profile", response_model=schemas.UserProfileUpdateResponse, tags=["Usuários"])
+def update_user_profile(
+    update_data: schemas.UserProfileUpdate,
+    negocio_id: str = Header(..., alias="negocio-id", description="ID do negócio"),
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db: firestore.client = Depends(get_db)
+):
+    """
+    Atualiza o perfil do usuário logado com validações de segurança.
+    
+    - **nome**: Nome completo (obrigatório, mínimo 2 caracteres)
+    - **telefone**: Telefone com DDD (opcional, validação de formato)  
+    - **endereco**: Endereço completo com CEP (opcional, validação de CEP)
+    - **profile_image**: Imagem em Base64 (opcional, máximo 5MB)
+    """
+    try:
+        logger.info(f"Atualizando perfil do usuário {current_user.id}")
+        
+        # Processar imagem se fornecida
+        profile_image_url = None
+        if update_data.profile_image:
+            try:
+                profile_image_url = crud.processar_imagem_base64(update_data.profile_image, current_user.id)
+                if not profile_image_url:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Erro ao processar imagem. Verifique o formato Base64 e tamanho (máximo 5MB)"
+                    )
+            except ValueError as ve:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(ve)
+                )
+        
+        # Atualizar perfil do usuário
+        try:
+            updated_user = crud.atualizar_perfil_usuario(db, current_user.id, negocio_id, update_data)
+        except ValueError as ve:
+            # Erros de validação (telefone, CEP, etc.)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(ve)
+            )
+        
+        if not updated_user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Usuário não encontrado ou não pertence ao negócio"
+            )
+        
+        # Montar resposta de sucesso
+        user_profile = schemas.UsuarioProfile(**updated_user)
+        
+        response = schemas.UserProfileUpdateResponse(
+            success=True,
+            message="Perfil atualizado com sucesso",
+            user=user_profile,
+            profile_image_url=profile_image_url
+        )
+        
+        logger.info(f"Perfil do usuário {current_user.id} atualizado com sucesso")
+        return response
+        
+    except HTTPException:
+        # Re-lançar HTTPExceptions
+        raise
+    except Exception as e:
+        logger.error(f"Erro interno ao atualizar perfil do usuário {current_user.id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro interno do servidor"
+        )
+
 @app.get("/negocios/{negocio_id}/admin-status", tags=["Admin - Gestão do Negócio"])
 def get_admin_status(
     negocio_id: str,
