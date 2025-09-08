@@ -4357,7 +4357,7 @@ def listar_historico_relatorios_medico(db: firestore.client, medico_id: str, neg
 # ATUALIZAÇÃO DE PERFIL DO USUÁRIO
 # =================================================================================
 
-def atualizar_perfil_usuario(db: firestore.client, user_id: str, negocio_id: str, update_data: schemas.UserProfileUpdate) -> Optional[Dict]:
+def atualizar_perfil_usuario(db: firestore.client, user_id: str, negocio_id: str, update_data: schemas.UserProfileUpdate, profile_image_url: Optional[str] = None) -> Optional[Dict]:
     """
     Atualiza o perfil do usuário com validações de segurança.
     
@@ -4427,6 +4427,10 @@ def atualizar_perfil_usuario(db: firestore.client, user_id: str, negocio_id: str
                     endereco_criptografado[campo] = valor
             update_dict['endereco'] = endereco_criptografado
         
+        # URL da imagem de perfil (se fornecida)
+        if profile_image_url is not None:
+            update_dict['profile_image_url'] = profile_image_url
+        
         # Adicionar timestamp de atualização
         update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
         
@@ -4479,7 +4483,7 @@ def atualizar_perfil_usuario(db: firestore.client, user_id: str, negocio_id: str
 
 def processar_imagem_base64(base64_data: str, user_id: str) -> Optional[str]:
     """
-    Processa imagem Base64 e salva no storage (implementação simplificada).
+    Processa imagem Base64 e salva localmente (implementação para desenvolvimento).
     
     Args:
         base64_data: Dados da imagem em Base64
@@ -4515,12 +4519,22 @@ def processar_imagem_base64(base64_data: str, user_id: str) -> Optional[str]:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"profile_{user_id}_{timestamp}.{image_type}"
         
-        # Por simplicidade, vamos retornar uma URL simulada
-        # Em produção, aqui seria o upload para Google Cloud Storage ou similar
-        simulated_url = f"https://storage.googleapis.com/barbearia-bucket/profiles/{filename}"
+        # Criar diretório local para salvar as imagens (se não existir)
+        upload_dir = "uploads/profiles"
+        os.makedirs(upload_dir, exist_ok=True)
         
-        logger.info(f"Imagem processada para usuário {user_id}: {filename}")
-        return simulated_url
+        # Salvar arquivo localmente
+        file_path = os.path.join(upload_dir, filename)
+        with open(file_path, 'wb') as f:
+            f.write(image_data)
+        
+        # Retornar URL para servir a imagem
+        # Em desenvolvimento, assumindo que há um servidor servindo /uploads/
+        base_url = "https://barbearia-backend-service-862082955632.southamerica-east1.run.app"
+        image_url = f"{base_url}/uploads/profiles/{filename}"
+        
+        logger.info(f"Imagem salva para usuário {user_id}: {file_path} -> {image_url}")
+        return image_url
         
     except Exception as e:
         logger.error(f"Erro ao processar imagem Base64 para usuário {user_id}: {e}")

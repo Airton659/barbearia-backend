@@ -61,6 +61,7 @@ class UsuarioProfile(UsuarioBase):
     tecnicos_vinculados_ids: Optional[List[str]] = Field(None, description="Lista de IDs dos técnicos vinculados.")
     medico_id: Optional[str] = Field(None, description="ID do usuário médico vinculado ao paciente.")
     endereco: Optional[Endereco] = None
+    profile_image_url: Optional[str] = Field(None, description="URL da imagem de perfil do usuário")
     
     # --- NOVOS CAMPOS ADICIONADOS AQUI ---
     consentimento_lgpd: Optional[bool] = None

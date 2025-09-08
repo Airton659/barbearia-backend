@@ -1,7 +1,10 @@
 # barbearia-backend/main.py (Versão estável com Checklist do Técnico)
 
 from fastapi import FastAPI, Depends, HTTPException, status, Header, Path, Query, UploadFile, File
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from typing import List, Optional, Union, Dict
+import os
 import schemas, crud
 import logging
 from datetime import date, timedelta, datetime
@@ -46,6 +49,16 @@ CLOUD_STORAGE_BUCKET_NAME_GLOBAL = os.getenv("CLOUD_STORAGE_BUCKET_NAME")
 def startup_event():
     """Inicializa a conexão com o Firebase ao iniciar a aplicação."""
     initialize_firebase_app()
+
+# --- Servir imagens de perfil ---
+@app.get("/uploads/profiles/{filename}", tags=["Arquivos"])
+def get_profile_image(filename: str):
+    """Serve as imagens de perfil salvas localmente."""
+    file_path = os.path.join("uploads", "profiles", filename)
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    else:
+        raise HTTPException(status_code=404, detail="Imagem não encontrada")
 
 # --- Endpoint Raiz ---
 @app.get("/")
@@ -1291,7 +1304,7 @@ def update_user_profile(
         
         # Atualizar perfil do usuário
         try:
-            updated_user = crud.atualizar_perfil_usuario(db, current_user.id, negocio_id, update_data)
+            updated_user = crud.atualizar_perfil_usuario(db, current_user.id, negocio_id, update_data, profile_image_url)
         except ValueError as ve:
             # Erros de validação (telefone, CEP, etc.)
             raise HTTPException(
