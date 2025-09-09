@@ -120,8 +120,6 @@ from crud.anamneses import (
 
 # Notificações
 from crud.notifications import (
-    adicionar_fcm_token,
-    remover_fcm_token,
     _send_data_push_to_tokens,
     listar_notificacoes,
     contar_notificacoes_nao_lidas,
@@ -306,8 +304,6 @@ __all__ = [
     'criar_checklist_item',
     
     # Notificações
-    'adicionar_fcm_token',
-    'remover_fcm_token',
     '_send_data_push_to_tokens',
     'listar_notificacoes',
     'contar_notificacoes_nao_lidas',
