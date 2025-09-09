@@ -555,6 +555,11 @@ class RegistroDiarioCreate(BaseModel):
     # Usa o novo modelo de conteúdo simplificado
     conteudo: RegistroDiarioConteudo
 
+class RegistroDiarioUpdate(BaseModel):
+    tipo: Optional[str] = Field(None, description="O tipo do registro (ex: 'sinais_vitais', 'medicacao', 'anotacao').")
+    data_hora: Optional[datetime] = Field(None, description="Timestamp exato do evento, enviado pelo app.")
+    conteudo: Optional[RegistroDiarioConteudo] = Field(None, description="Conteúdo do registro.")
+
 class RegistroDiarioResponse(BaseModel):
     id: str
     negocio_id: str
