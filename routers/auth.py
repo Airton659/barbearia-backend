@@ -129,8 +129,9 @@ async def update_user_profile_json_only(
             )
         
         return {
+            "success": True,
             "message": "Perfil atualizado com sucesso",
-            "usuario": updated_user,
+            "user": updated_user,
             "profile_image_url": None
         }
         
@@ -232,8 +233,9 @@ async def update_user_profile(
             )
         
         return {
+            "success": True,
             "message": "Perfil atualizado com sucesso",
-            "usuario": updated_user,
+            "user": updated_user,
             "profile_image_url": profile_image_url
         }
         
