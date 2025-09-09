@@ -3,7 +3,7 @@
 Router para autenticação e gestão de usuários
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Body
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Body, Form
 from fastapi.security import OAuth2PasswordBearer
 from typing import Optional
 import schemas
@@ -14,6 +14,7 @@ from firebase_admin import firestore, auth
 import logging
 import uuid
 import os
+import json
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 
@@ -142,7 +143,7 @@ async def update_user_profile_json_only(
 
 @router.put("/users/update-profile", response_model=schemas.UserProfileUpdateResponse)
 async def update_user_profile(
-    update_data: schemas.UserProfileUpdate,
+    update_data_json: str = Form(..., alias="update_data"),
     profile_image: Optional[UploadFile] = File(None),
     current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
     db: firestore.client = Depends(get_db)
@@ -151,8 +152,20 @@ async def update_user_profile(
     Atualiza o perfil do usuário com dados pessoais e imagem de perfil.
     """
     try:
+        # Converter string JSON para objeto Pydantic
+        try:
+            update_data_dict = json.loads(update_data_json)
+            update_data = schemas.UserProfileUpdate(**update_data_dict)
+        except json.JSONDecodeError as e:
+            logger.error(f"Erro ao decodificar JSON: {e}")
+            raise HTTPException(status_code=400, detail="JSON inválido no campo update_data")
+        except Exception as e:
+            logger.error(f"Erro ao validar dados do update_data: {e}")
+            raise HTTPException(status_code=400, detail=f"Dados inválidos: {str(e)}")
+
         # LOG CRÍTICO: Rastrear exatamente qual usuário está sendo processado
         logger.critical(f"✅ UPDATE-PROFILE CHAMADO - firebase_uid: {current_user.firebase_uid}, user_id: {current_user.id}, roles: {current_user.roles}")
+        logger.critical(f"✅ DADOS PROCESSADOS: {update_data}")
         
         profile_image_url = None
         
