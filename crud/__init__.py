@@ -23,8 +23,7 @@ from crud.usuarios import (
     buscar_usuario_por_firebase_uid,
     criar_ou_atualizar_usuario,
     adicionar_fcm_token,
-    remover_fcm_token,
-    atualizar_perfil_usuario
+    remover_fcm_token
 )
 
 # Negócios
