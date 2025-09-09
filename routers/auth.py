@@ -3,7 +3,7 @@
 Router para autenticação e gestão de usuários
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Body
 from fastapi.security import OAuth2PasswordBearer
 from typing import Optional
 import schemas
@@ -84,6 +84,61 @@ def registrar_fcm_token(
     """Registra um token FCM para o usuário autenticado."""
     crud.adicionar_fcm_token(db, current_user.firebase_uid, token_data.fcm_token)
     return {"message": "Token FCM registrado com sucesso"}
+
+@router.put("/users/update-profile-json", response_model=schemas.UserProfileUpdateResponse)
+async def update_user_profile_json_only(
+    update_data: schemas.UserProfileUpdate = Body(...),
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db: firestore.client = Depends(get_db)
+):
+    """
+    Atualiza o perfil do usuário apenas com dados JSON (sem imagem).
+    Endpoint temporário para debugging.
+    """
+    try:
+        # LOG CRÍTICO: Rastrear exatamente qual usuário está sendo processado
+        logger.critical(f"✅ UPDATE-PROFILE-JSON CHAMADO - firebase_uid: {current_user.firebase_uid}, user_id: {current_user.id}")
+        logger.critical(f"✅ DADOS RECEBIDOS: {update_data}")
+        
+        # Buscar negocio_id do usuário atual
+        negocio_id = None
+        user_roles = current_user.roles or {}
+        
+        # Pegar o primeiro negócio que não seja 'platform'
+        for biz_id, role in user_roles.items():
+            if biz_id != 'platform':
+                negocio_id = biz_id
+                break
+        
+        if not negocio_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Usuário não está associado a nenhum negócio válido"
+            )
+        
+        # Atualizar perfil usando a função CRUD (sem imagem)
+        updated_user = crud.atualizar_perfil_usuario(
+            db, current_user.id, negocio_id, update_data, None
+        )
+        
+        if not updated_user:
+            raise HTTPException(
+                status_code=404,
+                detail="Não foi possível atualizar o perfil do usuário"
+            )
+        
+        return {
+            "message": "Perfil atualizado com sucesso",
+            "usuario": updated_user,
+            "profile_image_url": None
+        }
+        
+    except ValueError as ve:
+        logger.warning(f"Erro de validação na atualização do perfil: {ve}")
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Erro ao atualizar perfil do usuário {current_user.id}: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
 
 @router.put("/users/update-profile", response_model=schemas.UserProfileUpdateResponse)
 async def update_user_profile(
