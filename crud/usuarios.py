@@ -27,7 +27,7 @@ USER_SENSITIVE_FIELDS = ['nome', 'telefone']
 def buscar_usuario_por_firebase_uid(db: firestore.client, firebase_uid: str) -> Optional[Dict]:
     """Busca um usuário na coleção 'usuarios' pelo seu firebase_uid e descriptografa os dados sensíveis."""
     try:
-        query = db.collection('usuarios').where('firebase_uid', '==', firebase_uid).order_by('created_at')
+        query = db.collection('usuarios').where('firebase_uid', '==', firebase_uid).limit(1)
         docs = list(query.stream())
         
         # LOG CRÍTICO: Verificar se há usuários duplicados
