@@ -4,6 +4,7 @@ FastAPI modular organizada com routers separados por domínio de negócio.
 """
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 import os
@@ -35,6 +36,15 @@ app = FastAPI(
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# --- Configurar CORS ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Em produção, especificar domínios exatos
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # --- Evento de Startup ---
 @app.on_event("startup")
 def startup_event():
@@ -54,6 +64,11 @@ def root():
             "pacientes", "medicos", "interacoes", "notifications", "utilitarios"
         ]
     }
+
+@app.get("/health")
+def health_check():
+    """Endpoint de health check para verificar se a API está funcionando."""
+    return {"status": "healthy", "message": "API está funcionando"}
 
 # --- Servir Arquivos Estáticos ---
 @app.get("/uploads/profiles/{filename}", tags=["Arquivos"])

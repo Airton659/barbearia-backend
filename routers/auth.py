@@ -4,15 +4,18 @@ Router para autenticação e gestão de usuários
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi.security import OAuth2PasswordBearer
 from typing import Optional
 import schemas
 import crud
 from database import get_db
 from auth import get_current_user_firebase, get_optional_current_user_firebase
-from firebase_admin import firestore
+from firebase_admin import firestore, auth
 import logging
 import uuid
 import os
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +24,37 @@ router = APIRouter(tags=["Usuários"])
 @router.post("/users/sync-profile", response_model=schemas.UsuarioProfile)
 def sync_profile(
     user_data: schemas.UsuarioSync,
-    db: firestore.client = Depends(get_db)
+    db: firestore.client = Depends(get_db),
+    token: str = Depends(oauth2_scheme)
 ):
     """
     Sincroniza o perfil do usuário autenticado via Firebase.
     Se é a primeira vez, cria o usuário. Se já existe, retorna os dados atualizados.
     """
     try:
+        # Validar o token Firebase primeiro
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token de autenticação não fornecido."
+            )
+        
+        try:
+            decoded_token = auth.verify_id_token(token)
+            firebase_uid_token = decoded_token['uid']
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Token inválido ou expirado: {e}"
+            )
+        
+        # Verificar se o firebase_uid do token corresponde ao enviado nos dados
+        if firebase_uid_token != user_data.firebase_uid:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Firebase UID no token não corresponde aos dados enviados."
+            )
+        
         # LOG CRÍTICO: Rastrear se este endpoint está sendo chamado
         logger.critical(f"🚨 SYNC-PROFILE CHAMADO - firebase_uid: {user_data.firebase_uid}, email: {user_data.email}")
         
