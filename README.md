@@ -526,6 +526,30 @@ A aplicação foi completamente modularizada com 185+ funções CRUD distribuíd
 
 ---
 
+## **⚠️ CORREÇÕES DE PERMISSÕES (IMPORTANTE para Frontend)**
+
+### **Problema Identificado e Corrigido (Janeiro 2025)**
+Durante a modularização da API, **13 endpoints importantes** tiveram suas permissões alteradas acidentalmente, causando erros 403 para usuários admin:
+
+**Endpoints Afetados:**
+- **POST/PATCH/DELETE** `/pacientes/{id}/exames` 
+- **POST/PATCH/DELETE** `/pacientes/{id}/medicacoes`
+- **POST/PATCH/DELETE** `/pacientes/{id}/checklist-itens`  
+- **POST/DELETE** `/pacientes/{id}/consultas`
+- **POST/PATCH/DELETE** `/pacientes/{id}/orientacoes`
+- **POST** `/pacientes/{id}/diario`
+
+**O que mudou (INCORRETAMENTE):**
+- **ANTES**: `get_paciente_autorizado` → Permitia admin, técnico, enfermeiro, paciente
+- **DURANTE BUG**: `get_current_admin_or_profissional_user` → Só admin/profissional
+- **AGORA (CORRIGIDO)**: `get_paciente_autorizado` → **Volta ao comportamento original**
+
+**Resultado:** Agora admins conseguem novamente acessar todos os endpoints médicos sem erro 403.
+
+**Para o Frontend:** Se você estava recebendo erros 403 inesperados nos endpoints médicos com usuário admin, isso foi corrigido. A API agora funciona exatamente como antes da modularização.
+
+---
+
 ## **📞 Suporte e Documentação**
 
 - **Documentação Interativa**: `/docs` (Swagger UI)

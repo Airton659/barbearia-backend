@@ -10,7 +10,7 @@ import crud
 from database import get_db
 from auth import (
     get_current_user_firebase, get_current_admin_or_profissional_user,
-    get_current_tecnico_user, get_paciente_autorizado,
+    get_current_tecnico_user, get_current_profissional_user, get_paciente_autorizado,
     get_paciente_autorizado_anamnese, validate_negocio_id
 )
 from firebase_admin import firestore
@@ -43,7 +43,7 @@ def obter_ficha_completa(
 def criar_exame_paciente(
     paciente_id: str,
     exame_data: schemas.ExameCreate,
-    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """Cria um novo exame para um paciente."""
@@ -85,7 +85,7 @@ def criar_medicacao_paciente(
     paciente_id: str,
     medicacao_data: schemas.MedicacaoCreate,
     consulta_id: str = Query(..., description="ID da consulta"),
-    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """Cria uma nova medicação para um paciente."""
@@ -96,7 +96,7 @@ def atualizar_medicacao_paciente(
     paciente_id: str,
     medicacao_id: str,
     update_data: schemas.MedicacaoUpdate,
-    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """Atualiza uma medicação na ficha do paciente."""
@@ -109,7 +109,7 @@ def atualizar_medicacao_paciente(
 def deletar_medicacao_paciente(
     paciente_id: str,
     medicacao_id: str,
-    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """Remove uma medicação da ficha do paciente."""
@@ -122,7 +122,7 @@ def criar_item_checklist_paciente(
     paciente_id: str,
     item_data: schemas.ChecklistItemCreate,
     consulta_id: str = Query(..., description="ID da consulta"),
-    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """Cria um novo item do checklist para um paciente."""
@@ -133,7 +133,7 @@ def atualizar_item_checklist_paciente(
     paciente_id: str,
     item_id: str,
     update_data: schemas.ChecklistItemUpdate,
-    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """Atualiza um item do checklist na ficha do paciente."""
@@ -146,7 +146,7 @@ def atualizar_item_checklist_paciente(
 def deletar_item_checklist_paciente(
     paciente_id: str,
     item_id: str,
-    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """Remove um item do checklist da ficha do paciente."""
@@ -172,7 +172,7 @@ def atualizar_consulta_paciente(
 def deletar_consulta_paciente(
     paciente_id: str,
     consulta_id: str,
-    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """Remove uma consulta da ficha do paciente."""
@@ -185,7 +185,7 @@ def atualizar_orientacao_paciente(
     paciente_id: str,
     orientacao_id: str,
     update_data: schemas.OrientacaoUpdate,
-    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """Atualiza uma orientação na ficha do paciente."""
@@ -198,7 +198,7 @@ def atualizar_orientacao_paciente(
 def deletar_orientacao_paciente(
     paciente_id: str,
     orientacao_id: str,
-    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """Remove uma orientação da ficha do paciente."""
@@ -210,7 +210,7 @@ def deletar_orientacao_paciente(
 def criar_consulta_paciente(
     paciente_id: str,
     consulta_data: schemas.ConsultaCreate,
-    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """Cria uma nova consulta para um paciente."""
@@ -241,7 +241,7 @@ def criar_orientacao_paciente(
     paciente_id: str,
     orientacao_data: schemas.OrientacaoCreate,
     consulta_id: str = Query(..., description="ID da consulta"),
-    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """Cria uma nova orientação para um paciente."""
@@ -352,7 +352,7 @@ def listar_checklist_diario_paciente(
     paciente_id: str,
     dia: date = Query(..., description="Data do checklist (YYYY-MM-DD)"),
     negocio_id: str = Depends(validate_negocio_id),
-    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """Lista o checklist diário de um paciente para uma data específica."""
@@ -398,7 +398,7 @@ def atualizar_item_checklist_diario(
 def criar_registro_diario(
     paciente_id: str,
     registro_data: schemas.DiarioTecnicoCreate,
-    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    current_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
     db: firestore.client = Depends(get_db)
 ):
     """Cria um novo registro no diário do técnico."""
@@ -407,7 +407,7 @@ def criar_registro_diario(
 @router.get("/pacientes/{paciente_id}/diario", response_model=List[schemas.DiarioTecnicoResponse])
 def listar_registros_diario(
     paciente_id: str,
-    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """Lista todos os registros do diário do técnico para um paciente."""
@@ -452,7 +452,7 @@ def criar_registro_estruturado(
 def listar_registros_estruturados(
     paciente_id: str,
     negocio_id: str = Depends(validate_negocio_id),
-    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
     """Lista todos os registros estruturados de um paciente."""
