@@ -225,3 +225,81 @@ def admin_listar_clientes_por_negocio(db: firestore.client, negocio_id: str, sta
     except Exception as e:
         logger.error(f"Erro ao listar clientes do negócio {negocio_id}: {e}")
         return []
+
+
+def admin_promover_cliente_para_profissional(db: firestore.client, negocio_id: str, cliente_uid: str) -> Optional[Dict]:
+    """Promove um usuário de 'cliente' para 'profissional' e cria seu perfil profissional."""
+    from .usuarios import buscar_usuario_por_firebase_uid
+    from .profissionais import criar_profissional
+    
+    try:
+        user_doc = buscar_usuario_por_firebase_uid(db, cliente_uid)
+        if not user_doc:
+            logger.warning(f"Tentativa de promover usuário inexistente com UID: {cliente_uid}")
+            return None
+
+        if user_doc.get("roles", {}).get(negocio_id) == 'cliente':
+            # 1. Atualiza a permissão do usuário
+            user_ref = db.collection('usuarios').document(user_doc['id'])
+            user_ref.update({
+                f'roles.{negocio_id}': 'profissional'
+            })
+            
+            # 2. Cria o perfil profissional básico
+            novo_profissional_data = schemas.ProfissionalCreate(
+                negocio_id=negocio_id,
+                usuario_uid=cliente_uid,
+                nome=user_doc.get('nome', 'Profissional sem nome'),
+                especialidades="A definir",
+                ativo=True,
+                fotos={}
+            )
+            criar_profissional(db, novo_profissional_data)
+            
+            logger.info(f"Usuário {user_doc['email']} promovido para profissional no negócio {negocio_id}.")
+            
+            # Retorna os dados atualizados do usuário
+            return buscar_usuario_por_firebase_uid(db, cliente_uid)
+        else:
+            logger.warning(f"Usuário {user_doc.get('email')} não é um cliente deste negócio e não pode ser promovido.")
+            return None
+    except Exception as e:
+        logger.error(f"Erro ao promover cliente {cliente_uid} para profissional: {e}")
+        return None
+
+
+def admin_rebaixar_profissional_para_cliente(db: firestore.client, negocio_id: str, profissional_uid: str) -> Optional[Dict]:
+    """Rebaixa um usuário de 'profissional' para 'cliente' e desativa seu perfil profissional."""
+    from .usuarios import buscar_usuario_por_firebase_uid
+    
+    try:
+        user_doc = buscar_usuario_por_firebase_uid(db, profissional_uid)
+        if not user_doc:
+            logger.warning(f"Tentativa de rebaixar usuário inexistente com UID: {profissional_uid}")
+            return None
+
+        if user_doc.get("roles", {}).get(negocio_id) == 'profissional':
+            # 1. Atualiza a permissão do usuário
+            user_ref = db.collection('usuarios').document(user_doc['id'])
+            user_ref.update({
+                f'roles.{negocio_id}': 'cliente'
+            })
+            
+            # 2. Desativa o perfil profissional
+            profissional_query = db.collection('profissionais') \
+                .where('usuario_uid', '==', profissional_uid) \
+                .where('negocio_id', '==', negocio_id)
+            
+            for doc in profissional_query.stream():
+                doc.reference.update({'ativo': False})
+            
+            logger.info(f"Usuário {user_doc['email']} rebaixado para cliente no negócio {negocio_id}.")
+            
+            # Retorna os dados atualizados do usuário
+            return buscar_usuario_por_firebase_uid(db, profissional_uid)
+        else:
+            logger.warning(f"Usuário {user_doc.get('email')} não é um profissional deste negócio e não pode ser rebaixado.")
+            return None
+    except Exception as e:
+        logger.error(f"Erro ao rebaixar profissional {profissional_uid} para cliente: {e}")
+        return None

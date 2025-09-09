@@ -140,7 +140,7 @@ def atualizar_medico(
     db: firestore.client = Depends(get_db)
 ):
     """(Admin) Atualiza dados de um médico."""
-    result = crud.atualizar_medico(db, medico_id, update_data)
+    result = crud.update_medico(db, current_user.negocio_id, medico_id, update_data)
     if not result:
         raise HTTPException(status_code=404, detail="Médico não encontrado")
     return result
@@ -153,7 +153,7 @@ def deletar_medico(
     db: firestore.client = Depends(get_db)
 ):
     """(Admin) Remove um médico do sistema."""
-    success = crud.deletar_medico(db, medico_id)
+    success = crud.delete_medico(db, current_user.negocio_id, medico_id)
     if not success:
         raise HTTPException(status_code=404, detail="Médico não encontrado")
 

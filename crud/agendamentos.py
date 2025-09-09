@@ -222,3 +222,73 @@ def deletar_bloqueio(db: firestore.client, profissional_id: str, bloqueio_id: st
     except Exception as e:
         logger.error(f"Erro ao remover bloqueio {bloqueio_id}: {e}")
         return False
+
+
+def cancelar_agendamento_pelo_profissional(db: firestore.client, agendamento_id: str, profissional_id: str) -> Optional[Dict]:
+    """Permite a um profissional cancelar um agendamento, atualizando o status."""
+    try:
+        agendamento_ref = db.collection('agendamentos').document(agendamento_id)
+        agendamento_doc = agendamento_ref.get()
+
+        if not agendamento_doc.exists:
+            logger.warning(f"Tentativa de cancelar agendamento inexistente: {agendamento_id}")
+            return None
+        
+        agendamento = agendamento_doc.to_dict()
+        agendamento['id'] = agendamento_doc.id
+
+        if agendamento.get('profissional_id') != profissional_id:
+            logger.warning(f"Profissional {profissional_id} tentou cancelar agendamento {agendamento_id} sem permissão.")
+            return None
+
+        # Atualiza o status
+        agendamento_ref.update({
+            "status": "cancelado_pelo_profissional",
+            "data_cancelamento": firestore.SERVER_TIMESTAMP,
+            "updated_at": firestore.SERVER_TIMESTAMP
+        })
+        
+        logger.info(f"Agendamento {agendamento_id} cancelado pelo profissional {profissional_id}")
+        
+        # Retornar dados atualizados
+        updated_doc = agendamento_ref.get()
+        updated_data = updated_doc.to_dict()
+        updated_data['id'] = updated_doc.id
+        
+        return updated_data
+        
+    except Exception as e:
+        logger.error(f"Erro ao cancelar agendamento pelo profissional: {e}")
+        return None
+
+
+def definir_horarios_trabalho(db: firestore.client, profissional_id: str, horarios: List[schemas.HorarioTrabalho]):
+    """Define os horários de trabalho para um profissional, substituindo os existentes."""
+    try:
+        # Remover horários existentes
+        query = db.collection('horarios_trabalho').where('profissional_id', '==', profissional_id)
+        batch = db.batch()
+        
+        for doc in query.stream():
+            batch.delete(doc.reference)
+        batch.commit()
+        
+        # Adicionar novos horários
+        for horario in horarios:
+            horario_dict = {
+                "profissional_id": profissional_id,
+                "dia_semana": horario.dia_semana,
+                "hora_inicio": horario.hora_inicio.isoformat(),
+                "hora_fim": horario.hora_fim.isoformat()
+            }
+            horario_dict = add_timestamps(horario_dict, is_update=False)
+            
+            doc_ref = db.collection('horarios_trabalho').document()
+            doc_ref.set(horario_dict)
+        
+        logger.info(f"Horários de trabalho definidos para profissional {profissional_id}")
+        return listar_horarios_trabalho(db, profissional_id)
+        
+    except Exception as e:
+        logger.error(f"Erro ao definir horários de trabalho: {e}")
+        raise

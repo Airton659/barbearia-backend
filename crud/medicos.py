@@ -208,3 +208,150 @@ def listar_historico_relatorios_medico(db: firestore.client, medico_id: str, neg
     except Exception as e:
         logger.error(f"Erro ao listar histórico do médico {medico_id}: {e}")
         return []
+
+
+def update_medico(db: firestore.client, negocio_id: str, medico_id: str, update_data: schemas.MedicoUpdate) -> Optional[Dict]:
+    """Atualiza os dados de um médico, garantindo que ele pertence ao negócio correto."""
+    try:
+        medico_ref = db.collection('medicos').document(medico_id)
+        medico_doc = medico_ref.get()
+
+        if not medico_doc.exists or medico_doc.to_dict().get('negocio_id') != negocio_id:
+            logger.warning(f"Tentativa de atualização do médico {medico_id} por admin não autorizado ou médico inexistente.")
+            return None
+
+        update_dict = update_data.model_dump(exclude_unset=True)
+        if not update_dict:
+            data = medico_doc.to_dict()
+            data['id'] = medico_doc.id
+            return data
+
+        update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
+        medico_ref.update(update_dict)
+        logger.info(f"Médico {medico_id} atualizado.")
+
+        updated_doc = medico_ref.get().to_dict()
+        updated_doc['id'] = medico_id
+        return updated_doc
+    except Exception as e:
+        logger.error(f"Erro ao atualizar médico {medico_id}: {e}")
+        return None
+
+
+def delete_medico(db: firestore.client, negocio_id: str, medico_id: str) -> bool:
+    """Deleta um médico, garantindo que ele pertence ao negócio correto."""
+    try:
+        medico_ref = db.collection('medicos').document(medico_id)
+        medico_doc = medico_ref.get()
+
+        if not medico_doc.exists or medico_doc.to_dict().get('negocio_id') != negocio_id:
+            logger.warning(f"Tentativa de exclusão do médico {medico_id} por admin não autorizado ou médico inexistente.")
+            return False
+
+        medico_ref.delete()
+        logger.info(f"Médico {medico_id} deletado.")
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao deletar médico {medico_id}: {e}")
+        return False
+
+
+def adicionar_foto_relatorio(db: firestore.client, relatorio_id: str, foto_url: str) -> Optional[Dict]:
+    """Adiciona a URL de uma foto ao array 'fotos' de um relatório médico usando operação atômica."""
+    try:
+        relatorio_ref = db.collection('relatorios_medicos').document(relatorio_id)
+        snapshot = relatorio_ref.get()
+        
+        if not snapshot.exists:
+            logger.error(f"Relatório {relatorio_id} não encontrado.")
+            return None
+
+        # Operação atômica no servidor: evita sobrescrita do array e é segura em concorrência
+        relatorio_ref.update({"fotos": firestore.ArrayUnion([foto_url])})
+
+        # Retorna documento atualizado
+        updated = relatorio_ref.get()
+        data = updated.to_dict() or {}
+        data["id"] = updated.id
+        
+        logger.info(f"Foto adicionada ao relatório {relatorio_id}")
+        return data
+        
+    except Exception as e:
+        logger.error(f"Erro ao adicionar foto ao relatório {relatorio_id}: {e}")
+        raise
+
+
+def aprovar_relatorio(db: firestore.client, relatorio_id: str, medico_id: str) -> Optional[Dict]:
+    """Muda o status de um relatório para 'aprovado'."""
+    try:
+        relatorio_ref = db.collection('relatorios_medicos').document(relatorio_id)
+        relatorio_doc = relatorio_ref.get()
+
+        if not relatorio_doc.exists:
+            logger.warning(f"Relatório {relatorio_id} não encontrado")
+            return None
+        
+        relatorio_data = relatorio_doc.to_dict()
+        
+        # Verificar se o médico tem permissão (pode ser o médico atribuído ou do mesmo negócio)
+        medico_responsavel = relatorio_data.get('medico_responsavel_id')
+        if medico_responsavel and medico_responsavel != medico_id:
+            logger.warning(f"Médico {medico_id} tentou aprovar relatório {relatorio_id} sem permissão")
+            return None
+
+        relatorio_ref.update({
+            "status": "aprovado",
+            "data_revisao": firestore.SERVER_TIMESTAMP,
+            "medico_responsavel_id": medico_id,
+            "updated_at": firestore.SERVER_TIMESTAMP
+        })
+        
+        updated_doc = relatorio_ref.get()
+        updated_data = updated_doc.to_dict()
+        updated_data['id'] = updated_doc.id
+        
+        logger.info(f"Relatório {relatorio_id} aprovado pelo médico {medico_id}")
+        return updated_data
+        
+    except Exception as e:
+        logger.error(f"Erro ao aprovar relatório {relatorio_id}: {e}")
+        return None
+
+
+def recusar_relatorio(db: firestore.client, relatorio_id: str, medico_id: str, motivo: str) -> Optional[Dict]:
+    """Muda o status de um relatório para 'recusado' e adiciona o motivo."""
+    try:
+        relatorio_ref = db.collection('relatorios_medicos').document(relatorio_id)
+        relatorio_doc = relatorio_ref.get()
+
+        if not relatorio_doc.exists:
+            logger.warning(f"Relatório {relatorio_id} não encontrado")
+            return None
+        
+        relatorio_data = relatorio_doc.to_dict()
+        
+        # Verificar se o médico tem permissão
+        medico_responsavel = relatorio_data.get('medico_responsavel_id')
+        if medico_responsavel and medico_responsavel != medico_id:
+            logger.warning(f"Médico {medico_id} tentou recusar relatório {relatorio_id} sem permissão")
+            return None
+
+        relatorio_ref.update({
+            "status": "recusado",
+            "data_revisao": firestore.SERVER_TIMESTAMP,
+            "motivo_recusa": motivo,
+            "medico_responsavel_id": medico_id,
+            "updated_at": firestore.SERVER_TIMESTAMP
+        })
+        
+        updated_doc = relatorio_ref.get()
+        updated_data = updated_doc.to_dict()
+        updated_data['id'] = updated_doc.id
+        
+        logger.info(f"Relatório {relatorio_id} recusado pelo médico {medico_id}")
+        return updated_data
+        
+    except Exception as e:
+        logger.error(f"Erro ao recusar relatório {relatorio_id}: {e}")
+        return None

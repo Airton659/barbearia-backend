@@ -195,3 +195,46 @@ def atualizar_consentimento_lgpd(db: firestore.client, user_id: str, consent_dat
     except Exception as e:
         logger.error(f"Erro ao atualizar consentimento LGPD do usuário {user_id}: {e}")
         return None
+
+
+def get_ficha_completa_paciente(db: firestore.client, paciente_id: str) -> Dict:
+    """Retorna a ficha clínica completa do paciente."""
+    from .anamneses import listar_consultas, listar_medicacoes, listar_checklist, listar_orientacoes
+    
+    try:
+        # Buscar todas as consultas do paciente
+        consultas = listar_consultas(db, paciente_id)
+        
+        # Se não há consultas, retornar estrutura vazia
+        if not consultas:
+            return {
+                "consultas": [],
+                "medicacoes": [],
+                "checklist": [],
+                "orientacoes": []
+            }
+        
+        # Usar a consulta mais recente como padrão
+        consulta_mais_recente = max(consultas, key=lambda x: x.get('data_consulta', ''))
+        consulta_id = consulta_mais_recente.get('id')
+        
+        # Buscar dados relacionados à consulta mais recente
+        medicacoes = listar_medicacoes(db, paciente_id, consulta_id) if consulta_id else []
+        checklist = listar_checklist(db, paciente_id, consulta_id) if consulta_id else []
+        orientacoes = listar_orientacoes(db, paciente_id, consulta_id) if consulta_id else []
+        
+        return {
+            "consultas": consultas,
+            "medicacoes": medicacoes,
+            "checklist": checklist,
+            "orientacoes": orientacoes
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro ao buscar ficha completa do paciente {paciente_id}: {e}")
+        return {
+            "consultas": [],
+            "medicacoes": [],
+            "checklist": [],
+            "orientacoes": []
+        }

@@ -237,3 +237,121 @@ def listar_checklist(db: firestore.client, paciente_id: str, consulta_id: str) -
     except Exception as e:
         logger.error(f"Erro ao listar checklist da consulta {consulta_id}: {e}")
         return []
+
+
+def criar_exame(db: firestore.client, exame_data: 'schemas.ExameCreate') -> Dict:
+    """Cria um novo exame."""
+    try:
+        exame_dict = exame_data.model_dump()
+        exame_dict['created_at'] = firestore.SERVER_TIMESTAMP
+        exame_dict['updated_at'] = firestore.SERVER_TIMESTAMP
+        
+        doc_ref = db.collection('exames').document()
+        doc_ref.set(exame_dict)
+        
+        # Retornar exame criado
+        exame_dict['id'] = doc_ref.id
+        logger.info(f"Exame criado com ID: {doc_ref.id}")
+        return exame_dict
+        
+    except Exception as e:
+        logger.error(f"Erro ao criar exame: {e}")
+        raise
+
+
+def update_exame(db: firestore.client, paciente_id: str, exame_id: str, update_data: 'schemas.ExameUpdate', current_user, negocio_id: str) -> Optional[Dict]:
+    """Atualiza um exame específico."""
+    try:
+        doc_ref = db.collection('exames').document(exame_id)
+        doc = doc_ref.get()
+        
+        if not doc.exists:
+            return None
+        
+        # Verificar se o exame pertence ao paciente
+        exame_data = doc.to_dict()
+        if exame_data.get('paciente_id') != paciente_id:
+            return None
+        
+        # Atualizar
+        update_dict = update_data.model_dump(exclude_unset=True)
+        update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
+        
+        doc_ref.update(update_dict)
+        
+        # Retornar dados atualizados
+        updated_doc = doc_ref.get()
+        updated_data = updated_doc.to_dict()
+        updated_data['id'] = updated_doc.id
+        
+        logger.info(f"Exame {exame_id} atualizado")
+        return updated_data
+        
+    except Exception as e:
+        logger.error(f"Erro ao atualizar exame {exame_id}: {e}")
+        return None
+
+
+def delete_exame(db: firestore.client, paciente_id: str, exame_id: str) -> bool:
+    """Remove um exame."""
+    try:
+        doc_ref = db.collection('exames').document(exame_id)
+        doc = doc_ref.get()
+        
+        if not doc.exists:
+            return False
+        
+        # Verificar se o exame pertence ao paciente
+        exame_data = doc.to_dict()
+        if exame_data.get('paciente_id') != paciente_id:
+            return False
+        
+        doc_ref.delete()
+        logger.info(f"Exame {exame_id} removido")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Erro ao deletar exame {exame_id}: {e}")
+        return False
+
+
+def criar_medicacao(db: firestore.client, medicacao_data: 'schemas.MedicacaoCreate', consulta_id: str) -> Dict:
+    """Cria uma nova medicação."""
+    try:
+        medicacao_dict = medicacao_data.model_dump()
+        medicacao_dict['consulta_id'] = consulta_id
+        medicacao_dict['created_at'] = firestore.SERVER_TIMESTAMP
+        medicacao_dict['updated_at'] = firestore.SERVER_TIMESTAMP
+        
+        doc_ref = db.collection('medicacoes').document()
+        doc_ref.set(medicacao_dict)
+        
+        # Retornar medicação criada
+        medicacao_dict['id'] = doc_ref.id
+        logger.info(f"Medicação criada com ID: {doc_ref.id}")
+        return medicacao_dict
+        
+    except Exception as e:
+        logger.error(f"Erro ao criar medicação: {e}")
+        raise
+
+
+def criar_checklist_item(db: firestore.client, item_data: 'schemas.ChecklistItemCreate', consulta_id: str) -> Dict:
+    """Cria um novo item do checklist."""
+    try:
+        item_dict = item_data.model_dump()
+        item_dict['consulta_id'] = consulta_id
+        item_dict['created_at'] = firestore.SERVER_TIMESTAMP
+        item_dict['updated_at'] = firestore.SERVER_TIMESTAMP
+        
+        doc_ref = db.collection('checklist').document()
+        doc_ref.set(item_dict)
+        
+        # Retornar item criado
+        item_dict['id'] = doc_ref.id
+        logger.info(f"Item do checklist criado com ID: {doc_ref.id}")
+        return item_dict
+        
+    except Exception as e:
+        logger.error(f"Erro ao criar item do checklist: {e}")
+        raise
