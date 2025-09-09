@@ -374,6 +374,16 @@ class MedicacaoUpdate(BaseModel):
     dosagem: Optional[str] = None
     instrucoes: Optional[str] = None
 
+class PrescricaoCreate(BaseModel):
+    negocio_id: str
+    paciente_id: str
+    nome_medicamento: str
+    dosagem: str
+    instrucoes: str
+    frequencia: Optional[str] = Field(None, description="Frequência de uso do medicamento")
+    duracao: Optional[str] = Field(None, description="Duração do tratamento")
+    observacoes: Optional[str] = Field(None, description="Observações adicionais")
+
 class ChecklistItemBase(BaseModel):
     negocio_id: str
     paciente_id: str
