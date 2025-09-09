@@ -1,4 +1,4 @@
-# crud/pacientes.py
+# back/barbearia-backend/crud/pacientes.py
 """
 CRUD para gestão de pacientes
 """
@@ -13,6 +13,7 @@ from crud.utils import (
     decrypt_endereco_fields,
     add_timestamps
 )
+from crypto_utils import decrypt_data
 
 logger = logging.getLogger(__name__)
 
@@ -21,29 +22,45 @@ USER_SENSITIVE_FIELDS = ['nome', 'telefone']
 
 
 def listar_pacientes_por_profissional_ou_tecnico(db: firestore.client, negocio_id: str, usuario_id: str, role: str) -> List[Dict]:
-    """Lista pacientes acessíveis por um profissional ou técnico."""
+    """
+    Lista todos os pacientes ATIVOS.
+    - Se a role for 'admin', retorna TODOS os pacientes do negócio.
+    - Se a role for 'profissional' ou 'tecnico', retorna apenas os pacientes vinculados.
+    """
     pacientes = []
     try:
-        # Buscar usuários com role 'cliente' no negócio
         query = db.collection('usuarios').where(f'roles.{negocio_id}', '==', 'cliente')
-        
+
+        # Filtra por vínculo, se não for admin
+        if role == 'admin':
+            # Se for admin, não aplica filtro de vínculo, pega todos os clientes do negócio.
+            pass
+        elif role == 'profissional':
+            query = query.where('enfermeiro_id', '==', usuario_id)
+        elif role == 'tecnico':
+            query = query.where('tecnicos_ids', 'array_contains', usuario_id)
+        else:
+            # Se a role não for nenhuma das esperadas, retorna lista vazia.
+            return []
+
         for doc in query.stream():
             paciente_data = doc.to_dict()
-            paciente_data['id'] = doc.id
-            
-            # Verificar se está ativo no negócio
-            status_por_negocio = paciente_data.get('status_por_negocio', {})
-            user_status = status_por_negocio.get(negocio_id, 'ativo')
-            
-            if user_status == 'ativo':
+            status_no_negocio = paciente_data.get('status_por_negocio', {}).get(negocio_id, 'ativo')
+
+            if status_no_negocio == 'ativo':
+                paciente_data['id'] = doc.id
+                
+                # CORREÇÃO CRÍTICA: Garantir que o firebase_uid esteja presente na resposta
+                paciente_data['firebase_uid'] = paciente_data.get('firebase_uid')
+
                 # Descriptografar dados sensíveis
                 paciente_data = decrypt_user_sensitive_fields(paciente_data, USER_SENSITIVE_FIELDS)
-                
+
                 if 'endereco' in paciente_data and paciente_data['endereco']:
                     paciente_data['endereco'] = decrypt_endereco_fields(paciente_data['endereco'])
-                
+
                 pacientes.append(paciente_data)
-        
+
         logger.info(f"Retornando {len(pacientes)} pacientes para {role} {usuario_id} no negócio {negocio_id}")
         return pacientes
     except Exception as e:
@@ -61,39 +78,18 @@ def atualizar_dados_pessoais_paciente(db: firestore.client, paciente_id: str, da
             logger.warning(f"Paciente {paciente_id} não encontrado")
             return None
         
-        # Preparar dados para atualização
-        update_dict = {}
-        
-        if dados_pessoais.data_nascimento is not None:
-            update_dict['data_nascimento'] = dados_pessoais.data_nascimento
-        
-        if dados_pessoais.sexo is not None:
-            update_dict['sexo'] = dados_pessoais.sexo
-        
-        if dados_pessoais.estado_civil is not None:
-            update_dict['estado_civil'] = dados_pessoais.estado_civil
-        
-        if dados_pessoais.profissao is not None:
-            update_dict['profissao'] = dados_pessoais.profissao
-        
-        if dados_pessoais.escolaridade is not None:
-            update_dict['escolaridade'] = dados_pessoais.escolaridade
-        
-        if dados_pessoais.renda_familiar is not None:
-            update_dict['renda_familiar'] = dados_pessoais.renda_familiar
-        
-        if dados_pessoais.pessoas_na_casa is not None:
-            update_dict['pessoas_na_casa'] = dados_pessoais.pessoas_na_casa
-        
-        if dados_pessoais.tem_plano_saude is not None:
-            update_dict['tem_plano_saude'] = dados_pessoais.tem_plano_saude
-        
-        if dados_pessoais.plano_saude is not None:
-            update_dict['plano_saude'] = dados_pessoais.plano_saude
-        
-        if dados_pessoais.contato_emergencia is not None:
-            update_dict['contato_emergencia'] = dados_pessoais.contato_emergencia.model_dump()
-        
+        # Preparar dados para atualização (apenas campos que não são None)
+        update_dict = dados_pessoais.model_dump(exclude_unset=True)
+
+        if not update_dict:
+            # Se nada foi enviado, apenas retorna os dados atuais
+            updated_data = user_doc.to_dict()
+            updated_data['id'] = user_doc.id
+            updated_data = decrypt_user_sensitive_fields(updated_data, USER_SENSITIVE_FIELDS)
+            if 'endereco' in updated_data and updated_data['endereco']:
+                updated_data['endereco'] = decrypt_endereco_fields(updated_data['endereco'])
+            return updated_data
+            
         # Adicionar timestamp
         update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
         
@@ -170,7 +166,6 @@ def atualizar_consentimento_lgpd(db: firestore.client, user_id: str, consent_dat
         
         # Preparar dados de consentimento
         consentimento_dict = consent_data.model_dump()
-        consentimento_dict['data_consentimento'] = firestore.SERVER_TIMESTAMP
         
         # Atualizar
         user_ref.update({
