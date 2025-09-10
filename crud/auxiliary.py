@@ -151,7 +151,7 @@ def vincular_paciente_enfermeiro(db: firestore.client, negocio_id: str, paciente
             return None
         
         update_data = {
-            f'vinculos.{negocio_id}.enfermeiro_id': enfermeiro_id,
+            'enfermeiro_id': enfermeiro_id,
             'updated_at': firestore.SERVER_TIMESTAMP
         }
         
@@ -180,7 +180,7 @@ def desvincular_paciente_enfermeiro(db: firestore.client, negocio_id: str, pacie
             return None
         
         update_data = {
-            f'vinculos.{negocio_id}.enfermeiro_id': None,
+            'enfermeiro_id': None,
             'updated_at': firestore.SERVER_TIMESTAMP
         }
         
@@ -209,7 +209,7 @@ def vincular_paciente_medico(db: firestore.client, negocio_id: str, paciente_id:
             return None
         
         update_data = {
-            f'vinculos.{negocio_id}.medico_id': medico_id,
+            'medico_id': medico_id,
             'updated_at': firestore.SERVER_TIMESTAMP
         }
         
@@ -238,7 +238,7 @@ def vincular_tecnicos_paciente(db: firestore.client, paciente_id: str, tecnicos_
             return None
         
         update_data = {
-            'tecnicos_vinculados': tecnicos_ids,
+            'tecnicos_ids': tecnicos_ids,
             'updated_at': firestore.SERVER_TIMESTAMP
         }
         

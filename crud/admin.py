@@ -109,6 +109,7 @@ def admin_listar_usuarios_por_negocio(db: firestore.client, negocio_id: str, sta
                             perfil_enfermeiro = buscar_profissional_por_uid(db, negocio_id, firebase_uid_enfermeiro)
                             usuario_data['enfermeiro_vinculado_id'] = perfil_enfermeiro.get('id') if perfil_enfermeiro else None
                     usuario_data['tecnicos_vinculados_ids'] = usuario_data.get('tecnicos_ids', [])
+                    usuario_data['medico_id'] = usuario_data.get('medico_id')
 
                 usuarios.append(usuario_data)
 
