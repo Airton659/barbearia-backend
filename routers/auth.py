@@ -3,7 +3,7 @@
 Router para autenticação e gestão de usuários
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Body, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Body, Form, Request
 from fastapi.security import OAuth2PasswordBearer
 from typing import Optional
 import schemas
@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Usuários"])
 
 @router.post("/users/sync-profile", response_model=schemas.UsuarioProfile)
-def sync_profile(
-    user_data: schemas.UsuarioSync,
+async def sync_profile(
+    request: Request,
     db: firestore.client = Depends(get_db),
     token: str = Depends(oauth2_scheme)
 ):
@@ -32,6 +32,23 @@ def sync_profile(
     Sincroniza o perfil do usuário autenticado via Firebase.
     Se é a primeira vez, cria o usuário. Se já existe, retorna os dados atualizados.
     """
+    # DEBUG: Log dos dados RAW da request
+    raw_body = await request.body()
+    import json
+    try:
+        raw_data = json.loads(raw_body)
+        logger.critical(f"🔍 DEBUG SYNC-PROFILE - RAW request body: {raw_data}")
+    except:
+        logger.critical(f"🔍 DEBUG SYNC-PROFILE - RAW body (não JSON): {raw_body}")
+    
+    # Validar com Pydantic
+    try:
+        user_data = schemas.UsuarioSync.parse_obj(raw_data)
+        logger.critical(f"🔍 DEBUG SYNC-PROFILE - user_data APÓS Pydantic: {user_data.dict()}")
+    except Exception as e:
+        logger.critical(f"🔍 DEBUG SYNC-PROFILE - ERRO Pydantic: {e}")
+        raise HTTPException(status_code=400, detail=f"Dados inválidos: {e}")
+    
     try:
         # Validar o token Firebase primeiro
         if not token:
