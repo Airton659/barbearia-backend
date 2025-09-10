@@ -350,7 +350,7 @@ def atualizar_endereco_paciente(
 @router.get("/pacientes/{paciente_id}/checklist-diario", response_model=List[schemas.ChecklistItemDiarioResponse])
 def listar_checklist_diario_paciente(
     paciente_id: str,
-    dia: date = Query(..., description="Data do checklist (YYYY-MM-DD)"),
+    data: date = Query(..., description="Data do checklist (formato: YYYY-MM-DD)."),
     negocio_id: str = Depends(validate_negocio_id),
     current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
@@ -358,7 +358,7 @@ def listar_checklist_diario_paciente(
     """Lista o checklist diário de um paciente para uma data específica."""
     try:
         # Usar função do CRUD que já implementa a replicação de itens
-        checklist = crud.listar_checklist_diario_com_replicacao(db, paciente_id, dia, negocio_id)
+        checklist = crud.listar_checklist_diario_com_replicacao(db, paciente_id, data, negocio_id)
         return checklist
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao carregar checklist diário: {str(e)}")

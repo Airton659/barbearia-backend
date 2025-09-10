@@ -208,17 +208,17 @@ def atualizar_item_checklist_diario(db: firestore.client, paciente_id: str, data
         return None
 
 
-def listar_checklist_diario_com_replicacao(db: firestore.client, paciente_id: str, dia: date, negocio_id: str) -> List[Dict]:
+def listar_checklist_diario_com_replicacao(db: firestore.client, paciente_id: str, data: date, negocio_id: str) -> List[Dict]:
     """Lista checklist diário com replicação de itens do plano ativo."""
     try:
         # Primeiro, buscar checklist existente para o dia
-        checklist_existente = listar_checklist_diario(db, paciente_id, dia, negocio_id)
+        checklist_existente = listar_checklist_diario(db, paciente_id, data, negocio_id)
         
         if checklist_existente:
             return checklist_existente
         
         # Se não existe, buscar do plano ativo e replicar
-        checklist_plano = get_checklist_diario_plano_ativo(db, paciente_id, dia, negocio_id)
+        checklist_plano = get_checklist_diario_plano_ativo(db, paciente_id, data, negocio_id)
         
         if checklist_plano:
             checklist_replicado = []
@@ -227,7 +227,7 @@ def listar_checklist_diario_com_replicacao(db: firestore.client, paciente_id: st
                 item_dict = {
                     'paciente_id': paciente_id,
                     'negocio_id': negocio_id,
-                    'data': dia.isoformat(),
+                    'data': data.isoformat(),
                     'descricao': item_plano.get('descricao'),
                     'horario': item_plano.get('horario'),
                     'concluido': False,
@@ -243,7 +243,7 @@ def listar_checklist_diario_com_replicacao(db: firestore.client, paciente_id: st
                 
                 checklist_replicado.append(item_dict)
             
-            logger.info(f"Checklist diário replicado para {dia}: {len(checklist_replicado)} itens")
+            logger.info(f"Checklist diário replicado para {data}: {len(checklist_replicado)} itens")
             return checklist_replicado
         
         return []

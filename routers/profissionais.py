@@ -216,37 +216,21 @@ def remover_bloqueio_horario(
 @self_management_router.get("/pacientes", response_model=List[schemas.PacienteProfile])
 def listar_meus_pacientes(
     negocio_id: str = Depends(validate_negocio_id),
-    current_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
     db: firestore.client = Depends(get_db)
 ):
-    """Lista todos os pacientes do profissional autenticado."""
-    # Verificar role do usuário
-    user_roles = current_user.roles or {}
-    user_role = user_roles.get(negocio_id, 'cliente')
+    """
+    (Gestor, Enfermeiro ou Técnico)
+    Lista os pacientes. Para Gestores, retorna TODOS os pacientes do negócio.
+    Para Enfermeiros/Técnicos, retorna apenas os pacientes vinculados.
+    """
+    user_role = current_user.roles.get(negocio_id)
     
-    if user_role not in ['profissional', 'admin', 'medico', 'enfermeiro', 'tecnico']:
+    if user_role not in ["profissional", "tecnico", "admin"]:
         raise HTTPException(
-            status_code=403,
-            detail="Apenas profissionais de saúde podem acessar a lista de pacientes"
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado: seu perfil não tem permissão para visualizar pacientes."
         )
-    
-    # Listar pacientes
+
     pacientes = crud.listar_pacientes_por_profissional_ou_tecnico(db, negocio_id, current_user.id, user_role)
-    
-    # Converter para PacienteProfile se necessário
-    pacientes_profile = []
-    for paciente in pacientes:
-        paciente_profile = schemas.PacienteProfile(
-            id=paciente.get('id'),
-            nome=paciente.get('nome'),
-            email=paciente.get('email'),
-            telefone=paciente.get('telefone'),
-            data_nascimento=paciente.get('data_nascimento'),
-            sexo=paciente.get('sexo'),
-            endereco=paciente.get('endereco'),
-            created_at=paciente.get('created_at'),
-            updated_at=paciente.get('updated_at')
-        )
-        pacientes_profile.append(paciente_profile)
-    
-    return pacientes_profile
+    return pacientes
