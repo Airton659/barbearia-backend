@@ -1,0 +1,3301 @@
+Relatório de Comparação de Funções:\n\nFunções idênticas:\nlistar_agendamentos_por_profissional, processar_imagem_base64, check_admin_status, listar_agendamentos_por_cliente, delete_medico, atualizar_perfil_usuario, cancelar_agendamento, admin_listar_negocios, criar_agendamento, criar_postagem, transaction_sync_user, criar_ou_atualizar_usuario, admin_listar_usuarios_por_negocio, listar_postagens_por_profissional, admin_set_usuario_status, admin_criar_negocio, admin_criar_paciente, cancelar_agendamento_pelo_profissional, admin_atualizar_role_usuario, buscar_usuario_por_firebase_uid\n\nFunções divergentes:\n- admin_promover_cliente_para_profissional:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,4 +1,6 @@
+-"\n    Promove um usuário de 'cliente' para 'profissional' e cria seu perfil profissional.\n    "
++"Promove um usuário de 'cliente' para 'profissional' e cria seu perfil profissional."
++from .usuarios import buscar_usuario_por_firebase_uid
++from .profissionais import criar_profissional
+ try:
+     user_doc = buscar_usuario_por_firebase_uid(db, cliente_uid)
+     if not user_doc:
+\n- delete_medicacao:\n  - Body is different:\n--- backup
++++ crud
+@@ -1 +1,15 @@
+-return _delete_subcollection_item(db, paciente_id, 'medicacoes', medicacao_id)+'Remove uma medicação.'
++try:
++    medicacao_ref = db.collection('medicacoes').document(medicacao_id)
++    medicacao_doc = medicacao_ref.get()
++    if not medicacao_doc.exists:
++        return False
++    medicacao_data = medicacao_doc.to_dict()
++    if medicacao_data.get('paciente_id') != paciente_id:
++        return False
++    medicacao_ref.delete()
++    logger.info(f'Medicação {medicacao_id} removida')
++    return True
++except Exception as e:
++    logger.error(f'Erro ao deletar medicação: {e}')
++    return False\n- listar_horarios_trabalho:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,8 +1,13 @@
+ 'Lista os horários de trabalho de um profissional.'
+ horarios = []
+-horarios_ref = db.collection('profissionais').document(profissional_id).collection('horarios_trabalho')
+-for doc in horarios_ref.stream():
+-    horario_data = doc.to_dict()
+-    horario_data['id'] = doc.id
+-    horarios.append(horario_data)
+-return horarios+try:
++    query = db.collection('horarios_trabalho').where('profissional_id', '==', profissional_id)
++    for doc in query.stream():
++        horario_data = doc.to_dict()
++        horario_data['id'] = doc.id
++        horarios.append(horario_data)
++    logger.info(f'Retornando {len(horarios)} horários de trabalho para o profissional {profissional_id}')
++    return horarios
++except Exception as e:
++    logger.error(f'Erro ao listar horários de trabalho do profissional {profissional_id}: {e}')
++    return []\n- adicionar_item_checklist:\n  - Parameters are different. Backup: ['db', 'item_data', 'consulta_id'], Crud: ['db', 'paciente_id', 'item_data']\n  - Body is different:\n--- backup
++++ crud
+@@ -1,9 +1,13 @@
+-'Salva um novo item de checklist na subcoleção de um paciente, vinculando-o a uma consulta.'
+-item_dict = item_data.model_dump()
+-item_dict['data_criacao'] = datetime.utcnow()
+-item_dict['consulta_id'] = consulta_id
+-paciente_ref = db.collection('usuarios').document(item_data.paciente_id)
+-doc_ref = paciente_ref.collection('checklist').document()
+-doc_ref.set(item_dict)
+-item_dict['id'] = doc_ref.id
+-return item_dict+'Adiciona um novo item ao checklist de um paciente.'
++try:
++    item_dict = item_data.model_dump()
++    item_dict['paciente_id'] = paciente_id
++    item_dict = add_timestamps(item_dict, is_update=False)
++    doc_ref = db.collection('checklist').document()
++    doc_ref.set(item_dict)
++    item_dict['id'] = doc_ref.id
++    logger.info(f'Item adicionado ao checklist do paciente {paciente_id}')
++    return item_dict
++except Exception as e:
++    logger.error(f'Erro ao adicionar item ao checklist: {e}')
++    raise\n- submeter_respostas_pesquisa:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,17 +1,19 @@
+-'Salva as respostas de um paciente para uma pesquisa e atualiza o status.'
+-pesquisa_ref = db.collection('pesquisas_enviadas').document(pesquisa_enviada_id)
+-pesquisa_doc = pesquisa_ref.get()
+-if not pesquisa_doc.exists or pesquisa_doc.to_dict().get('paciente_id') != paciente_id:
+-    logger.error(f'Paciente {paciente_id} tentou responder pesquisa {pesquisa_enviada_id} que não lhe pertence ou não existe.')
+-    return None
+-if pesquisa_doc.to_dict().get('status') == 'respondida':
+-    logger.warning(f'Paciente {paciente_id} tentou responder a pesquisa {pesquisa_enviada_id} novamente.')
+-    data = pesquisa_doc.to_dict()
+-    data['id'] = pesquisa_doc.id
+-    return data
+-update_dict = {'status': 'respondida', 'data_resposta': datetime.utcnow(), 'respostas': [item.model_dump() for item in respostas_data.respostas]}
+-pesquisa_ref.update(update_dict)
+-updated_doc = pesquisa_ref.get()
+-data = updated_doc.to_dict()
+-data['id'] = updated_doc.id
+-return data+'Submete as respostas de uma pesquisa de satisfação.'
++try:
++    pesquisa_ref = db.collection('pesquisas_enviadas').document(pesquisa_enviada_id)
++    pesquisa_doc = pesquisa_ref.get()
++    if not pesquisa_doc.exists:
++        return None
++    pesquisa_data = pesquisa_doc.to_dict()
++    if pesquisa_data.get('paciente_id') != paciente_id:
++        return None
++    update_data = {'respostas': respostas_data.respostas, 'data_resposta': firestore.SERVER_TIMESTAMP, 'respondida': True, 'status': 'respondida', 'updated_at': firestore.SERVER_TIMESTAMP}
++    pesquisa_ref.update(update_data)
++    logger.info(f'Respostas submetidas para pesquisa {pesquisa_enviada_id}')
++    updated_doc = pesquisa_ref.get()
++    updated_data = updated_doc.to_dict()
++    updated_data['id'] = updated_doc.id
++    return updated_data
++except Exception as e:
++    logger.error(f'Erro ao submeter respostas da pesquisa: {e}')
++    return None\n- atualizar_suporte_psicologico:\n  - Parameters are different. Backup: ['db', 'paciente_id', 'suporte_id', 'update_data'], Crud: ['db', 'suporte_id', 'update_data', 'psicologo_id']\n  - Body is different:\n--- backup
++++ crud
+@@ -1,26 +1,20 @@
+-'Atualiza um recurso de suporte psicológico existente, criptografando novos dados sensíveis.'
+-suporte_ref = db.collection('usuarios').document(paciente_id).collection('suporte_psicologico').document(suporte_id)
+-if not suporte_ref.get().exists:
+-    return None
+-update_dict = update_data.model_dump(exclude_unset=True)
+-sensitive_fields = ['titulo', 'conteudo']
+-if 'conteudo' in update_dict:
+-    update_dict['tipo'] = _detectar_tipo_conteudo(update_dict['conteudo'])
+-for field in sensitive_fields:
+-    if field in update_dict and update_dict[field] is not None:
+-        if isinstance(update_dict[field], str) and update_dict[field].strip():
+-            update_dict[field] = encrypt_data(update_dict[field])
+-update_dict['data_atualizacao'] = firestore.SERVER_TIMESTAMP
+-suporte_ref.update(update_dict)
+-updated_doc = suporte_ref.get()
+-data = updated_doc.to_dict()
+-data['id'] = updated_doc.id
+-for field in sensitive_fields:
+-    if field in data and data[field] is not None:
+-        if isinstance(data[field], str) and data[field].strip():
+-            try:
+-                data[field] = decrypt_data(data[field])
+-            except Exception as e:
+-                logger.error(f'Erro ao descriptografar campo {field} do suporte psicológico {suporte_id}: {e}')
+-                data[field] = '[Erro na descriptografia]'
+-return data+'Atualiza um registro de suporte psicológico.'
++try:
++    suporte_ref = db.collection('suporte_psicologico').document(suporte_id)
++    suporte_doc = suporte_ref.get()
++    if not suporte_doc.exists:
++        return None
++    suporte_data = suporte_doc.to_dict()
++    if suporte_data.get('psicologo_id') != psicologo_id:
++        return None
++    update_dict = update_data.model_dump(exclude_unset=True)
++    update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
++    suporte_ref.update(update_dict)
++    updated_doc = suporte_ref.get()
++    updated_data = updated_doc.to_dict()
++    updated_data['id'] = updated_doc.id
++    logger.info(f'Suporte psicológico {suporte_id} atualizado')
++    return updated_data
++except Exception as e:
++    logger.error(f'Erro ao atualizar suporte psicológico: {e}')
++    return None\n- atualizar_relatorio_medico:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,31 +1,20 @@
+-'\n    Atualiza um relatório médico com novos dados.\n    '
++'Atualiza um relatório médico.'
+ try:
+     relatorio_ref = db.collection('relatorios_medicos').document(relatorio_id)
+     relatorio_doc = relatorio_ref.get()
+     if not relatorio_doc.exists:
+-        logger.error(f'Relatório {relatorio_id} não encontrado.')
++        logger.warning(f'Relatório {relatorio_id} não encontrado')
+         return None
+-    relatorio_data = relatorio_doc.to_dict()
+-    if relatorio_data.get('criado_por_id') != usuario_id:
+-        logger.warning(f'Usuário {usuario_id} tentou editar relatório {relatorio_id} de outro usuário.')
+-        raise HTTPException(status_code=403, detail='Acesso negado: você só pode editar seus próprios relatórios.')
+-    update_dict = {}
+-    if update_data.conteudo is not None:
+-        update_dict['conteudo'] = update_data.conteudo
+-    if update_data.status is not None:
+-        update_dict['status'] = update_data.status
+-    if update_data.motivo_recusa is not None:
+-        update_dict['motivo_recusa'] = update_data.motivo_recusa
+-    if not update_dict:
+-        logger.info(f'Nenhum campo para atualizar no relatório {relatorio_id}')
+-        current_data = relatorio_doc.to_dict()
+-        current_data['id'] = relatorio_doc.id
+-        return current_data
++    update_dict = update_data.model_dump(exclude_unset=True)
++    update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
++    if update_data.status == 'finalizado':
++        update_dict['medico_responsavel_id'] = usuario_id
++        update_dict['data_finalizacao'] = firestore.SERVER_TIMESTAMP
+     relatorio_ref.update(update_dict)
+-    logger.info(f'Relatório {relatorio_id} atualizado com sucesso: {list(update_dict.keys())}')
+     updated_doc = relatorio_ref.get()
+     updated_data = updated_doc.to_dict()
+     updated_data['id'] = updated_doc.id
++    logger.info(f'Relatório {relatorio_id} atualizado com sucesso')
+     return updated_data
+ except Exception as e:
+     logger.error(f'Erro ao atualizar relatório {relatorio_id}: {e}')
+\n- update_in_transaction:\n  - Parameters are different. Backup: ['transaction', 'doc_ref'], Crud: ['transaction', 'post_reference', 'curtida_reference', 'curtida_existe']\n  - Body is different:\n--- backup
++++ crud
+@@ -1,15 +1,9 @@
+-snapshot = doc_ref.get(transaction=transaction)
+-if not snapshot.exists:
+-    raise ValueError('Checklist diário não encontrado para este dia.')
+-checklist = snapshot.to_dict()
+-itens = checklist.get('itens', [])
+-item_encontrado = None
+-for item in itens:
+-    if item.get('id') == item_id:
+-        item_encontrado = item
+-        break
+-if not item_encontrado:
+-    raise ValueError(f"Item do checklist com ID '{item_id}' não encontrado.")
+-item_encontrado['concluido'] = update_data.concluido
+-transaction.update(doc_ref, {'itens': itens})
+-return item_encontrado+if curtida_existe:
++    transaction.delete(curtida_reference)
++    transaction.update(post_reference, {'curtidas': firestore.Increment(-1)})
++    return False
++else:
++    curtida_data = {'postagem_id': postagem_id, 'user_id': user_id, 'created_at': firestore.SERVER_TIMESTAMP}
++    transaction.set(curtida_reference, curtida_data)
++    transaction.update(post_reference, {'curtidas': firestore.Increment(1)})
++    return True\n- listar_checklist_diario_com_replicacao:\n  - Parameters are different. Backup: ['db', 'paciente_id', 'dia', 'negocio_id'], Crud: ['db', 'paciente_id', 'data', 'negocio_id']\n  - Body is different:\n--- backup
++++ crud
+@@ -1,35 +1,21 @@
+-'Busca o checklist do dia. Se não existir, replica o do dia anterior de forma segura.'
++'Lista checklist diário com replicação de itens do plano ativo.'
+ try:
+-    start_dt = datetime.combine(dia, time.min)
+-    end_dt = datetime.combine(dia, time.max)
+-    col_ref = db.collection('usuarios').document(paciente_id).collection('checklist')
+-    query_hoje = col_ref.where('negocio_id', '==', negocio_id).where('data_criacao', '>=', start_dt).where('data_criacao', '<=', end_dt)
+-    docs_hoje = list(query_hoje.stream())
+-    if docs_hoje:
+-        return [{'id': doc.id, 'descricao': doc.to_dict().get('descricao_item', ''), 'concluido': doc.to_dict().get('concluido', False)} for doc in docs_hoje]
+-    query_ultimo_dia = col_ref.where('negocio_id', '==', negocio_id).where('data_criacao', '<', start_dt).order_by('data_criacao', direction=firestore.Query.DESCENDING).limit(1)
+-    docs_anteriores = list(query_ultimo_dia.stream())
+-    if not docs_anteriores:
+-        logger.info(f'Nenhum checklist encontrado para hoje ou dias anteriores para o paciente {paciente_id}.')
+-        return []
+-    ultimo_doc_data = docs_anteriores[0].to_dict()['data_criacao'].date()
+-    start_anterior = datetime.combine(ultimo_doc_data, time.min)
+-    end_anterior = datetime.combine(ultimo_doc_data, time.max)
+-    query_para_replicar = col_ref.where('negocio_id', '==', negocio_id).where('data_criacao', '>=', start_anterior).where('data_criacao', '<=', end_anterior)
+-    docs_para_replicar = list(query_para_replicar.stream())
+-    if not docs_para_replicar:
+-        return []
+-    batch = db.batch()
+-    novos_itens_resposta = []
+-    for doc in docs_para_replicar:
+-        dados_antigos = doc.to_dict()
+-        novos_dados = {'paciente_id': paciente_id, 'negocio_id': negocio_id, 'descricao_item': dados_antigos.get('descricao_item', 'Item sem descrição'), 'concluido': False, 'data_criacao': datetime.combine(dia, datetime.utcnow().time()), 'consulta_id': dados_antigos.get('consulta_id')}
+-        novo_doc_ref = col_ref.document()
+-        batch.set(novo_doc_ref, novos_dados)
+-        novos_itens_resposta.append({'id': novo_doc_ref.id, 'descricao': novos_dados['descricao_item'], 'concluido': novos_dados['concluido']})
+-    batch.commit()
+-    logger.info(f'Checklist replicado com {len(novos_itens_resposta)} itens para o paciente {paciente_id} no dia {dia.isoformat()}.')
+-    return novos_itens_resposta
++    checklist_existente = listar_checklist_diario(db, paciente_id, data, negocio_id)
++    if checklist_existente:
++        return checklist_existente
++    checklist_plano = get_checklist_diario_plano_ativo(db, paciente_id, data, negocio_id)
++    if checklist_plano:
++        checklist_replicado = []
++        for item_plano in checklist_plano:
++            item_dict = {'paciente_id': paciente_id, 'negocio_id': negocio_id, 'data': data.isoformat(), 'descricao': item_plano.get('descricao'), 'horario': item_plano.get('horario'), 'concluido': False, 'observacoes': '', 'plano_item_id': item_plano.get('id')}
++            item_dict = add_timestamps(item_dict, is_update=False)
++            doc_ref = db.collection('checklist_diario').document()
++            doc_ref.set(item_dict)
++            item_dict['id'] = doc_ref.id
++            checklist_replicado.append(item_dict)
++        logger.info(f'Checklist diário replicado para {data}: {len(checklist_replicado)} itens')
++        return checklist_replicado
++    return []
+ except Exception as e:
+-    logger.error(f'ERRO CRÍTICO ao listar/replicar checklist para paciente {paciente_id}: {e}')
+-    raise HTTPException(status_code=500, detail=f'Erro interno ao processar o checklist: {e}')+    logger.error(f'Erro ao listar checklist com replicação: {e}')
++    return []\n- listar_historico_relatorios_medico:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,74 +1,16 @@
+-"\n    Lista o histórico de relatórios já avaliados pelo médico (aprovados + recusados).\n    \n    Args:\n        db: Cliente Firestore\n        medico_id: ID do médico\n        negocio_id: ID do negócio\n        status_filter: Filtro opcional por status ('aprovado' ou 'recusado')\n    \n    Returns:\n        Lista de relatórios com dados do paciente descriptografados\n    "
++'Lista o histórico de relatórios de um médico.'
++relatorios = []
+ try:
+-    logger.info(f'🔍 DEBUG HISTÓRICO RELATÓRIOS:')
+-    logger.info(f'   - medico_id: {medico_id}')
+-    logger.info(f'   - negocio_id: {negocio_id}')
+-    logger.info(f'   - status_filter: {status_filter}')
+-    query_medico = db.collection('relatorios_medicos').where('medico_id', '==', medico_id)
+-    count_medico = len(list(query_medico.stream()))
+-    logger.info(f'   - Total de relatórios para este médico: {count_medico}')
+-    query_aprovados_geral = db.collection('relatorios_medicos').where('medico_id', '==', medico_id).where('status', '==', 'aprovado')
+-    count_aprovados = len(list(query_aprovados_geral.stream()))
+-    query_recusados_geral = db.collection('relatorios_medicos').where('medico_id', '==', medico_id).where('status', '==', 'recusado')
+-    count_recusados = len(list(query_recusados_geral.stream()))
+-    logger.info(f'   - Relatórios aprovados para este médico: {count_aprovados}')
+-    logger.info(f'   - Relatórios recusados para este médico: {count_recusados}')
+-    query = db.collection('relatorios_medicos').where('medico_id', '==', medico_id).where('negocio_id', '==', negocio_id)
+-    if status_filter and status_filter.lower() in ['aprovado', 'recusado']:
+-        query = query.where('status', '==', status_filter.lower())
+-    else:
+-        query_aprovados = query.where('status', '==', 'aprovado')
+-        query_recusados = query.where('status', '==', 'recusado')
+-        docs_aprovados = list(query_aprovados.stream())
+-        docs_recusados = list(query_recusados.stream())
+-        docs = docs_aprovados + docs_recusados
++    query = db.collection('relatorios_medicos').where('medico_responsavel_id', '==', medico_id).where('negocio_id', '==', negocio_id)
+     if status_filter:
+-        docs = list(query.stream())
+-    logger.info(f'Encontrados {len(docs)} relatórios avaliados')
+-    if not docs:
+-        return []
+-    relatorios = []
+-    for doc in docs:
++        query = query.where('status', '==', status_filter)
++    query = query.order_by('data_finalizacao', direction=firestore.Query.DESCENDING)
++    for doc in query.stream():
+         relatorio_data = doc.to_dict()
+         relatorio_data['id'] = doc.id
+-        paciente_id = relatorio_data.get('paciente_id')
+-        if paciente_id:
+-            try:
+-                paciente_ref = db.collection('usuarios').document(paciente_id)
+-                paciente_doc = paciente_ref.get()
+-                if paciente_doc.exists:
+-                    paciente_data = paciente_doc.to_dict()
+-                    if 'nome' in paciente_data and paciente_data['nome']:
+-                        try:
+-                            paciente_data['nome'] = decrypt_data(paciente_data['nome'])
+-                        except Exception as e:
+-                            logger.error(f'Erro ao descriptografar nome do paciente {paciente_id}: {e}')
+-                            paciente_data['nome'] = '[Erro na descriptografia]'
+-                    if 'email' in paciente_data and paciente_data['email']:
+-                        try:
+-                            paciente_data['email'] = decrypt_data(paciente_data['email'])
+-                        except Exception as e:
+-                            logger.error(f'Erro ao descriptografar email do paciente {paciente_id}: {e}')
+-                            paciente_data['email'] = '[Erro na descriptografia]'
+-                    if 'telefone' in paciente_data and paciente_data['telefone']:
+-                        try:
+-                            paciente_data['telefone'] = decrypt_data(paciente_data['telefone'])
+-                        except Exception as e:
+-                            logger.error(f'Erro ao descriptografar telefone do paciente {paciente_id}: {e}')
+-                            paciente_data['telefone'] = '[Erro na descriptografia]'
+-                    relatorio_data['paciente'] = paciente_data
+-                else:
+-                    logger.warning(f'Paciente {paciente_id} não encontrado')
+-                    relatorio_data['paciente'] = {'nome': '[Paciente não encontrado]'}
+-            except Exception as e:
+-                logger.error(f'Erro ao buscar dados do paciente {paciente_id}: {e}')
+-                relatorio_data['paciente'] = {'nome': '[Erro ao carregar paciente]'}
+-        else:
+-            relatorio_data['paciente'] = {'nome': '[ID do paciente não informado]'}
+         relatorios.append(relatorio_data)
+-    relatorios.sort(key=lambda x: x.get('data_avaliacao', datetime.min), reverse=True)
+-    logger.info(f'Retornando {len(relatorios)} relatórios do histórico')
++    logger.info(f'Retornando {len(relatorios)} relatórios no histórico do médico {medico_id}')
+     return relatorios
+ except Exception as e:
+-    logger.error(f'Erro ao listar histórico de relatórios do médico {medico_id}: {e}')
++    logger.error(f'Erro ao listar histórico do médico {medico_id}: {e}')
+     return []\n- criar_avaliacao:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,9 +1,12 @@
+-'Cria uma nova avaliação para um profissional, desnormalizando os dados do cliente.'
+-avaliacao_dict = avaliacao_data.dict()
+-avaliacao_dict['data'] = datetime.utcnow()
+-avaliacao_dict['cliente_id'] = usuario.id
+-avaliacao_dict['cliente_nome'] = usuario.nome
+-doc_ref = db.collection('avaliacoes').document()
+-doc_ref.set(avaliacao_dict)
+-avaliacao_dict['id'] = doc_ref.id
+-return avaliacao_dict+'Cria uma nova avaliação de serviço.'
++try:
++    avaliacao_dict = {'agendamento_id': avaliacao_data.agendamento_id, 'profissional_id': avaliacao_data.profissional_id, 'cliente_id': usuario.id, 'cliente_nome': usuario.nome, 'nota': avaliacao_data.nota, 'comentario': avaliacao_data.comentario or '', 'aspectos_avaliados': avaliacao_data.aspectos_avaliados or {}, 'recomendaria': avaliacao_data.recomendaria}
++    avaliacao_dict = add_timestamps(avaliacao_dict, is_update=False)
++    doc_ref = db.collection('avaliacoes').document()
++    doc_ref.set(avaliacao_dict)
++    avaliacao_dict['id'] = doc_ref.id
++    logger.info(f'Avaliação criada para agendamento {avaliacao_data.agendamento_id}')
++    return avaliacao_dict
++except Exception as e:
++    logger.error(f'Erro ao criar avaliação: {e}')
++    raise\n- criar_medico:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,6 +1,12 @@
+-'Cria um novo médico (referência) para uma clínica.'
+-medico_dict = medico_data.model_dump()
+-doc_ref = db.collection('medicos').document()
+-doc_ref.set(medico_dict)
+-medico_dict['id'] = doc_ref.id
+-return medico_dict+'Cria um novo médico.'
++try:
++    medico_dict = medico_data.model_dump()
++    medico_dict = add_timestamps(medico_dict, is_update=False)
++    doc_ref = db.collection('medicos').document()
++    doc_ref.set(medico_dict)
++    medico_dict['id'] = doc_ref.id
++    logger.info(f'Médico criado para usuário {medico_data.usuario_uid}')
++    return medico_dict
++except Exception as e:
++    logger.error(f'Erro ao criar médico: {e}')
++    raise\n- listar_exames:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,11 +1,13 @@
+-'Lista todos os exames de um paciente, independente do plano de cuidado.'
++'Lista todos os exames de um paciente.'
+ exames = []
+ try:
+-    query = db.collection('usuarios').document(paciente_id).collection('exames').order_by('data_exame', direction=firestore.Query.DESCENDING)
++    query = db.collection('exames').where('paciente_id', '==', paciente_id).order_by('created_at', direction=firestore.Query.DESCENDING)
+     for doc in query.stream():
+         exame_data = doc.to_dict()
+         exame_data['id'] = doc.id
+         exames.append(exame_data)
++    logger.info(f'Retornando {len(exames)} exames para o paciente {paciente_id}')
++    return exames
+ except Exception as e:
+     logger.error(f'Erro ao listar exames do paciente {paciente_id}: {e}')
+-return exames+    return []\n- delete_exame:\n  - Parameters are different. Backup: ['db', 'paciente_id', 'exame_id', 'current_user', 'negocio_id'], Crud: ['db', 'paciente_id', 'exame_id']\n  - Body is different:\n--- backup
++++ crud
+@@ -1,11 +1,15 @@
+-'Deleta um exame, validando as permissões de exclusão.'
+-exame_ref = db.collection('usuarios').document(paciente_id).collection('exames').document(exame_id)
+-exame_doc = exame_ref.get()
+-if not exame_doc.exists:
+-    return False
+-exame_atual = exame_doc.to_dict()
+-user_role = current_user.roles.get(negocio_id)
+-if user_role != 'admin' and exame_atual.get('criado_por') != current_user.firebase_uid:
+-    raise HTTPException(status_code=403, detail='Acesso negado: Enfermeiros só podem deletar os exames que criaram.')
+-exame_ref.delete()
+-return True+'Remove um exame.'
++try:
++    doc_ref = db.collection('exames').document(exame_id)
++    doc = doc_ref.get()
++    if not doc.exists:
++        return False
++    exame_data = doc.to_dict()
++    if exame_data.get('paciente_id') != paciente_id:
++        return False
++    doc_ref.delete()
++    logger.info(f'Exame {exame_id} removido')
++    return True
++except Exception as e:
++    logger.error(f'Erro ao deletar exame {exame_id}: {e}')
++    return False\n- calcular_horarios_disponiveis:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,32 +1,26 @@
+-'Calcula os horários disponíveis para um profissional em um dia específico.'
+-dia_semana = dia.weekday()
+-horario_trabalho_ref = db.collection('profissionais').document(profissional_id).collection('horarios_trabalho').document(str(dia_semana))
+-horario_trabalho_doc = horario_trabalho_ref.get()
+-if not horario_trabalho_doc.exists:
+-    return []
+-horario_trabalho = horario_trabalho_doc.to_dict()
+-slots_disponiveis = []
+-hora_inicio_str = horario_trabalho['hora_inicio']
+-hora_fim_str = horario_trabalho['hora_fim']
+-hora_inicio = datetime.combine(dia, time.fromisoformat(hora_inicio_str))
+-hora_fim = datetime.combine(dia, time.fromisoformat(hora_fim_str))
+-hora_atual = hora_inicio
+-while hora_atual < hora_fim:
+-    slots_disponiveis.append(hora_atual)
+-    hora_atual += timedelta(minutes=duracao_servico_min)
+-agendamentos_no_dia_query = db.collection('agendamentos').where('profissional_id', '==', profissional_id).where('status', '==', 'pendente').where('data_hora', '>=', datetime.combine(dia, time.min)).where('data_hora', '<=', datetime.combine(dia, time.max))
+-horarios_ocupados = {ag.to_dict()['data_hora'].replace(tzinfo=None) for ag in agendamentos_no_dia_query.stream()}
+-bloqueios_no_dia_query = db.collection('profissionais').document(profissional_id).collection('bloqueios').where('inicio', '<=', datetime.combine(dia, time.max)).where('fim', '>=', datetime.combine(dia, time.min))
+-bloqueios = [b.to_dict() for b in bloqueios_no_dia_query.stream()]
+-horarios_finais = []
+-for slot in slots_disponiveis:
+-    if slot in horarios_ocupados:
+-        continue
+-    em_bloqueio = False
+-    for bloqueio in bloqueios:
+-        if bloqueio['inicio'].replace(tzinfo=None) <= slot < bloqueio['fim'].replace(tzinfo=None):
+-            em_bloqueio = True
+-            break
+-    if not em_bloqueio:
+-        horarios_finais.append(slot.time())
+-return horarios_finais+'Calcula os horários disponíveis de um profissional para um dia específico.'
++try:
++    horarios_disponiveis = []
++    dia_semana = dia.weekday()
++    horarios_query = db.collection('horarios_trabalho').where('profissional_id', '==', profissional_id).where('dia_semana', '==', dia_semana)
++    horarios_trabalho = list(horarios_query.stream())
++    if not horarios_trabalho:
++        logger.info(f'Nenhum horário de trabalho encontrado para profissional {profissional_id} no dia {dia}')
++        return []
++    for horario_doc in horarios_trabalho:
++        horario_data = horario_doc.to_dict()
++        hora_inicio = datetime.fromisoformat(horario_data['hora_inicio']).time()
++        hora_fim = datetime.fromisoformat(horario_data['hora_fim']).time()
++        current_time = datetime.combine(dia, hora_inicio)
++        end_time = datetime.combine(dia, hora_fim)
++        while current_time + timedelta(minutes=duracao_servico_min) <= end_time:
++            slot_time = current_time.time()
++            if not _horario_ocupado(db, profissional_id, dia, slot_time, duracao_servico_min):
++                horarios_disponiveis.append(slot_time)
++            current_time += timedelta(minutes=duracao_servico_min)
++    horarios_disponiveis.sort()
++    logger.info(f'Encontrados {len(horarios_disponiveis)} horários disponíveis para {dia}')
++    return horarios_disponiveis
++except Exception as e:
++    logger.error(f'Erro ao calcular horários disponíveis: {e}')
++    return []\n- adicionar_registro_diario:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,8 +1,12 @@
+-'Adiciona um novo registro estruturado ao diário de acompanhamento.'
+-registro_dict = registro.model_dump()
+-registro_dict.update({'paciente_id': paciente_id, 'tecnico_id': tecnico_id, 'data_registro': datetime.utcnow()})
+-paciente_ref = db.collection('usuarios').document(paciente_id)
+-doc_ref = paciente_ref.collection('registros_diarios_estruturados').document()
+-doc_ref.set(registro_dict)
+-registro_dict['id'] = doc_ref.id
+-return registro_dict+'Adiciona um registro diário simplificado.'
++try:
++    registro_dict = {'paciente_id': paciente_id, 'tecnico_id': tecnico_id, 'data_registro': registro.data_registro, 'observacoes': registro.observacoes, 'humor': registro.humor, 'sintomas': registro.sintomas or [], 'medicamentos_tomados': registro.medicamentos_tomados or []}
++    registro_dict = add_timestamps(registro_dict, is_update=False)
++    doc_ref = db.collection('registros_diarios_simples').document()
++    doc_ref.set(registro_dict)
++    registro_dict['id'] = doc_ref.id
++    logger.info(f'Registro diário simples criado para paciente {paciente_id}')
++    return registro_dict
++except Exception as e:
++    logger.error(f'Erro ao adicionar registro diário: {e}')
++    raise\n- aprovar_relatorio:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,10 +1,21 @@
+-"\n    Muda o status de um relatório para 'aprovado'.\n    "
+-relatorio_ref = db.collection('relatorios_medicos').document(relatorio_id)
+-relatorio_doc = relatorio_ref.get()
+-if not relatorio_doc.exists or relatorio_doc.to_dict().get('medico_id') != medico_id:
+-    raise HTTPException(status_code=403, detail='Acesso negado: este relatório não está atribuído a você.')
+-relatorio_ref.update({'status': 'aprovado', 'data_revisao': datetime.utcnow()})
+-updated_doc = relatorio_ref.get()
+-data = updated_doc.to_dict()
+-data['id'] = updated_doc.id
+-return data+"Muda o status de um relatório para 'aprovado'."
++try:
++    relatorio_ref = db.collection('relatorios_medicos').document(relatorio_id)
++    relatorio_doc = relatorio_ref.get()
++    if not relatorio_doc.exists:
++        logger.warning(f'Relatório {relatorio_id} não encontrado')
++        return None
++    relatorio_data = relatorio_doc.to_dict()
++    medico_responsavel = relatorio_data.get('medico_responsavel_id')
++    if medico_responsavel and medico_responsavel != medico_id:
++        logger.warning(f'Médico {medico_id} tentou aprovar relatório {relatorio_id} sem permissão')
++        return None
++    relatorio_ref.update({'status': 'aprovado', 'data_revisao': firestore.SERVER_TIMESTAMP, 'medico_responsavel_id': medico_id, 'updated_at': firestore.SERVER_TIMESTAMP})
++    updated_doc = relatorio_ref.get()
++    updated_data = updated_doc.to_dict()
++    updated_data['id'] = updated_doc.id
++    logger.info(f'Relatório {relatorio_id} aprovado pelo médico {medico_id}')
++    return updated_data
++except Exception as e:
++    logger.error(f'Erro ao aprovar relatório {relatorio_id}: {e}')
++    return None\n- deletar_comentario:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,14 +1,20 @@
+-'Deleta um comentário, garantindo que ele pertence ao usuário correto.'
++'Remove um comentário (apenas o autor pode deletar).'
+ try:
+-    comentario_ref = db.collection('postagens').document(postagem_id).collection('comentarios').document(comentario_id)
++    comentario_ref = db.collection('comentarios').document(comentario_id)
+     comentario_doc = comentario_ref.get()
+-    if not comentario_doc.exists or comentario_doc.to_dict().get('cliente_id') != user_id:
+-        logger.warning(f'Tentativa de exclusão do comentário {comentario_id} por usuário não autorizado ({user_id}).')
++    if not comentario_doc.exists:
++        return False
++    comentario_data = comentario_doc.to_dict()
++    if comentario_data.get('user_id') != user_id:
++        logger.warning(f'Usuário {user_id} tentou deletar comentário que não é seu')
++        return False
++    if comentario_data.get('postagem_id') != postagem_id:
+         return False
+     comentario_ref.delete()
+-    db.collection('postagens').document(postagem_id).update({'total_comentarios': firestore.Increment(-1)})
+-    logger.info(f'Comentário {comentario_id} deletado pelo usuário {user_id}.')
++    post_ref = db.collection('postagens').document(postagem_id)
++    post_ref.update({'comentarios': firestore.Increment(-1)})
++    logger.info(f'Comentário {comentario_id} deletado')
+     return True
+ except Exception as e:
+-    logger.error(f'Erro ao deletar comentário {comentario_id}: {e}')
++    logger.error(f'Erro ao deletar comentário: {e}')
+     return False\n- toggle_curtida:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,17 +1,26 @@
+ 'Adiciona ou remove uma curtida de uma postagem.'
+-post_ref = db.collection('postagens').document(postagem_id)
+-curtida_ref = post_ref.collection('curtidas').document(user_id)
+-curtida_doc = curtida_ref.get()
++try:
+
+-@firestore.transactional
+-def update_in_transaction(transaction, post_reference, curtida_reference, curtida_existe):
+-    if curtida_existe:
+-        transaction.delete(curtida_reference)
+-        transaction.update(post_reference, {'total_curtidas': firestore.Increment(-1)})
+-        return False
+-    else:
+-        transaction.set(curtida_reference, {'data': datetime.utcnow()})
+-        transaction.update(post_reference, {'total_curtidas': firestore.Increment(1)})
+-        return True
+-transaction = db.transaction()
+-return update_in_transaction(transaction, post_ref, curtida_ref, curtida_doc.exists)+    @firestore.transactional
++    def update_in_transaction(transaction, post_reference, curtida_reference, curtida_existe):
++        if curtida_existe:
++            transaction.delete(curtida_reference)
++            transaction.update(post_reference, {'curtidas': firestore.Increment(-1)})
++            return False
++        else:
++            curtida_data = {'postagem_id': postagem_id, 'user_id': user_id, 'created_at': firestore.SERVER_TIMESTAMP}
++            transaction.set(curtida_reference, curtida_data)
++            transaction.update(post_reference, {'curtidas': firestore.Increment(1)})
++            return True
++    curtida_query = db.collection('curtidas').where('postagem_id', '==', postagem_id).where('user_id', '==', user_id).limit(1)
++    curtidas = list(curtida_query.stream())
++    curtida_existe = len(curtidas) > 0
++    post_ref = db.collection('postagens').document(postagem_id)
++    curtida_ref = db.collection('curtidas').document() if not curtida_existe else curtidas[0].reference
++    transaction = db.transaction()
++    user_curtiu = update_in_transaction(transaction, post_ref, curtida_ref, curtida_existe)
++    logger.info(f"Curtida {('adicionada' if user_curtiu else 'removida')} na postagem {postagem_id}")
++    return user_curtiu
++except Exception as e:
++    logger.error(f'Erro ao toggle curtida: {e}')
++    return False\n- listar_registros_diario_estruturado:\n  - Parameters are different. Backup: ['db', 'paciente_id', 'data', 'tipo'], Crud: ['db', 'paciente_id', 'data_inicio', 'data_fim']\n  - Body is different:\n--- backup
++++ crud
+@@ -1,71 +1,18 @@
+-'\n    Lista os registros diários estruturados de um paciente.\n    AGORA CORRIGIDO: Lida de forma robusta com registros antigos (estruturados)\n    e novos (texto livre), sem depender de schemas que foram removidos,\n    convertendo todos para o formato de anotação simples.\n    '
+-registros_pydantic: List[schemas.RegistroDiarioResponse] = []
++'Lista registros diários estruturados com filtro de data.'
++registros = []
+ try:
+-    coll_ref = db.collection('usuarios').document(paciente_id).collection('registros_diarios_estruturados')
+-    query = coll_ref.order_by('data_registro', direction=firestore.Query.DESCENDING)
+-    if tipo:
+-        query = query.where('tipo', '==', tipo)
+-    if data:
+-        inicio = datetime.combine(data, time.min)
+-        fim = datetime.combine(data, time.max)
+-        query = query.where('data_registro', '>=', inicio).where('data_registro', '<=', fim)
+-    docs = list(query.stream())
+-    tecnicos_cache: Dict[str, Dict] = {}
+-    for doc in docs:
+-        d = doc.to_dict() or {}
+-        d['id'] = doc.id
+-        conteudo_bruto = d.get('conteudo', {}) or {}
+-        descricao_final = ''
+-        if 'descricao' in conteudo_bruto:
+-            descricao_final = conteudo_bruto.get('descricao', '')
+-            if descricao_final and isinstance(descricao_final, str) and descricao_final.strip():
+-                try:
+-                    descricao_final = decrypt_data(descricao_final)
+-                except Exception as e:
+-                    logger.error(f'Erro ao descriptografar descrição do registro diário estruturado {doc.id}: {e}')
+-                    descricao_final = '[Erro na descriptografia]'
+-        else:
+-            partes = []
+-            if 'pressao_sistolica' in conteudo_bruto:
+-                partes.append(f"PA: {conteudo_bruto.get('pressao_sistolica')}/{conteudo_bruto.get('pressao_diastolica')}")
+-            if 'temperatura' in conteudo_bruto:
+-                partes.append(f"Temp: {conteudo_bruto.get('temperatura')}°C")
+-            if 'batimentos_cardiacos' in conteudo_bruto:
+-                partes.append(f"FC: {conteudo_bruto.get('batimentos_cardiacos')} bpm")
+-            if 'saturacao_oxigenio' in conteudo_bruto:
+-                partes.append(f"Sat O²: {conteudo_bruto.get('saturacao_oxigenio')}%")
+-            if 'nome' in conteudo_bruto:
+-                partes.append(f"Medicamento: {conteudo_bruto.get('nome')} ({conteudo_bruto.get('dose')})")
+-            descricao_final = ', '.join(filter(None, partes))
+-            if not descricao_final:
+-                descricao_final = 'Registro estruturado antigo sem descrição.'
+-        conteudo_final = schemas.AnotacaoConteudo(descricao=descricao_final)
+-        tecnico_id = d.get('tecnico_id')
+-        tecnico_perfil = None
+-        if tecnico_id:
+-            if tecnico_id in tecnicos_cache:
+-                tecnico_perfil = tecnicos_cache[tecnico_id]
+-            else:
+-                tdoc = db.collection('usuarios').document(tecnico_id).get()
+-                if tdoc.exists:
+-                    tdat = tdoc.to_dict() or {}
+-                    nome_tecnico = tdat.get('nome')
+-                    if nome_tecnico:
+-                        try:
+-                            nome_tecnico = decrypt_data(nome_tecnico)
+-                        except Exception as e:
+-                            logger.error(f'Erro ao descriptografar nome do técnico {tecnico_id}: {e}')
+-                            nome_tecnico = '[Erro na descriptografia]'
+-                    tecnico_perfil = {'id': tdoc.id, 'nome': nome_tecnico, 'email': tdat.get('email')}
+-                else:
+-                    tecnico_perfil = {'id': tecnico_id, 'nome': 'Técnico Desconhecido', 'email': ''}
+-                tecnicos_cache[tecnico_id] = tecnico_perfil
+-        registro_data = {'id': d['id'], 'negocio_id': d.get('negocio_id'), 'paciente_id': d.get('paciente_id'), 'tecnico': tecnico_perfil or {'id': '', 'nome': '', 'email': ''}, 'data_registro': d.get('data_registro'), 'tipo': d.get('tipo', 'anotacao'), 'conteudo': conteudo_final}
+-        try:
+-            registros_pydantic.append(schemas.RegistroDiarioResponse.model_validate(registro_data))
+-        except Exception as e:
+-            logger.error(f'Falha ao montar o modelo de resposta final para o registro {doc.id}: {e}')
++    query = db.collection('registros_diarios_estruturados').where('paciente_id', '==', paciente_id)
++    if data_inicio:
++        query = query.where('data_registro', '>=', data_inicio.isoformat())
++    if data_fim:
++        query = query.where('data_registro', '<=', data_fim.isoformat())
++    query = query.order_by('data_registro', direction=firestore.Query.DESCENDING)
++    for doc in query.stream():
++        registro_data = doc.to_dict()
++        registro_data['id'] = doc.id
++        registros.append(registro_data)
++    logger.info(f'Retornando {len(registros)} registros estruturados')
++    return registros
+ except Exception as e:
+-    logger.error(f'Erro ao listar registros estruturados para o paciente {paciente_id}: {e}')
+-    raise HTTPException(status_code=500, detail=f'Erro ao consultar o banco de dados: {e}')
+-return registros_pydantic+    logger.error(f'Erro ao listar registros estruturados: {e}')
++    return []\n- prescrever_medicacao:\n  - Parameters are different. Backup: ['db', 'medicacao_data', 'consulta_id'], Crud: ['db', 'prescricao_data', 'medico_id']\n  - Body is different:\n--- backup
++++ crud
+@@ -1,9 +1,14 @@
+-'Salva uma nova medicação na subcoleção de um paciente, vinculando-a a uma consulta.'
+-medicacao_dict = medicacao_data.model_dump()
+-medicacao_dict['data_criacao'] = datetime.utcnow()
+-medicacao_dict['consulta_id'] = consulta_id
+-paciente_ref = db.collection('usuarios').document(medicacao_data.paciente_id)
+-doc_ref = paciente_ref.collection('medicacoes').document()
+-doc_ref.set(medicacao_dict)
+-medicacao_dict['id'] = doc_ref.id
+-return medicacao_dict+'Prescreve uma medicação para um paciente.'
++try:
++    prescricao_dict = prescricao_data.model_dump()
++    prescricao_dict['medico_id'] = medico_id
++    prescricao_dict['status'] = 'ativa'
++    prescricao_dict = add_timestamps(prescricao_dict, is_update=False)
++    doc_ref = db.collection('prescricoes').document()
++    doc_ref.set(prescricao_dict)
++    prescricao_dict['id'] = doc_ref.id
++    logger.info(f'Medicação prescrita para paciente {prescricao_data.paciente_id}')
++    return prescricao_dict
++except Exception as e:
++    logger.error(f'Erro ao prescrever medicação: {e}')
++    raise\n- atualizar_perfil_profissional:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,12 +1,14 @@
+-'Atualiza os dados de um perfil profissional.'
++'Atualiza o perfil de um profissional.'
+ try:
+     prof_ref = db.collection('profissionais').document(profissional_id)
++    prof_doc = prof_ref.get()
++    if not prof_doc.exists:
++        logger.warning(f'Profissional {profissional_id} não encontrado')
++        return None
+     update_dict = update_data.model_dump(exclude_unset=True)
+-    if not update_dict:
+-        return buscar_profissional_por_id(db, profissional_id)
++    update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
+     prof_ref.update(update_dict)
+-    logger.info(f'Perfil do profissional {profissional_id} atualizado.')
+     return buscar_profissional_por_id(db, profissional_id)
+ except Exception as e:
+-    logger.error(f'Erro ao atualizar perfil do profissional {profissional_id}: {e}')
++    logger.error(f'Erro ao atualizar profissional {profissional_id}: {e}')
+     return None\n- criar_servico:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,6 +1,12 @@
+ 'Cria um novo serviço para um profissional.'
+-servico_dict = servico_data.dict()
+-doc_ref = db.collection('servicos').document()
+-doc_ref.set(servico_dict)
+-servico_dict['id'] = doc_ref.id
+-return servico_dict+try:
++    servico_dict = servico_data.model_dump()
++    servico_dict = add_timestamps(servico_dict, is_update=False)
++    doc_ref = db.collection('servicos').document()
++    doc_ref.set(servico_dict)
++    servico_dict['id'] = doc_ref.id
++    logger.info(f'Serviço {servico_data.nome} criado para profissional {servico_data.profissional_id}')
++    return servico_dict
++except Exception as e:
++    logger.error(f'Erro ao criar serviço: {e}')
++    raise\n- enviar_pesquisa_satisfacao:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,8 +1,12 @@
+-'Cria um registro de pesquisa enviada para um paciente.'
+-pesquisa_dict = envio_data.model_dump()
+-pesquisa_dict.update({'data_envio': datetime.utcnow(), 'status': 'pendente', 'respostas': []})
+-doc_ref = db.collection('pesquisas_enviadas').document()
+-doc_ref.set(pesquisa_dict)
+-pesquisa_dict['id'] = doc_ref.id
+-logger.info(f'Pesquisa {envio_data.modelo_pesquisa_id} enviada para o paciente {envio_data.paciente_id}.')
+-return pesquisa_dict+'Envia uma pesquisa de satisfação para um paciente.'
++try:
++    envio_dict = {'modelo_pesquisa_id': envio_data.modelo_pesquisa_id, 'paciente_id': envio_data.paciente_id, 'negocio_id': envio_data.negocio_id, 'data_envio': firestore.SERVER_TIMESTAMP, 'data_limite_resposta': envio_data.data_limite_resposta, 'status': 'enviada', 'respondida': False}
++    envio_dict = add_timestamps(envio_dict, is_update=False)
++    doc_ref = db.collection('pesquisas_enviadas').document()
++    doc_ref.set(envio_dict)
++    envio_dict['id'] = doc_ref.id
++    logger.info(f'Pesquisa enviada para paciente {envio_data.paciente_id}')
++    return envio_dict
++except Exception as e:
++    logger.error(f'Erro ao enviar pesquisa: {e}')
++    raise\n- delete_consulta:\n  - Body is different:\n--- backup
++++ crud
+@@ -1 +1,2 @@
++'Remove uma consulta.'
+ return _delete_subcollection_item(db, paciente_id, 'consultas', consulta_id)\n- update_medico:\n  - Body is different:\n--- backup
++++ crud
+@@ -10,6 +10,7 @@
+         data = medico_doc.to_dict()
+         data['id'] = medico_doc.id
+         return data
++    update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
+     medico_ref.update(update_dict)
+     logger.info(f'Médico {medico_id} atualizado.')
+     updated_doc = medico_ref.get().to_dict()
+\n- desvincular_paciente_enfermeiro:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,15 +1,16 @@
+-'Desvincula um paciente de um enfermeiro, removendo o campo enfermeiro_id.'
++'Desvincula um paciente de um enfermeiro.'
+ try:
+     paciente_ref = db.collection('usuarios').document(paciente_id)
+-    paciente_ref.update({'enfermeiro_id': firestore.DELETE_FIELD})
+-    criar_log_auditoria(db, autor_uid=autor_uid, negocio_id=negocio_id, acao='DESVINCULO_PACIENTE_ENFERMEIRO', detalhes={'paciente_id': paciente_id})
+-    logger.info(f'Paciente {paciente_id} desvinculado de seu enfermeiro no negócio {negocio_id}.')
+-    doc = paciente_ref.get()
+-    if doc.exists:
+-        updated_doc = doc.to_dict()
+-        updated_doc['id'] = doc.id
+-        return updated_doc
+-    return None
++    paciente_doc = paciente_ref.get()
++    if not paciente_doc.exists:
++        return None
++    update_data = {f'vinculos.{negocio_id}.enfermeiro_id': None, 'updated_at': firestore.SERVER_TIMESTAMP}
++    paciente_ref.update(update_data)
++    logger.info(f'Paciente {paciente_id} desvinculado do enfermeiro')
++    updated_doc = paciente_ref.get()
++    updated_data = updated_doc.to_dict()
++    updated_data['id'] = updated_doc.id
++    return updated_data
+ except Exception as e:
+-    logger.error(f'Erro ao desvincular paciente {paciente_id}: {e}')
++    logger.error(f'Erro ao desvincular paciente do enfermeiro: {e}')
+     return None\n- deletar_suporte_psicologico:\n  - Parameters are different. Backup: ['db', 'paciente_id', 'suporte_id'], Crud: ['db', 'suporte_id', 'psicologo_id']\n  - Body is different:\n--- backup
++++ crud
+@@ -1,6 +1,15 @@
+-'Deleta um recurso de suporte psicológico.'
+-suporte_ref = db.collection('usuarios').document(paciente_id).collection('suporte_psicologico').document(suporte_id)
+-if not suporte_ref.get().exists:
+-    return False
+-suporte_ref.delete()
+-return True+'Remove um registro de suporte psicológico.'
++try:
++    suporte_ref = db.collection('suporte_psicologico').document(suporte_id)
++    suporte_doc = suporte_ref.get()
++    if not suporte_doc.exists:
++        return False
++    suporte_data = suporte_doc.to_dict()
++    if suporte_data.get('psicologo_id') != psicologo_id:
++        return False
++    suporte_ref.delete()
++    logger.info(f'Suporte psicológico {suporte_id} removido')
++    return True
++except Exception as e:
++    logger.error(f'Erro ao deletar suporte psicológico: {e}')
++    return False\n- update_checklist_item:\n  - Body is different:\n--- backup
++++ crud
+@@ -1 +1,20 @@
+-return _update_subcollection_item(db, paciente_id, 'checklist', item_id, update_data)+'Atualiza um item do checklist.'
++try:
++    item_ref = db.collection('checklist').document(item_id)
++    item_doc = item_ref.get()
++    if not item_doc.exists:
++        return None
++    item_data = item_doc.to_dict()
++    if item_data.get('paciente_id') != paciente_id:
++        return None
++    update_dict = update_data.model_dump(exclude_unset=True)
++    update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
++    item_ref.update(update_dict)
++    updated_doc = item_ref.get()
++    updated_data = updated_doc.to_dict()
++    updated_data['id'] = updated_doc.id
++    logger.info(f'Item checklist {item_id} atualizado')
++    return updated_data
++except Exception as e:
++    logger.error(f'Erro ao atualizar item checklist: {e}')
++    return None\n- listar_relatorios_pendentes_medico:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,90 +1,13 @@
+-"\n    Lista todos os relatórios com status 'pendente' atribuídos a um médico específico.\n    "
++'Lista todos os relatórios pendentes para um médico.'
+ relatorios = []
+ try:
+-    logger.info(f'🔍 DEBUG RELATÓRIOS PENDENTES:')
+-    logger.info(f'   - medico_id: {medico_id}')
+-    logger.info(f'   - negocio_id: {negocio_id}')
+-    logger.info(f'   - status: pendente')
+-    query_medico = db.collection('relatorios_medicos').where('medico_id', '==', medico_id)
+-    count_medico = len(list(query_medico.stream()))
+-    logger.info(f'   - Total de relatórios para este médico: {count_medico}')
+-    query_negocio = db.collection('relatorios_medicos').where('negocio_id', '==', negocio_id)
+-    count_negocio = len(list(query_negocio.stream()))
+-    logger.info(f'   - Total de relatórios para este negócio: {count_negocio}')
+-    query_pendentes = db.collection('relatorios_medicos').where('status', '==', 'pendente')
+-    count_pendentes = len(list(query_pendentes.stream()))
+-    logger.info(f'   - Total de relatórios pendentes no sistema: {count_pendentes}')
+-    query = db.collection('relatorios_medicos').where('negocio_id', '==', negocio_id).where('medico_id', '==', medico_id).where('status', '==', 'pendente')
++    query = db.collection('relatorios_medicos').where('negocio_id', '==', negocio_id).where('status', '==', 'pendente').order_by('data_solicitacao', direction=firestore.Query.ASCENDING)
+     for doc in query.stream():
+-        data = doc.to_dict()
+-        data['id'] = doc.id
+-        paciente_id = data.get('paciente_id')
+-        if paciente_id:
+-            try:
+-                paciente_doc = db.collection('usuarios').document(paciente_id).get()
+-                if paciente_doc.exists:
+-                    paciente_data = paciente_doc.to_dict()
+-                    paciente_info = {'id': paciente_id, 'email': paciente_data.get('email', '')}
+-                    if 'nome' in paciente_data and paciente_data['nome']:
+-                        try:
+-                            paciente_info['nome'] = decrypt_data(paciente_data['nome'])
+-                        except Exception as e:
+-                            logger.error(f'Erro ao descriptografar nome do paciente {paciente_id}: {e}')
+-                            paciente_info['nome'] = '[Erro na descriptografia]'
+-                    else:
+-                        paciente_info['nome'] = 'Nome não disponível'
+-                    if 'telefone' in paciente_data and paciente_data['telefone']:
+-                        try:
+-                            paciente_info['telefone'] = decrypt_data(paciente_data['telefone'])
+-                        except Exception as e:
+-                            logger.error(f'Erro ao descriptografar telefone do paciente {paciente_id}: {e}')
+-                            paciente_info['telefone'] = '[Erro na descriptografia]'
+-                    if 'data_nascimento' in paciente_data:
+-                        paciente_info['data_nascimento'] = paciente_data['data_nascimento']
+-                    if 'sexo' in paciente_data:
+-                        paciente_info['sexo'] = paciente_data['sexo']
+-                    if 'estado_civil' in paciente_data:
+-                        paciente_info['estado_civil'] = paciente_data['estado_civil']
+-                    if 'profissao' in paciente_data:
+-                        paciente_info['profissao'] = paciente_data['profissao']
+-                    data['paciente'] = paciente_info
+-                else:
+-                    data['paciente'] = {'id': paciente_id, 'nome': 'Paciente não encontrado', 'email': ''}
+-                    logger.warning(f'Paciente {paciente_id} não encontrado para relatório {doc.id}')
+-            except Exception as e:
+-                logger.error(f'Erro ao buscar dados do paciente {paciente_id}: {e}')
+-                data['paciente'] = {'id': paciente_id, 'nome': 'Erro ao carregar dados', 'email': ''}
+-        relatorios.append(data)
+-        logger.info(f'✅ Relatório encontrado: {doc.id}')
+-        logger.info(f"   - medico_id: {data.get('medico_id')}")
+-        logger.info(f"   - negocio_id: {data.get('negocio_id')}")
+-        logger.info(f"   - status: {data.get('status')}")
+-        logger.info(f"   - paciente: {data.get('paciente', {}).get('nome', 'N/A')}")
+-    relatorios.sort(key=lambda x: x.get('data_criacao', datetime.min), reverse=True)
+-    logger.info(f'📊 RESULTADO FINAL: {len(relatorios)} relatórios pendentes encontrados')
+-    if len(relatorios) == 0:
+-        logger.warning('❌ Nenhum relatório encontrado! Verificando relatórios específicos...')
+-        relatorio_ids_debug = ['6O75Oh2o9rHggN8oXUhj', 'Qb0y0CeCADAlzdUxTtGN']
+-        for relatorio_id in relatorio_ids_debug:
+-            doc_ref = db.collection('relatorios_medicos').document(relatorio_id)
+-            doc = doc_ref.get()
+-            if doc.exists:
+-                data = doc.to_dict()
+-                logger.info(f'🔍 Relatório específico {relatorio_id}:')
+-                logger.info(f"   - medico_id: {data.get('medico_id')} (esperado: {medico_id})")
+-                logger.info(f"   - negocio_id: {data.get('negocio_id')} (esperado: {negocio_id})")
+-                logger.info(f"   - status: {data.get('status')} (esperado: pendente)")
+-                logger.info(f"   - data_criacao: {data.get('data_criacao')}")
+-                medico_match = data.get('medico_id') == medico_id
+-                negocio_match = data.get('negocio_id') == negocio_id
+-                status_match = data.get('status') == 'pendente'
+-                logger.info(f'   - medico_id match: {medico_match}')
+-                logger.info(f'   - negocio_id match: {negocio_match}')
+-                logger.info(f'   - status match: {status_match}')
+-            else:
+-                logger.warning(f'❌ Relatório {relatorio_id} não existe no banco!')
++        relatorio_data = doc.to_dict()
++        relatorio_data['id'] = doc.id
++        relatorios.append(relatorio_data)
++    logger.info(f'Retornando {len(relatorios)} relatórios pendentes para o médico {medico_id}')
++    return relatorios
+ except Exception as e:
+     logger.error(f'Erro ao listar relatórios pendentes para o médico {medico_id}: {e}')
+-    import traceback
+-    logger.error(f'Stack trace: {traceback.format_exc()}')
+-return relatorios+    return []\n- admin_listar_clientes_por_negocio:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,52 +1,17 @@
+-"Lista todos os usuários com o papel de 'cliente' para um negócio, com filtro de status."
++'Lista todos os clientes de um negócio específico.'
+ clientes = []
+ try:
+     query = db.collection('usuarios').where(f'roles.{negocio_id}', '==', 'cliente')
+     for doc in query.stream():
+         cliente_data = doc.to_dict()
+-        status_no_negocio = cliente_data.get('status_por_negocio', {}).get(negocio_id, 'ativo')
+-        if status_no_negocio == status:
++        status_por_negocio = cliente_data.get('status_por_negocio', {})
++        user_status = status_por_negocio.get(negocio_id, 'ativo')
++        if user_status == status:
+             cliente_data['id'] = doc.id
+-            if 'nome' in cliente_data and cliente_data['nome']:
+-                try:
+-                    cliente_data['nome'] = decrypt_data(cliente_data['nome'])
+-                except Exception as e:
+-                    logger.error(f'Erro ao descriptografar nome do cliente {doc.id}: {e}')
+-                    cliente_data['nome'] = '[Erro na descriptografia]'
+-            if 'telefone' in cliente_data and cliente_data['telefone']:
+-                try:
+-                    cliente_data['telefone'] = decrypt_data(cliente_data['telefone'])
+-                except Exception as e:
+-                    logger.error(f'Erro ao descriptografar telefone do cliente {doc.id}: {e}')
+-                    cliente_data['telefone'] = '[Erro na descriptografia]'
+-            if 'endereco' in cliente_data and cliente_data['endereco']:
+-                endereco_descriptografado = {}
+-                for key, value in cliente_data['endereco'].items():
+-                    if value and isinstance(value, str) and value.strip():
+-                        try:
+-                            endereco_descriptografado[key] = decrypt_data(value)
+-                        except Exception as e:
+-                            logger.error(f'Erro ao descriptografar campo de endereço {key} do cliente {doc.id}: {e}')
+-                            endereco_descriptografado[key] = '[Erro na descriptografia]'
+-                    else:
+-                        endereco_descriptografado[key] = value
+-                cliente_data['endereco'] = endereco_descriptografado
+-            enfermeiro_user_id = cliente_data.get('enfermeiro_id')
+-            if enfermeiro_user_id:
+-                enfermeiro_doc = db.collection('usuarios').document(enfermeiro_user_id).get()
+-                if enfermeiro_doc.exists:
+-                    firebase_uid = enfermeiro_doc.to_dict().get('firebase_uid')
+-                    perfil_profissional = buscar_profissional_por_uid(db, negocio_id, firebase_uid)
+-                    if perfil_profissional:
+-                        cliente_data['profissional_id'] = perfil_profissional.get('id')
+-                    else:
+-                        cliente_data['profissional_id'] = None
+-                else:
+-                    cliente_data['profissional_id'] = None
+-            else:
+-                cliente_data['profissional_id'] = None
++            cliente_data = decrypt_user_sensitive_fields(cliente_data, USER_SENSITIVE_FIELDS)
+             clientes.append(cliente_data)
++    logger.info(f'Retornando {len(clientes)} clientes para o negócio {negocio_id} com status {status}')
+     return clientes
+ except Exception as e:
+-    logger.error(f'Erro ao listar clientes para o negocio_id {negocio_id}: {e}')
++    logger.error(f'Erro ao listar clientes do negócio {negocio_id}: {e}')
+     return []\n- listar_tecnicos_supervisionados_por_paciente:\n  - Parameters are different. Backup: ['db', 'paciente_id', 'enfermeiro_id'], Crud: ['db', 'paciente_id']\n  - Body is different:\n--- backup
++++ crud
+@@ -1,30 +1,22 @@
+-'\n    Lista os técnicos vinculados a um paciente que são supervisionados pelo enfermeiro logado.\n    '
++'Lista os técnicos que supervisionam um paciente específico.'
++tecnicos = []
+ try:
+-    paciente_doc = db.collection('usuarios').document(paciente_id).get()
++    paciente_ref = db.collection('usuarios').document(paciente_id)
++    paciente_doc = paciente_ref.get()
+     if not paciente_doc.exists:
+-        logger.warning(f'Paciente com ID {paciente_id} não encontrado.')
+         return []
+     paciente_data = paciente_doc.to_dict()
+-    tecnicos_vinculados_ids = paciente_data.get('tecnicos_ids', [])
+-    if not tecnicos_vinculados_ids:
+-        logger.info(f'Paciente {paciente_id} não possui técnicos vinculados.')
+-        return []
+-    tecnicos_finais = []
+-    for tecnico_id in tecnicos_vinculados_ids:
++    tecnicos_vinculados = paciente_data.get('tecnicos_vinculados', [])
++    for tecnico_id in tecnicos_vinculados:
+         tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
+-        if not tecnico_doc.exists:
+-            continue
+-        tecnico_data = tecnico_doc.to_dict()
+-        if tecnico_data.get('supervisor_id') == enfermeiro_id:
+-            nome_tecnico = tecnico_data.get('nome', 'Nome não disponível')
+-            if nome_tecnico and nome_tecnico != 'Nome não disponível':
+-                try:
+-                    nome_tecnico = decrypt_data(nome_tecnico)
+-                except Exception as e:
+-                    logger.error(f'Erro ao descriptografar nome do técnico {tecnico_doc.id}: {e}')
+-                    nome_tecnico = '[Erro na descriptografia]'
+-            tecnicos_finais.append({'id': tecnico_doc.id, 'nome': nome_tecnico, 'email': tecnico_data.get('email', 'Email não disponível')})
+-    return tecnicos_finais
++        if tecnico_doc.exists:
++            tecnico_data = tecnico_doc.to_dict()
++            tecnico_data['id'] = tecnico_doc.id
++            from crud.utils import decrypt_user_sensitive_fields
++            tecnico_data = decrypt_user_sensitive_fields(tecnico_data, ['nome', 'telefone'])
++            tecnicos.append(tecnico_data)
++    logger.info(f'Retornando {len(tecnicos)} técnicos supervisionando paciente {paciente_id}')
++    return tecnicos
+ except Exception as e:
+-    logger.error(f'Erro ao listar técnicos supervisionados para o paciente {paciente_id}: {e}')
++    logger.error(f'Erro ao listar técnicos supervisionados: {e}')
+     return []\n- atualizar_anamnese:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,39 +1,22 @@
+-'Atualiza uma anamnese existente, criptografando novos dados sensíveis e descriptografando para resposta.'
+-anamnese_ref = db.collection('usuarios').document(paciente_id).collection('anamneses').document(anamnese_id)
+-if not anamnese_ref.get().exists:
+-    return None
+-update_dict = update_data.model_dump(exclude_unset=True, mode='json')
+-sensitive_fields = ['nome_paciente', 'queixa_principal', 'historico_doenca_atual', 'historia_familiar', 'sistema_respiratorio', 'sistema_cardiovascular', 'abdome', 'estado_nutricional', 'eliminacoes_fisiologicas', 'drenos_sondas_cateteres', 'pele_mucosas', 'apoio_familiar_social', 'necessidades_emocionais_espirituais']
+-antecedentes_sensitive_fields = ['outras_doencas_cronicas', 'cirurgias_anteriores', 'alergias', 'medicamentos_uso_continuo', 'outros_habitos']
+-for field in sensitive_fields:
+-    if field in update_dict and update_dict[field] is not None:
+-        if isinstance(update_dict[field], str) and update_dict[field].strip():
+-            update_dict[field] = encrypt_data(update_dict[field])
+-if 'antecedentes_pessoais' in update_dict and update_dict['antecedentes_pessoais'] is not None:
+-    for field in antecedentes_sensitive_fields:
+-        if field in update_dict['antecedentes_pessoais'] and update_dict['antecedentes_pessoais'][field] is not None:
+-            if isinstance(update_dict['antecedentes_pessoais'][field], str) and update_dict['antecedentes_pessoais'][field].strip():
+-                update_dict['antecedentes_pessoais'][field] = encrypt_data(update_dict['antecedentes_pessoais'][field])
+-update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
+-anamnese_ref.update(update_dict)
+-updated_doc = anamnese_ref.get()
+-data = updated_doc.to_dict()
+-data['id'] = updated_doc.id
+-for field in sensitive_fields:
+-    if field in data and data[field] is not None:
+-        if isinstance(data[field], str) and data[field].strip():
+-            try:
+-                data[field] = decrypt_data(data[field])
+-            except Exception as e:
+-                logger.error(f'Erro ao descriptografar campo {field} da anamnese {anamnese_id}: {e}')
+-                data[field] = '[Erro na descriptografia]'
+-if 'antecedentes_pessoais' in data and data['antecedentes_pessoais'] is not None:
+-    for field in antecedentes_sensitive_fields:
+-        if field in data['antecedentes_pessoais'] and data['antecedentes_pessoais'][field] is not None:
+-            if isinstance(data['antecedentes_pessoais'][field], str) and data['antecedentes_pessoais'][field].strip():
+-                try:
+-                    data['antecedentes_pessoais'][field] = decrypt_data(data['antecedentes_pessoais'][field])
+-                except Exception as e:
+-                    logger.error(f'Erro ao descriptografar campo {field} dos antecedentes pessoais da anamnese {anamnese_id}: {e}')
+-                    data['antecedentes_pessoais'][field] = '[Erro na descriptografia]'
+-return data+'Atualiza uma anamnese específica.'
++try:
++    anamnese_ref = db.collection('anamneses').document(anamnese_id)
++    anamnese_doc = anamnese_ref.get()
++    if not anamnese_doc.exists:
++        logger.warning(f'Anamnese {anamnese_id} não encontrada')
++        return None
++    anamnese_data = anamnese_doc.to_dict()
++    if anamnese_data.get('paciente_id') != paciente_id:
++        logger.warning(f'Anamnese {anamnese_id} não pertence ao paciente {paciente_id}')
++        return None
++    update_dict = update_data.model_dump(exclude_unset=True)
++    update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
++    anamnese_ref.update(update_dict)
++    updated_doc = anamnese_ref.get()
++    updated_data = updated_doc.to_dict()
++    updated_data['id'] = updated_doc.id
++    logger.info(f'Anamnese {anamnese_id} atualizada com sucesso')
++    return updated_data
++except Exception as e:
++    logger.error(f'Erro ao atualizar anamnese {anamnese_id}: {e}')
++    return None\n- criar_relatorio_medico:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,11 +1,15 @@
+-'\n    Cria um novo relatório médico para um paciente.\n    '
+-consultas = listar_consultas(db, paciente_id)
+-if not consultas:
+-    raise HTTPException(status_code=404, detail='Nenhum plano de cuidado (consulta) encontrado para este paciente.')
+-consulta_id_recente = consultas[0]['id']
+-relatorio_dict = {'paciente_id': paciente_id, 'negocio_id': relatorio_data.negocio_id, 'criado_por_id': autor.id, 'medico_id': relatorio_data.medico_id, 'consulta_id': consulta_id_recente, 'conteudo': relatorio_data.conteudo, 'status': 'pendente', 'fotos': [], 'motivo_recusa': None, 'data_criacao': datetime.utcnow(), 'data_revisao': None}
+-doc_ref = db.collection('relatorios_medicos').document()
+-doc_ref.set(relatorio_dict)
+-relatorio_dict['id'] = doc_ref.id
+-logger.info(f'Relatório médico {doc_ref.id} criado para o paciente {paciente_id} pelo usuário {autor.id}.')
+-return relatorio_dict+'Cria um novo relatório médico.'
++try:
++    relatorio_dict = {'paciente_id': paciente_id, 'autor_id': autor.id, 'autor_nome': autor.nome, 'autor_email': autor.email, 'negocio_id': relatorio_data.negocio_id, 'tipo': relatorio_data.tipo, 'titulo': relatorio_data.titulo, 'conteudo': relatorio_data.conteudo, 'status': 'pendente', 'prioridade': relatorio_data.prioridade or 'media', 'data_solicitacao': firestore.SERVER_TIMESTAMP, 'created_at': firestore.SERVER_TIMESTAMP, 'updated_at': firestore.SERVER_TIMESTAMP}
++    if relatorio_data.data_consulta:
++        relatorio_dict['data_consulta'] = relatorio_data.data_consulta
++    if relatorio_data.observacoes:
++        relatorio_dict['observacoes'] = relatorio_data.observacoes
++    doc_ref = db.collection('relatorios_medicos').document()
++    doc_ref.set(relatorio_dict)
++    relatorio_dict['id'] = doc_ref.id
++    logger.info(f'Relatório médico criado para paciente {paciente_id} por {autor.nome}')
++    return relatorio_dict
++except Exception as e:
++    logger.error(f'Erro ao criar relatório médico: {e}')
++    raise\n- get_ficha_completa_paciente:\n  - Parameters are different. Backup: ['db', 'paciente_id', 'consulta_id'], Crud: ['db', 'paciente_id']\n  - Body is different:\n--- backup
++++ crud
+@@ -1,11 +1,15 @@
+-'\n    Retorna um dicionário com os dados da ficha do paciente (sem exames),\n    filtrando para mostrar apenas o "Plano Ativo" (o mais recente).\n    '
+-consultas = listar_consultas(db, paciente_id)
+-if consulta_id:
+-    ultima_consulta_id = consulta_id
+-else:
++'Retorna a ficha clínica completa do paciente.'
++from .anamneses import listar_consultas, listar_medicacoes, listar_checklist, listar_orientacoes
++try:
++    consultas = listar_consultas(db, paciente_id)
+     if not consultas:
+         return {'consultas': [], 'medicacoes': [], 'checklist': [], 'orientacoes': []}
+-    ultima_consulta_id = consultas[0]['id']
+-ficha = {'consultas': consultas, 'medicacoes': listar_medicacoes(db, paciente_id, consulta_id=ultima_consulta_id), 'checklist': listar_checklist(db, paciente_id, consulta_id=ultima_consulta_id), 'orientacoes': listar_orientacoes(db, paciente_id, consulta_id=ultima_consulta_id)}
+-ficha['checklist'] = _dedup_checklist_items(ficha.get('checklist', []))
+-return ficha+    consulta_mais_recente = max(consultas, key=lambda x: x.get('data_consulta', ''))
++    consulta_id = consulta_mais_recente.get('id')
++    medicacoes = listar_medicacoes(db, paciente_id, consulta_id) if consulta_id else []
++    checklist = listar_checklist(db, paciente_id, consulta_id) if consulta_id else []
++    orientacoes = listar_orientacoes(db, paciente_id, consulta_id) if consulta_id else []
++    return {'consultas': consultas, 'medicacoes': medicacoes, 'checklist': checklist, 'orientacoes': orientacoes}
++except Exception as e:
++    logger.error(f'Erro ao buscar ficha completa do paciente {paciente_id}: {e}')
++    return {'consultas': [], 'medicacoes': [], 'checklist': [], 'orientacoes': []}\n- get_checklist_diario_plano_ativo:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,41 +1,19 @@
+-'\n    Busca o checklist do dia com a lógica corrigida.\n    1. Encontra o plano de cuidado (consulta) que estava ativo NA DATA solicitada.\n    2. Se nenhum plano existia naquela data, retorna [].\n    3. Se um plano existia, busca o checklist daquela data.\n    4. A replicação de um novo checklist só ocorre se a data solicitada for HOJE.\n    5. CORREÇÃO: Garante que a lista final não tenha itens duplicados.\n    '
++'Busca o checklist diário do plano ativo do paciente.'
+ try:
+-    end_of_day = datetime.combine(dia, time.max)
+-    consulta_ref = db.collection('usuarios').document(paciente_id).collection('consultas')
+-    query_plano_valido = consulta_ref.where('created_at', '<=', end_of_day).order_by('created_at', direction=firestore.Query.DESCENDING).limit(1)
+-    docs_plano_valido = list(query_plano_valido.stream())
+-    if not docs_plano_valido:
+-        logger.info(f'Nenhum plano de cuidado ativo para {paciente_id} em {dia.isoformat()}.')
++    planos_query = db.collection('planos_tratamento').where('paciente_id', '==', paciente_id).where('negocio_id', '==', negocio_id).where('ativo', '==', True).limit(1)
++    planos = list(planos_query.stream())
++    if not planos:
+         return []
+-    plano_valido_id = docs_plano_valido[0].id
+-    logger.info(f'Plano válido para {dia.isoformat()} é a consulta {plano_valido_id}.')
+-    checklist_template = listar_checklist(db, paciente_id, plano_valido_id)
+-    if not checklist_template:
+-        logger.info(f'Plano {plano_valido_id} não possui checklist.')
+-        return []
+-    col_ref = db.collection('usuarios').document(paciente_id).collection('checklist')
+-    start_dt = datetime.combine(dia, time.min)
+-    end_dt = datetime.combine(dia, time.max)
+-    query_checklist_do_dia = col_ref.where('negocio_id', '==', negocio_id).where('data_criacao', '>=', start_dt).where('data_criacao', '<=', end_dt).where('consulta_id', '==', plano_valido_id)
+-    docs_checklist_do_dia = list(query_checklist_do_dia.stream())
+-    if not docs_checklist_do_dia and dia == date.today():
+-        logger.info(f'Replicando {len(checklist_template)} itens do plano {plano_valido_id} para hoje.')
+-        batch = db.batch()
+-        for item_template in checklist_template:
+-            novo_doc_ref = col_ref.document()
+-            batch.set(novo_doc_ref, {'paciente_id': paciente_id, 'negocio_id': negocio_id, 'descricao_item': item_template.get('descricao_item', 'Item sem descrição'), 'concluido': False, 'data_criacao': datetime.combine(dia, datetime.utcnow().time()), 'consulta_id': plano_valido_id})
+-        batch.commit()
+-        docs_checklist_do_dia = list(query_checklist_do_dia.stream())
+-    itens_formatados = []
+-    descricoes_vistas = set()
+-    for doc in docs_checklist_do_dia:
++    plano_ativo = planos[0].to_dict()
++    plano_id = planos[0].id
++    checklist_query = db.collection('planos_tratamento').document(plano_id).collection('checklist_diario')
++    checklist = []
++    for doc in checklist_query.stream():
+         item_data = doc.to_dict()
+-        descricao = item_data.get('descricao_item', '')
+-        if descricao not in descricoes_vistas:
+-            itens_formatados.append({'id': doc.id, 'descricao': descricao, 'concluido': item_data.get('concluido', False)})
+-            descricoes_vistas.add(descricao)
+-    logger.info(f'Retornando {len(itens_formatados)} itens de checklist únicos para o dia {dia.isoformat()}.')
+-    return itens_formatados
++        item_data['id'] = doc.id
++        checklist.append(item_data)
++    logger.info(f'Retornando {len(checklist)} itens do plano ativo para checklist diário')
++    return checklist
+ except Exception as e:
+-    logger.error(f'ERRO CRÍTICO ao buscar checklist do plano ativo para o paciente {paciente_id}: {e}')
+-    raise HTTPException(status_code=500, detail=f'Erro interno ao processar o checklist: {e}')+    logger.error(f'Erro ao buscar checklist do plano ativo: {e}')
++    return []\n- listar_relatorios_por_paciente:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,51 +1,13 @@
+-'\n    Lista todos os relatórios médicos de um paciente específico, ordenados por data de criação.\n    '
++'Lista todos os relatórios médicos de um paciente.'
+ relatorios = []
+ try:
+-    query = db.collection('relatorios_medicos').where('paciente_id', '==', paciente_id).order_by('data_criacao', direction=firestore.Query.DESCENDING)
+-    profissionais_cache = {}
++    query = db.collection('relatorios_medicos').where('paciente_id', '==', paciente_id).order_by('created_at', direction=firestore.Query.DESCENDING)
+     for doc in query.stream():
+-        data = doc.to_dict()
+-        data['id'] = doc.id
+-        medico_id = data.get('medico_id')
+-        if medico_id:
+-            if medico_id in profissionais_cache:
+-                data['medico_nome'] = profissionais_cache[medico_id]['nome']
+-            else:
+-                medico_doc = db.collection('usuarios').document(medico_id).get()
+-                if medico_doc.exists:
+-                    medico_data = medico_doc.to_dict()
+-                    nome_medico = medico_data.get('nome', 'Médico desconhecido')
+-                    if nome_medico and nome_medico != 'Médico desconhecido':
+-                        try:
+-                            nome_medico = decrypt_data(nome_medico)
+-                        except Exception as e:
+-                            logger.error(f'Erro ao descriptografar nome do médico {medico_id}: {e}')
+-                            nome_medico = '[Erro na descriptografia]'
+-                    profissionais_cache[medico_id] = {'nome': nome_medico}
+-                    data['medico_nome'] = nome_medico
+-                else:
+-                    data['medico_nome'] = 'Médico não encontrado'
+-        criado_por_id = data.get('criado_por_id')
+-        if criado_por_id and criado_por_id != medico_id:
+-            if criado_por_id in profissionais_cache:
+-                data['criado_por_nome'] = profissionais_cache[criado_por_id]['nome']
+-            else:
+-                criador_doc = db.collection('usuarios').document(criado_por_id).get()
+-                if criador_doc.exists:
+-                    criador_data = criador_doc.to_dict()
+-                    nome_criador = criador_data.get('nome', 'Criador desconhecido')
+-                    if nome_criador and nome_criador != 'Criador desconhecido':
+-                        try:
+-                            nome_criador = decrypt_data(nome_criador)
+-                        except Exception as e:
+-                            logger.error(f'Erro ao descriptografar nome do criador {criado_por_id}: {e}')
+-                            nome_criador = '[Erro na descriptografia]'
+-                    profissionais_cache[criado_por_id] = {'nome': nome_criador}
+-                    data['criado_por_nome'] = nome_criador
+-                else:
+-                    data['criado_por_nome'] = 'Criador não encontrado'
+-        relatorios.append(data)
++        relatorio_data = doc.to_dict()
++        relatorio_data['id'] = doc.id
++        relatorios.append(relatorio_data)
++    logger.info(f'Retornando {len(relatorios)} relatórios para o paciente {paciente_id}')
+     return relatorios
+ except Exception as e:
+-    logger.error(f'Erro ao listar relatórios para o paciente {paciente_id}: {e}')
++    logger.error(f'Erro ao listar relatórios do paciente {paciente_id}: {e}')
+     return []\n- vincular_paciente_enfermeiro:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,50 +1,16 @@
+-'Vincula ou desvincula um paciente de um enfermeiro.'
+-paciente_ref = db.collection('usuarios').document(paciente_id)
+-if enfermeiro_id is None:
+-    paciente_ref.update({'enfermeiro_id': firestore.DELETE_FIELD})
+-    acao_log = 'DESVINCULO_PACIENTE_ENFERMEIRO'
+-    detalhes_log = {'paciente_id': paciente_id}
+-    logger.info(f'Paciente {paciente_id} desvinculado do enfermeiro.')
+-else:
+-    perfil_enfermeiro = buscar_profissional_por_id(db, enfermeiro_id)
+-    if not perfil_enfermeiro:
++'Vincula um paciente a um enfermeiro.'
++try:
++    paciente_ref = db.collection('usuarios').document(paciente_id)
++    paciente_doc = paciente_ref.get()
++    if not paciente_doc.exists:
+         return None
+-    usuario_enfermeiro = buscar_usuario_por_firebase_uid(db, perfil_enfermeiro['usuario_uid'])
+-    if not usuario_enfermeiro:
+-        return None
+-    usuario_enfermeiro_id_para_salvar = usuario_enfermeiro['id']
+-    paciente_ref.update({'enfermeiro_id': usuario_enfermeiro_id_para_salvar})
+-    acao_log = 'VINCULO_PACIENTE_ENFERMEIRO'
+-    detalhes_log = {'paciente_id': paciente_id, 'enfermeiro_id': usuario_enfermeiro_id_para_salvar}
+-    logger.info(f'Paciente {paciente_id} vinculado ao enfermeiro {usuario_enfermeiro_id_para_salvar}.')
+-criar_log_auditoria(db, autor_uid=autor_uid, negocio_id=negocio_id, acao=acao_log, detalhes=detalhes_log)
+-doc = paciente_ref.get()
+-if doc.exists:
+-    data = doc.to_dict()
+-    data['id'] = doc.id
+-    if 'nome' in data and data['nome']:
+-        try:
+-            data['nome'] = decrypt_data(data['nome'])
+-        except Exception as e:
+-            logger.error(f'Erro ao descriptografar nome do paciente {doc.id}: {e}')
+-            data['nome'] = '[Erro na descriptografia]'
+-    if 'telefone' in data and data['telefone']:
+-        try:
+-            data['telefone'] = decrypt_data(data['telefone'])
+-        except Exception as e:
+-            logger.error(f'Erro ao descriptografar telefone do paciente {doc.id}: {e}')
+-            data['telefone'] = '[Erro na descriptografia]'
+-    if 'endereco' in data and data['endereco']:
+-        endereco_descriptografado = {}
+-        for key, value in data['endereco'].items():
+-            if value and isinstance(value, str) and value.strip():
+-                try:
+-                    endereco_descriptografado[key] = decrypt_data(value)
+-                except Exception as e:
+-                    logger.error(f'Erro ao descriptografar campo de endereço {key} do paciente {doc.id}: {e}')
+-                    endereco_descriptografado[key] = '[Erro na descriptografia]'
+-            else:
+-                endereco_descriptografado[key] = value
+-        data['endereco'] = endereco_descriptografado
+-    return data
+-return None+    update_data = {f'vinculos.{negocio_id}.enfermeiro_id': enfermeiro_id, 'updated_at': firestore.SERVER_TIMESTAMP}
++    paciente_ref.update(update_data)
++    logger.info(f'Paciente {paciente_id} vinculado ao enfermeiro {enfermeiro_id}')
++    updated_doc = paciente_ref.get()
++    updated_data = updated_doc.to_dict()
++    updated_data['id'] = updated_doc.id
++    return updated_data
++except Exception as e:
++    logger.error(f'Erro ao vincular paciente ao enfermeiro: {e}')
++    return None\n- listar_medicos_por_negocio:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,12 +1,21 @@
+-'Lista todos os médicos de referência de uma clínica.'
++'Lista todos os médicos de um negócio.'
+ medicos = []
+ try:
+     query = db.collection('medicos').where('negocio_id', '==', negocio_id)
+     for doc in query.stream():
+         medico_data = doc.to_dict()
+         medico_data['id'] = doc.id
++        usuario_uid = medico_data.get('usuario_uid')
++        if usuario_uid:
++            user_query = db.collection('usuarios').where('firebase_uid', '==', usuario_uid).limit(1)
++            user_docs = list(user_query.stream())
++            if user_docs:
++                user_data = user_docs[0].to_dict()
++                user_data = decrypt_user_sensitive_fields(user_data, USER_SENSITIVE_FIELDS)
++                medico_data.update({'nome': user_data.get('nome'), 'email': user_data.get('email'), 'telefone': user_data.get('telefone')})
+         medicos.append(medico_data)
++    logger.info(f'Retornando {len(medicos)} médicos para o negócio {negocio_id}')
+     return medicos
+ except Exception as e:
+-    logger.error(f'Erro ao listar médicos para o negocio_id {negocio_id}: {e}')
++    logger.error(f'Erro ao listar médicos do negócio {negocio_id}: {e}')
+     return []\n- listar_avaliacoes_por_profissional:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,8 +1,13 @@
+-'Lista todas as avaliações de um profissional específico.'
++'Lista todas as avaliações de um profissional.'
+ avaliacoes = []
+-query = db.collection('avaliacoes').where('profissional_id', '==', profissional_id).order_by('data', direction=firestore.Query.DESCENDING)
+-for doc in query.stream():
+-    avaliacao_data = doc.to_dict()
+-    avaliacao_data['id'] = doc.id
+-    avaliacoes.append(avaliacao_data)
+-return avaliacoes+try:
++    query = db.collection('avaliacoes').where('profissional_id', '==', profissional_id).order_by('created_at', direction=firestore.Query.DESCENDING)
++    for doc in query.stream():
++        avaliacao_data = doc.to_dict()
++        avaliacao_data['id'] = doc.id
++        avaliacoes.append(avaliacao_data)
++    logger.info(f'Retornando {len(avaliacoes)} avaliações do profissional {profissional_id}')
++    return avaliacoes
++except Exception as e:
++    logger.error(f'Erro ao listar avaliações: {e}')
++    return []\n- atualizar_item_checklist_diario:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,7 +1,20 @@
+-'Permite ao técnico marcar os itens ao longo do dia.'
+-item_ref = db.collection('usuarios').document(paciente_id).collection('checklist').document(item_id)
+-if not item_ref.get().exists:
+-    return None
+-item_ref.update(update_data.model_dump())
+-updated_doc = item_ref.get().to_dict()
+-return {'id': item_id, 'descricao': updated_doc.get('descricao_item', ''), 'concluido': updated_doc.get('concluido', False)}+'Atualiza um item do checklist diário (versão sem data).'
++try:
++    item_ref = db.collection('checklist_diario').document(item_id)
++    item_doc = item_ref.get()
++    if not item_doc.exists:
++        return None
++    item_data = item_doc.to_dict()
++    if item_data.get('paciente_id') != paciente_id:
++        return None
++    update_dict = update_data.model_dump(exclude_unset=True)
++    update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
++    item_ref.update(update_dict)
++    updated_doc = item_ref.get()
++    updated_data = updated_doc.to_dict()
++    updated_data['id'] = updated_doc.id
++    logger.info(f'Item checklist diário {item_id} atualizado')
++    return updated_data
++except Exception as e:
++    logger.error(f'Erro ao atualizar item checklist diário: {e}')
++    return None\n- listar_servicos_por_profissional:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,12 +1,13 @@
+-'Lista todos os serviços de um profissional específico.'
++'Lista todos os serviços de um profissional.'
+ servicos = []
+ try:
+-    query = db.collection('servicos').where('profissional_id', '==', profissional_id)
++    query = db.collection('servicos').where('profissional_id', '==', profissional_id).where('ativo', '==', True)
+     for doc in query.stream():
+         servico_data = doc.to_dict()
+         servico_data['id'] = doc.id
+         servicos.append(servico_data)
++    logger.info(f'Retornando {len(servicos)} serviços para o profissional {profissional_id}')
+     return servicos
+ except Exception as e:
+-    logger.error(f'Erro ao listar serviços para o profissional_id {profissional_id}: {e}')
++    logger.error(f'Erro ao listar serviços do profissional {profissional_id}: {e}')
+     return []\n- listar_anamneses_por_paciente:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,27 +1,13 @@
+-'Lista todas as anamneses de um paciente, descriptografando dados sensíveis.'
++'Lista todas as anamneses de um paciente.'
+ anamneses = []
+-query = db.collection('usuarios').document(paciente_id).collection('anamneses').order_by('data_avaliacao', direction=firestore.Query.DESCENDING)
+-sensitive_fields = ['nome_paciente', 'queixa_principal', 'historico_doenca_atual', 'historia_familiar', 'sistema_respiratorio', 'sistema_cardiovascular', 'abdome', 'estado_nutricional', 'eliminacoes_fisiologicas', 'drenos_sondas_cateteres', 'pele_mucosas', 'apoio_familiar_social', 'necessidades_emocionais_espirituais']
+-antecedentes_sensitive_fields = ['outras_doencas_cronicas', 'cirurgias_anteriores', 'alergias', 'medicamentos_uso_continuo', 'outros_habitos']
+-for doc in query.stream():
+-    data = doc.to_dict()
+-    data['id'] = doc.id
+-    for field in sensitive_fields:
+-        if field in data and data[field] is not None:
+-            if isinstance(data[field], str) and data[field].strip():
+-                try:
+-                    data[field] = decrypt_data(data[field])
+-                except Exception as e:
+-                    logger.error(f'Erro ao descriptografar campo {field} da anamnese {doc.id}: {e}')
+-                    data[field] = '[Erro na descriptografia]'
+-    if 'antecedentes_pessoais' in data and data['antecedentes_pessoais'] is not None:
+-        for field in antecedentes_sensitive_fields:
+-            if field in data['antecedentes_pessoais'] and data['antecedentes_pessoais'][field] is not None:
+-                if isinstance(data['antecedentes_pessoais'][field], str) and data['antecedentes_pessoais'][field].strip():
+-                    try:
+-                        data['antecedentes_pessoais'][field] = decrypt_data(data['antecedentes_pessoais'][field])
+-                    except Exception as e:
+-                        logger.error(f'Erro ao descriptografar campo {field} dos antecedentes pessoais da anamnese {doc.id}: {e}')
+-                        data['antecedentes_pessoais'][field] = '[Erro na descriptografia]'
+-    anamneses.append(data)
+-return anamneses+try:
++    query = db.collection('anamneses').where('paciente_id', '==', paciente_id).order_by('created_at', direction=firestore.Query.DESCENDING)
++    for doc in query.stream():
++        anamnese_data = doc.to_dict()
++        anamnese_data['id'] = doc.id
++        anamneses.append(anamnese_data)
++    logger.info(f'Retornando {len(anamneses)} anamneses para o paciente {paciente_id}')
++    return anamneses
++except Exception as e:
++    logger.error(f'Erro ao listar anamneses do paciente {paciente_id}: {e}')
++    return []\n- listar_consultas:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,18 +1,13 @@
+ 'Lista todas as consultas de um paciente.'
+ consultas = []
+ try:
+-    col = db.collection('usuarios').document(paciente_id).collection('consultas')
+-    query = col.order_by('created_at', direction=firestore.Query.DESCENDING).order_by('__name__', direction=firestore.Query.DESCENDING)
++    query = db.collection('consultas').where('paciente_id', '==', paciente_id).order_by('created_at', direction=firestore.Query.DESCENDING)
+     for doc in query.stream():
+         consulta_data = doc.to_dict()
+         consulta_data['id'] = doc.id
+         consultas.append(consulta_data)
+-    if not consultas:
+-        query2 = col.order_by('__name__', direction=firestore.Query.DESCENDING)
+-        for doc in query2.stream():
+-            consulta_data = doc.to_dict()
+-            consulta_data['id'] = doc.id
+-            consultas.append(consulta_data)
++    logger.info(f'Retornando {len(consultas)} consultas para o paciente {paciente_id}')
++    return consultas
+ except Exception as e:
+     logger.error(f'Erro ao listar consultas do paciente {paciente_id}: {e}')
+-return consultas+    return []\n- buscar_profissional_por_id:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,12 +1,19 @@
+-'Busca um profissional pelo seu ID de documento.'
++'Busca um profissional pelo ID.'
+ try:
+-    doc_ref = db.collection('profissionais').document(profissional_id)
+-    doc = doc_ref.get()
++    doc = db.collection('profissionais').document(profissional_id).get()
+     if doc.exists:
+         prof_data = doc.to_dict()
+         prof_data['id'] = doc.id
++        usuario_uid = prof_data.get('usuario_uid')
++        if usuario_uid:
++            user_query = db.collection('usuarios').where('firebase_uid', '==', usuario_uid).limit(1)
++            user_docs = list(user_query.stream())
++            if user_docs:
++                user_data = user_docs[0].to_dict()
++                user_data = decrypt_user_sensitive_fields(user_data, USER_SENSITIVE_FIELDS)
++                prof_data.update({'nome': user_data.get('nome'), 'email': user_data.get('email'), 'telefone': user_data.get('telefone')})
+         return prof_data
+     return None
+ except Exception as e:
+-    logger.error(f'Erro ao buscar profissional por ID {profissional_id}: {e}')
++    logger.error(f'Erro ao buscar profissional {profissional_id}: {e}')
+     return None\n- deletar_registro_diario_estruturado:\n  - Parameters are different. Backup: ['db', 'paciente_id', 'registro_id', 'tecnico_id'], Crud: ['db', 'registro_id', 'tecnico_id']\n  - Body is different:\n--- backup
++++ crud
+@@ -1,14 +1,15 @@
+-'Deleta um registro estruturado, validando a autoria.'
++'Remove um registro diário estruturado.'
+ try:
+-    item_ref = db.collection('usuarios').document(paciente_id).collection('registros_diarios_estruturados').document(registro_id)
+-    doc = item_ref.get()
+-    if not doc.exists:
++    registro_ref = db.collection('registros_diarios_estruturados').document(registro_id)
++    registro_doc = registro_ref.get()
++    if not registro_doc.exists:
+         return False
+-    if doc.to_dict().get('tecnico_id') != tecnico_id:
+-        raise PermissionError('Você só pode deletar seus próprios registros.')
+-    item_ref.delete()
+-    logger.info(f'Registro estruturado {registro_id} do paciente {paciente_id} deletado pelo técnico {tecnico_id}.')
++    registro_data = registro_doc.to_dict()
++    if registro_data.get('tecnico_id') != tecnico_id:
++        return False
++    registro_ref.delete()
++    logger.info(f'Registro estruturado {registro_id} removido')
+     return True
+ except Exception as e:
+-    logger.error(f'Erro ao deletar registro estruturado {registro_id} do paciente {paciente_id}: {e}')
+-    raise e+    logger.error(f'Erro ao deletar registro estruturado: {e}')
++    return False\n- listar_pacientes_por_profissional_ou_tecnico:\n  - Body is different:\n--- backup
++++ crud
+@@ -15,32 +15,13 @@
+         status_no_negocio = paciente_data.get('status_por_negocio', {}).get(negocio_id, 'ativo')
+         if status_no_negocio == 'ativo':
+             paciente_data['id'] = doc.id
+-            if 'nome' in paciente_data and paciente_data['nome']:
+-                try:
+-                    paciente_data['nome'] = decrypt_data(paciente_data['nome'])
+-                except Exception as e:
+-                    logger.error(f'Erro ao descriptografar nome do paciente {doc.id}: {e}')
+-                    paciente_data['nome'] = '[Erro na descriptografia]'
+-            if 'telefone' in paciente_data and paciente_data['telefone']:
+-                try:
+-                    paciente_data['telefone'] = decrypt_data(paciente_data['telefone'])
+-                except Exception as e:
+-                    logger.error(f'Erro ao descriptografar telefone do paciente {doc.id}: {e}')
+-                    paciente_data['telefone'] = '[Erro na descriptografia]'
++            paciente_data['firebase_uid'] = paciente_data.get('firebase_uid')
++            paciente_data = decrypt_user_sensitive_fields(paciente_data, USER_SENSITIVE_FIELDS)
+             if 'endereco' in paciente_data and paciente_data['endereco']:
+-                endereco_descriptografado = {}
+-                for key, value in paciente_data['endereco'].items():
+-                    if value and isinstance(value, str) and value.strip():
+-                        try:
+-                            endereco_descriptografado[key] = decrypt_data(value)
+-                        except Exception as e:
+-                            logger.error(f'Erro ao descriptografar campo de endereço {key} do paciente {doc.id}: {e}')
+-                            endereco_descriptografado[key] = '[Erro na descriptografia]'
+-                    else:
+-                        endereco_descriptografado[key] = value
+-                paciente_data['endereco'] = endereco_descriptografado
++                paciente_data['endereco'] = decrypt_endereco_fields(paciente_data['endereco'])
+             pacientes.append(paciente_data)
++    logger.info(f'Retornando {len(pacientes)} pacientes para {role} {usuario_id} no negócio {negocio_id}')
+     return pacientes
+ except Exception as e:
+-    logger.error(f"Erro ao listar pacientes para o usuário {usuario_id} com role '{role}': {e}")
++    logger.error(f'Erro ao listar pacientes para {role} {usuario_id}: {e}')
+     return []\n- adicionar_fcm_token:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,8 +1,18 @@
+-'Adiciona um FCM token a um usuário, evitando duplicatas.'
++'Adiciona um token FCM para um usuário.'
+ try:
+-    user_doc = buscar_usuario_por_firebase_uid(db, firebase_uid)
+-    if user_doc:
+-        doc_ref = db.collection('usuarios').document(user_doc['id'])
+-        doc_ref.update({'fcm_tokens': firestore.ArrayUnion([fcm_token])})
++    user_query = db.collection('usuarios').where('firebase_uid', '==', firebase_uid).limit(1)
++    user_docs = list(user_query.stream())
++    if user_docs:
++        user_ref = user_docs[0].reference
++        user_data = user_docs[0].to_dict()
++        fcm_tokens = user_data.get('fcm_tokens', [])
++        if fcm_token not in fcm_tokens:
++            fcm_tokens.append(fcm_token)
++            user_ref.update({'fcm_tokens': fcm_tokens})
++            logger.info(f'Token FCM adicionado para usuário {firebase_uid}')
++        else:
++            logger.info(f'Token FCM já existe para usuário {firebase_uid}')
++    else:
++        logger.warning(f'Usuário com firebase_uid {firebase_uid} não encontrado')
+ except Exception as e:
+-    logger.error(f'Erro ao adicionar FCM token para o UID {firebase_uid}: {e}')+    logger.error(f'Erro ao adicionar token FCM: {e}')\n- definir_horarios_trabalho:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,11 +1,17 @@
+ 'Define os horários de trabalho para um profissional, substituindo os existentes.'
+-prof_ref = db.collection('profissionais').document(profissional_id)
+-horarios_ref = prof_ref.collection('horarios_trabalho')
+-batch = db.batch()
+-for doc in horarios_ref.stream():
+-    batch.delete(doc.reference)
+-batch.commit()
+-for horario in horarios:
+-    horario_to_save = {'dia_semana': horario.dia_semana, 'hora_inicio': horario.hora_inicio.isoformat(), 'hora_fim': horario.hora_fim.isoformat()}
+-    horarios_ref.document(str(horario.dia_semana)).set(horario_to_save)
+-return listar_horarios_trabalho(db, profissional_id)+try:
++    query = db.collection('horarios_trabalho').where('profissional_id', '==', profissional_id)
++    batch = db.batch()
++    for doc in query.stream():
++        batch.delete(doc.reference)
++    batch.commit()
++    for horario in horarios:
++        horario_dict = {'profissional_id': profissional_id, 'dia_semana': horario.dia_semana, 'hora_inicio': horario.hora_inicio.isoformat(), 'hora_fim': horario.hora_fim.isoformat()}
++        horario_dict = add_timestamps(horario_dict, is_update=False)
++        doc_ref = db.collection('horarios_trabalho').document()
++        doc_ref.set(horario_dict)
++    logger.info(f'Horários de trabalho definidos para profissional {profissional_id}')
++    return listar_horarios_trabalho(db, profissional_id)
++except Exception as e:
++    logger.error(f'Erro ao definir horários de trabalho: {e}')
++    raise\n- listar_orientacoes:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,11 +1,13 @@
+-'Lista todas as orientações de um paciente, filtrando-as pelo ID da consulta.'
++'Lista todas as orientações de uma consulta específica.'
+ orientacoes = []
+ try:
+-    query = db.collection('usuarios').document(paciente_id).collection('orientacoes').where('consulta_id', '==', consulta_id).order_by('data_criacao', direction=firestore.Query.DESCENDING)
++    query = db.collection('orientacoes').where('consulta_id', '==', consulta_id).order_by('created_at', direction=firestore.Query.DESCENDING)
+     for doc in query.stream():
+         orientacao_data = doc.to_dict()
+         orientacao_data['id'] = doc.id
+         orientacoes.append(orientacao_data)
++    logger.info(f'Retornando {len(orientacoes)} orientações para a consulta {consulta_id}')
++    return orientacoes
+ except Exception as e:
+-    logger.error(f'Erro ao listar orientações do paciente {paciente_id}: {e}')
+-return orientacoes+    logger.error(f'Erro ao listar orientações da consulta {consulta_id}: {e}')
++    return []\n- buscar_profissional_por_uid:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,12 +1,23 @@
+-'Busca um perfil de profissional com base no firebase_uid do usuário e no negocio_id.'
++'Busca um profissional pelo firebase_uid em um negócio específico.'
+ try:
+-    query = db.collection('profissionais').where('negocio_id', '==', negocio_id).where('usuario_uid', '==', firebase_uid).limit(1)
+-    docs = list(query.stream())
+-    if docs:
+-        prof_data = docs[0].to_dict()
+-        prof_data['id'] = docs[0].id
++    user_query = db.collection('usuarios').where('firebase_uid', '==', firebase_uid).limit(1)
++    user_docs = list(user_query.stream())
++    if not user_docs:
++        return None
++    user_data = user_docs[0].to_dict()
++    user_data['id'] = user_docs[0].id
++    roles = user_data.get('roles', {})
++    if roles.get(negocio_id) not in ['profissional', 'admin']:
++        return None
++    prof_query = db.collection('profissionais').where('negocio_id', '==', negocio_id).where('usuario_uid', '==', firebase_uid).limit(1)
++    prof_docs = list(prof_query.stream())
++    if prof_docs:
++        prof_data = prof_docs[0].to_dict()
++        prof_data['id'] = prof_docs[0].id
++        user_data = decrypt_user_sensitive_fields(user_data, USER_SENSITIVE_FIELDS)
++        prof_data.update({'nome': user_data.get('nome'), 'email': user_data.get('email'), 'telefone': user_data.get('telefone')})
+         return prof_data
+     return None
+ except Exception as e:
+-    logger.error(f'Erro ao buscar profissional por UID {firebase_uid} no negócio {negocio_id}: {e}')
++    logger.error(f'Erro ao buscar profissional por UID {firebase_uid}: {e}')
+     return None\n- listar_registros_diario:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,47 +1,13 @@
+-'\n    Lista todos os registros do diário de um paciente,\n    retornando uma lista de objetos Pydantic para garantir a serialização correta.\n    '
+-registros_pydantic = []
++'Lista todos os registros diários de um paciente.'
++registros = []
+ try:
+-    query = db.collection('usuarios').document(paciente_id).collection('diario_tecnico').order_by('data_ocorrencia', direction=firestore.Query.DESCENDING)
+-    tecnicos_cache = {}
+-    sensitive_fields = ['anotacao_geral', 'medicamentos', 'atividades', 'intercorrencias']
++    query = db.collection('registros_diarios').where('paciente_id', '==', paciente_id).order_by('data_registro', direction=firestore.Query.DESCENDING)
+     for doc in query.stream():
+         registro_data = doc.to_dict()
+         registro_data['id'] = doc.id
+-        for field in sensitive_fields:
+-            if field in registro_data and registro_data[field] is not None:
+-                if isinstance(registro_data[field], str) and registro_data[field].strip():
+-                    try:
+-                        registro_data[field] = decrypt_data(registro_data[field])
+-                    except Exception as e:
+-                        logger.error(f'Erro ao descriptografar campo {field} do registro diário {doc.id}: {e}')
+-                        registro_data[field] = '[Erro na descriptografia]'
+-        tecnico_id = registro_data.get('tecnico_id')
+-        if tecnico_id:
+-            if tecnico_id in tecnicos_cache:
+-                tecnico_perfil = tecnicos_cache[tecnico_id]
+-            else:
+-                tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
+-                if tecnico_doc.exists:
+-                    tecnico_data = tecnico_doc.to_dict()
+-                    nome_tecnico = tecnico_data.get('nome')
+-                    if nome_tecnico:
+-                        try:
+-                            nome_tecnico = decrypt_data(nome_tecnico)
+-                        except Exception as e:
+-                            logger.error(f'Erro ao descriptografar nome do técnico {tecnico_id}: {e}')
+-                            nome_tecnico = '[Erro na descriptografia]'
+-                    tecnico_perfil = {'id': tecnico_doc.id, 'nome': nome_tecnico, 'email': tecnico_data.get('email')}
+-                    tecnicos_cache[tecnico_id] = tecnico_perfil
+-                else:
+-                    tecnico_perfil = {'id': tecnico_id, 'nome': 'Técnico Desconhecido', 'email': ''}
+-            registro_data['tecnico'] = tecnico_perfil
+-        registro_data.pop('tecnico_id', None)
+-        registro_data.pop('tecnico_nome', None)
+-        try:
+-            modelo_validado = schemas.DiarioTecnicoResponse.model_validate(registro_data)
+-            registros_pydantic.append(modelo_validado)
+-        except Exception as validation_error:
+-            logger.error(f'Falha ao validar o registro do diário {doc.id}: {validation_error}')
++        registros.append(registro_data)
++    logger.info(f'Retornando {len(registros)} registros diários para paciente {paciente_id}')
++    return registros
+ except Exception as e:
+-    logger.error(f'Erro ao listar o diário do paciente {paciente_id}: {e}')
+-return registros_pydantic+    logger.error(f'Erro ao listar registros diários: {e}')
++    return []\n- contar_notificacoes_nao_lidas:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,4 +1,9 @@
+ 'Conta o número de notificações não lidas de um usuário.'
+-query = db.collection('usuarios').document(usuario_id).collection('notificacoes').where('lida', '==', False)
+-docs = query.get()
+-return len(docs)+try:
++    query = db.collection('notificacoes').where('destinatario_id', '==', usuario_id).where('lida', '==', False)
++    count = len(list(query.stream()))
++    logger.info(f'Usuário {usuario_id} tem {count} notificações não lidas')
++    return count
++except Exception as e:
++    logger.error(f'Erro ao contar notificações não lidas: {e}')
++    return 0\n- atualizar_consentimento_lgpd:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,38 +1,20 @@
+-'\n    Atualiza os dados de consentimento LGPD para um usuário específico.\n    '
+-user_ref = db.collection('usuarios').document(user_id)
+-user_doc = user_ref.get()
+-if not user_doc.exists:
+-    logger.warning(f'Tentativa de atualizar consentimento de usuário inexistente: {user_id}')
+-    return None
+-update_dict = consent_data.model_dump()
+-update_dict['tipo_consentimento'] = update_dict['tipo_consentimento'].value
+-user_ref.update(update_dict)
+-logger.info(f'Consentimento LGPD atualizado para o usuário {user_id}.')
+-updated_doc = user_ref.get()
+-data = updated_doc.to_dict()
+-data['id'] = updated_doc.id
+-if 'nome' in data and data['nome']:
+-    try:
+-        data['nome'] = decrypt_data(data['nome'])
+-    except Exception as e:
+-        logger.error(f'Erro ao descriptografar nome do usuário {updated_doc.id}: {e}')
+-        data['nome'] = '[Erro na descriptografia]'
+-if 'telefone' in data and data['telefone']:
+-    try:
+-        data['telefone'] = decrypt_data(data['telefone'])
+-    except Exception as e:
+-        logger.error(f'Erro ao descriptografar telefone do usuário {updated_doc.id}: {e}')
+-        data['telefone'] = '[Erro na descriptografia]'
+-if 'endereco' in data and data['endereco']:
+-    endereco_descriptografado = {}
+-    for key, value in data['endereco'].items():
+-        if value and isinstance(value, str) and value.strip():
+-            try:
+-                endereco_descriptografado[key] = decrypt_data(value)
+-            except Exception as e:
+-                logger.error(f'Erro ao descriptografar campo de endereço {key} do usuário {updated_doc.id}: {e}')
+-                endereco_descriptografado[key] = '[Erro na descriptografia]'
+-        else:
+-            endereco_descriptografado[key] = value
+-    data['endereco'] = endereco_descriptografado
+-return data+'Atualiza o consentimento LGPD de um usuário.'
++try:
++    user_ref = db.collection('usuarios').document(user_id)
++    user_doc = user_ref.get()
++    if not user_doc.exists:
++        logger.warning(f'Usuário {user_id} não encontrado')
++        return None
++    consentimento_dict = consent_data.model_dump()
++    user_ref.update({'consentimento_lgpd': consentimento_dict, 'updated_at': firestore.SERVER_TIMESTAMP})
++    updated_doc = user_ref.get()
++    updated_data = updated_doc.to_dict()
++    updated_data['id'] = updated_doc.id
++    updated_data = decrypt_user_sensitive_fields(updated_data, USER_SENSITIVE_FIELDS)
++    if 'endereco' in updated_data and updated_data['endereco']:
++        updated_data['endereco'] = decrypt_endereco_fields(updated_data['endereco'])
++    logger.info(f'Consentimento LGPD do usuário {user_id} atualizado com sucesso')
++    return updated_data
++except Exception as e:
++    logger.error(f'Erro ao atualizar consentimento LGPD do usuário {user_id}: {e}')
++    return None\n- admin_rebaixar_profissional_para_cliente:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,4 +1,5 @@
+-"\n    Rebaixa um usuário de 'profissional' para 'cliente' e desativa seu perfil profissional.\n    "
++"Rebaixa um usuário de 'profissional' para 'cliente' e desativa seu perfil profissional."
++from .usuarios import buscar_usuario_por_firebase_uid
+ try:
+     user_doc = buscar_usuario_por_firebase_uid(db, profissional_uid)
+     if not user_doc:
+@@ -7,15 +8,14 @@
+     if user_doc.get('roles', {}).get(negocio_id) == 'profissional':
+         user_ref = db.collection('usuarios').document(user_doc['id'])
+         user_ref.update({f'roles.{negocio_id}': 'cliente'})
+-        perfil_profissional = buscar_profissional_por_uid(db, negocio_id, profissional_uid)
+-        if perfil_profissional:
+-            prof_ref = db.collection('profissionais').document(perfil_profissional['id'])
+-            prof_ref.update({'ativo': False})
++        profissional_query = db.collection('profissionais').where('usuario_uid', '==', profissional_uid).where('negocio_id', '==', negocio_id)
++        for doc in profissional_query.stream():
++            doc.reference.update({'ativo': False})
+         logger.info(f"Usuário {user_doc['email']} rebaixado para cliente no negócio {negocio_id}.")
+         return buscar_usuario_por_firebase_uid(db, profissional_uid)
+     else:
+         logger.warning(f"Usuário {user_doc.get('email')} não é um profissional deste negócio e não pode ser rebaixado.")
+         return None
+ except Exception as e:
+-    logger.error(f'Erro ao rebaixar profissional {profissional_uid}: {e}')
++    logger.error(f'Erro ao rebaixar profissional {profissional_uid} para cliente: {e}')
+     return None\n- deletar_servico:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,12 +1,16 @@
+-'Deleta um serviço, garantindo que ele pertence ao profissional correto.'
++'Marca um serviço como inativo (soft delete).'
+ try:
+     servico_ref = db.collection('servicos').document(servico_id)
+     servico_doc = servico_ref.get()
+-    if not servico_doc.exists or servico_doc.to_dict().get('profissional_id') != profissional_id:
+-        logger.warning(f'Tentativa de exclusão do serviço {servico_id} por profissional não autorizado ({profissional_id}).')
++    if not servico_doc.exists:
++        logger.warning(f'Serviço {servico_id} não encontrado')
+         return False
+-    servico_ref.delete()
+-    logger.info(f'Serviço {servico_id} deletado pelo profissional {profissional_id}.')
++    servico_data = servico_doc.to_dict()
++    if servico_data.get('profissional_id') != profissional_id:
++        logger.warning(f'Serviço {servico_id} não pertence ao profissional {profissional_id}')
++        return False
++    servico_ref.update({'ativo': False, 'updated_at': firestore.SERVER_TIMESTAMP})
++    logger.info(f'Serviço {servico_id} deletado (inativado) com sucesso')
+     return True
+ except Exception as e:
+     logger.error(f'Erro ao deletar serviço {servico_id}: {e}')
+\n- criar_profissional:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,6 +1,12 @@
+-'Cria um novo profissional no Firestore.'
+-prof_dict = profissional_data.dict()
+-doc_ref = db.collection('profissionais').document()
+-doc_ref.set(prof_dict)
+-prof_dict['id'] = doc_ref.id
+-return prof_dict+'Cria um novo perfil profissional.'
++try:
++    prof_dict = profissional_data.model_dump()
++    prof_dict = add_timestamps(prof_dict, is_update=False)
++    doc_ref = db.collection('profissionais').document()
++    doc_ref.set(prof_dict)
++    prof_dict['id'] = doc_ref.id
++    logger.info(f'Profissional criado para usuário {profissional_data.usuario_uid}')
++    return prof_dict
++except Exception as e:
++    logger.error(f'Erro ao criar profissional: {e}')
++    raise\n- vincular_supervisor_tecnico:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,50 +1,16 @@
+-'Vincula ou desvincula um supervisor de um técnico.'
+-tecnico_ref = db.collection('usuarios').document(tecnico_id)
+-tecnico_doc = tecnico_ref.get()
+-if not tecnico_doc.exists:
+-    return None
+-if supervisor_id is None:
+-    tecnico_ref.update({'supervisor_id': firestore.DELETE_FIELD})
+-    acao_log = 'DESVINCULO_SUPERVISOR_TECNICO'
+-    detalhes_log = {'tecnico_id': tecnico_id}
+-    logger.info(f'Supervisor desvinculado do técnico {tecnico_id}.')
+-else:
+-    supervisor_ref = db.collection('usuarios').document(supervisor_id)
+-    if not supervisor_ref.get().exists:
+-        raise ValueError('Supervisor não encontrado.')
+-    tecnico_ref.update({'supervisor_id': supervisor_id})
+-    acao_log = 'VINCULO_SUPERVISOR_TECNICO'
+-    detalhes_log = {'tecnico_id': tecnico_id, 'supervisor_id': supervisor_id}
+-    logger.info(f'Supervisor {supervisor_id} vinculado ao técnico {tecnico_id}.')
+-negocio_id = list(tecnico_doc.to_dict().get('roles', {}).keys())[0]
+-criar_log_auditoria(db, autor_uid=autor_uid, negocio_id=negocio_id, acao=acao_log, detalhes=detalhes_log)
+-doc = tecnico_ref.get()
+-if doc.exists:
+-    data = doc.to_dict()
+-    data['id'] = doc.id
+-    if 'nome' in data and data['nome']:
+-        try:
+-            data['nome'] = decrypt_data(data['nome'])
+-        except Exception as e:
+-            logger.error(f'Erro ao descriptografar nome do técnico {doc.id}: {e}')
+-            data['nome'] = '[Erro na descriptografia]'
+-    if 'telefone' in data and data['telefone']:
+-        try:
+-            data['telefone'] = decrypt_data(data['telefone'])
+-        except Exception as e:
+-            logger.error(f'Erro ao descriptografar telefone do técnico {doc.id}: {e}')
+-            data['telefone'] = '[Erro na descriptografia]'
+-    if 'endereco' in data and data['endereco']:
+-        endereco_descriptografado = {}
+-        for key, value in data['endereco'].items():
+-            if value and isinstance(value, str) and value.strip():
+-                try:
+-                    endereco_descriptografado[key] = decrypt_data(value)
+-                except Exception as e:
+-                    logger.error(f'Erro ao descriptografar campo de endereço {key} do técnico {doc.id}: {e}')
+-                    endereco_descriptografado[key] = '[Erro na descriptografia]'
+-            else:
+-                endereco_descriptografado[key] = value
+-        data['endereco'] = endereco_descriptografado
+-    return data
+-return None+'Vincula um técnico a um supervisor.'
++try:
++    tecnico_ref = db.collection('usuarios').document(tecnico_id)
++    tecnico_doc = tecnico_ref.get()
++    if not tecnico_doc.exists:
++        return None
++    update_data = {'supervisor_id': supervisor_id, 'updated_at': firestore.SERVER_TIMESTAMP}
++    tecnico_ref.update(update_data)
++    logger.info(f'Técnico {tecnico_id} vinculado ao supervisor {supervisor_id}')
++    updated_doc = tecnico_ref.get()
++    updated_data = updated_doc.to_dict()
++    updated_data['id'] = updated_doc.id
++    return updated_data
++except Exception as e:
++    logger.error(f'Erro ao vincular supervisor ao técnico: {e}')
++    return None\n- listar_profissionais_por_negocio:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,17 +1,21 @@
+-'Lista todos os profissionais ativos de um negócio específico.'
++'Lista todos os profissionais ativos de um negócio.'
+ profissionais = []
+ try:
+     query = db.collection('profissionais').where('negocio_id', '==', negocio_id).where('ativo', '==', True)
+     for doc in query.stream():
+         prof_data = doc.to_dict()
+         prof_data['id'] = doc.id
+-        usuario_doc = buscar_usuario_por_firebase_uid(db, prof_data.get('usuario_uid'))
+-        if usuario_doc:
+-            prof_data['email'] = usuario_doc.get('email', '')
+-        else:
+-            prof_data['email'] = ''
++        usuario_uid = prof_data.get('usuario_uid')
++        if usuario_uid:
++            user_query = db.collection('usuarios').where('firebase_uid', '==', usuario_uid).limit(1)
++            user_docs = list(user_query.stream())
++            if user_docs:
++                user_data = user_docs[0].to_dict()
++                user_data = decrypt_user_sensitive_fields(user_data, USER_SENSITIVE_FIELDS)
++                prof_data.update({'nome': user_data.get('nome'), 'email': user_data.get('email'), 'telefone': user_data.get('telefone')})
+         profissionais.append(prof_data)
++    logger.info(f'Retornando {len(profissionais)} profissionais para o negócio {negocio_id}')
+     return profissionais
+ except Exception as e:
+-    logger.error(f'Erro ao listar profissionais para o negocio_id {negocio_id}: {e}')
++    logger.error(f'Erro ao listar profissionais do negócio {negocio_id}: {e}')
+     return []\n- update_orientacao:\n  - Body is different:\n--- backup
++++ crud
+@@ -1 +1,20 @@
+-return _update_subcollection_item(db, paciente_id, 'orientacoes', orientacao_id, update_data)+'Atualiza uma orientação.'
++try:
++    orientacao_ref = db.collection('orientacoes').document(orientacao_id)
++    orientacao_doc = orientacao_ref.get()
++    if not orientacao_doc.exists:
++        return None
++    orientacao_data = orientacao_doc.to_dict()
++    if orientacao_data.get('paciente_id') != paciente_id:
++        return None
++    update_dict = update_data.model_dump(exclude_unset=True)
++    update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
++    orientacao_ref.update(update_dict)
++    updated_doc = orientacao_ref.get()
++    updated_data = updated_doc.to_dict()
++    updated_data['id'] = updated_doc.id
++    logger.info(f'Orientação {orientacao_id} atualizada')
++    return updated_data
++except Exception as e:
++    logger.error(f'Erro ao atualizar orientação: {e}')
++    return None\n- verificar_leitura_plano_do_dia:\n  - Parameters are different. Backup: ['db', 'paciente_id', 'tecnico_id', 'data'], Crud: ['db', 'paciente_id', 'data']\n  - Body is different:\n--- backup
++++ crud
+@@ -1,10 +1,8 @@
+-'\n    Verifica se a leitura do plano já foi confirmada hoje e retorna o status e a data.\n    '
+-data_inicio_dia = datetime.combine(data, datetime.min.time())
+-data_fim_dia = datetime.combine(data, datetime.max.time())
+-query = db.collection('usuarios').document(paciente_id).collection('confirmacoes_leitura').where('usuario_id', '==', tecnico_id).where('data_confirmacao', '>=', data_inicio_dia).where('data_confirmacao', '<=', data_fim_dia).order_by('data_confirmacao', direction=firestore.Query.DESCENDING).limit(1)
+-docs = list(query.stream())
+-if not docs:
+-    return {'leitura_confirmada': False, 'ultima_leitura': None}
+-ultima_leitura_doc = docs[0].to_dict()
+-data_confirmacao = ultima_leitura_doc.get('data_confirmacao')
+-return {'leitura_confirmada': True, 'ultima_leitura': data_confirmacao.isoformat() if data_confirmacao else None}+'Verifica se o paciente já leu o plano do dia.'
++try:
++    query = db.collection('confirmacoes_leitura').where('paciente_id', '==', paciente_id).where('data_leitura', '>=', data).where('data_leitura', '<', data + datetime.timedelta(days=1))
++    confirmacoes = list(query.stream())
++    return len(confirmacoes) > 0
++except Exception as e:
++    logger.error(f'Erro ao verificar leitura do plano: {e}')
++    return False\n- criar_anamnese:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,36 +1,13 @@
+-'Cria um novo registro de anamnese para um paciente, criptografando dados sensíveis.'
+-anamnese_dict = anamnese_data.model_dump(mode='json')
+-sensitive_fields = ['nome_paciente', 'queixa_principal', 'historico_doenca_atual', 'historia_familiar', 'sistema_respiratorio', 'sistema_cardiovascular', 'abdome', 'estado_nutricional', 'eliminacoes_fisiologicas', 'drenos_sondas_cateteres', 'pele_mucosas', 'apoio_familiar_social', 'necessidades_emocionais_espirituais']
+-antecedentes_sensitive_fields = ['outras_doencas_cronicas', 'cirurgias_anteriores', 'alergias', 'medicamentos_uso_continuo', 'outros_habitos']
+-for field in sensitive_fields:
+-    if field in anamnese_dict and anamnese_dict[field] is not None:
+-        if isinstance(anamnese_dict[field], str) and anamnese_dict[field].strip():
+-            anamnese_dict[field] = encrypt_data(anamnese_dict[field])
+-if 'antecedentes_pessoais' in anamnese_dict and anamnese_dict['antecedentes_pessoais'] is not None:
+-    for field in antecedentes_sensitive_fields:
+-        if field in anamnese_dict['antecedentes_pessoais'] and anamnese_dict['antecedentes_pessoais'][field] is not None:
+-            if isinstance(anamnese_dict['antecedentes_pessoais'][field], str) and anamnese_dict['antecedentes_pessoais'][field].strip():
+-                anamnese_dict['antecedentes_pessoais'][field] = encrypt_data(anamnese_dict['antecedentes_pessoais'][field])
+-anamnese_dict.update({'paciente_id': paciente_id, 'created_at': firestore.SERVER_TIMESTAMP, 'updated_at': None})
+-doc_ref = db.collection('usuarios').document(paciente_id).collection('anamneses').document()
+-doc_ref.set(anamnese_dict)
+-anamnese_dict['id'] = doc_ref.id
+-anamnese_dict['created_at'] = datetime.utcnow()
+-for field in sensitive_fields:
+-    if field in anamnese_dict and anamnese_dict[field] is not None:
+-        if isinstance(anamnese_dict[field], str) and anamnese_dict[field].strip():
+-            try:
+-                anamnese_dict[field] = decrypt_data(anamnese_dict[field])
+-            except Exception as e:
+-                logger.error(f'Erro ao descriptografar campo {field} da anamnese: {e}')
+-                anamnese_dict[field] = '[Erro na descriptografia]'
+-if 'antecedentes_pessoais' in anamnese_dict and anamnese_dict['antecedentes_pessoais'] is not None:
+-    for field in antecedentes_sensitive_fields:
+-        if field in anamnese_dict['antecedentes_pessoais'] and anamnese_dict['antecedentes_pessoais'][field] is not None:
+-            if isinstance(anamnese_dict['antecedentes_pessoais'][field], str) and anamnese_dict['antecedentes_pessoais'][field].strip():
+-                try:
+-                    anamnese_dict['antecedentes_pessoais'][field] = decrypt_data(anamnese_dict['antecedentes_pessoais'][field])
+-                except Exception as e:
+-                    logger.error(f'Erro ao descriptografar campo {field} dos antecedentes pessoais: {e}')
+-                    anamnese_dict['antecedentes_pessoais'][field] = '[Erro na descriptografia]'
+-return anamnese_dict+'Cria uma nova anamnese para um paciente.'
++try:
++    anamnese_dict = anamnese_data.model_dump()
++    anamnese_dict['paciente_id'] = paciente_id
++    anamnese_dict = add_timestamps(anamnese_dict, is_update=False)
++    doc_ref = db.collection('anamneses').document()
++    doc_ref.set(anamnese_dict)
++    anamnese_dict['id'] = doc_ref.id
++    logger.info(f'Anamnese criada para paciente {paciente_id}')
++    return anamnese_dict
++except Exception as e:
++    logger.error(f'Erro ao criar anamnese: {e}')
++    raise\n- listar_comentarios:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,8 +1,13 @@
+ 'Lista todos os comentários de uma postagem.'
+ comentarios = []
+-query = db.collection('postagens').document(postagem_id).collection('comentarios').order_by('data', direction=firestore.Query.ASCENDING)
+-for doc in query.stream():
+-    comentario_data = doc.to_dict()
+-    comentario_data['id'] = doc.id
+-    comentarios.append(comentario_data)
+-return comentarios+try:
++    query = db.collection('comentarios').where('postagem_id', '==', postagem_id).order_by('created_at', direction=firestore.Query.ASCENDING)
++    for doc in query.stream():
++        comentario_data = doc.to_dict()
++        comentario_data['id'] = doc.id
++        comentarios.append(comentario_data)
++    logger.info(f'Retornando {len(comentarios)} comentários da postagem {postagem_id}')
++    return comentarios
++except Exception as e:
++    logger.error(f'Erro ao listar comentários: {e}')
++    return []\n- remover_fcm_token:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,8 +1,18 @@
+-'Remove um FCM token de um usuário.'
++'Remove um token FCM de um usuário.'
+ try:
+-    user_doc = buscar_usuario_por_firebase_uid(db, firebase_uid)
+-    if user_doc:
+-        doc_ref = db.collection('usuarios').document(user_doc['id'])
+-        doc_ref.update({'fcm_tokens': firestore.ArrayRemove([fcm_token])})
++    user_query = db.collection('usuarios').where('firebase_uid', '==', firebase_uid).limit(1)
++    user_docs = list(user_query.stream())
++    if user_docs:
++        user_ref = user_docs[0].reference
++        user_data = user_docs[0].to_dict()
++        fcm_tokens = user_data.get('fcm_tokens', [])
++        if fcm_token in fcm_tokens:
++            fcm_tokens.remove(fcm_token)
++            user_ref.update({'fcm_tokens': fcm_tokens})
++            logger.info(f'Token FCM removido para usuário {firebase_uid}')
++        else:
++            logger.info(f'Token FCM não encontrado para usuário {firebase_uid}')
++    else:
++        logger.warning(f'Usuário com firebase_uid {firebase_uid} não encontrado')
+ except Exception as e:
+-    logger.error(f'Erro ao remover FCM token para o UID {firebase_uid}: {e}')+    logger.error(f'Erro ao remover token FCM: {e}')\n- criar_consulta:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,12 +1,12 @@
+-'Salva uma nova consulta na subcoleção de um paciente.'
+-consulta_dict = consulta_data.model_dump()
+-if 'created_at' not in consulta_dict:
+-    try:
+-        consulta_dict['created_at'] = firestore.SERVER_TIMESTAMP
+-    except Exception:
+-        consulta_dict['created_at'] = datetime.utcnow()
+-paciente_ref = db.collection('usuarios').document(consulta_data.paciente_id)
+-doc_ref = paciente_ref.collection('consultas').document()
+-doc_ref.set(consulta_dict)
+-consulta_dict['id'] = doc_ref.id
+-return consulta_dict+'Cria uma nova consulta.'
++try:
++    consulta_dict = consulta_data.model_dump()
++    consulta_dict = add_timestamps(consulta_dict, is_update=False)
++    doc_ref = db.collection('consultas').document()
++    doc_ref.set(consulta_dict)
++    consulta_dict['id'] = doc_ref.id
++    logger.info(f'Consulta criada para paciente {consulta_data.paciente_id}')
++    return consulta_dict
++except Exception as e:
++    logger.error(f'Erro ao criar consulta: {e}')
++    raise\n- update_consulta:\n  - Body is different:\n--- backup
++++ crud
+@@ -1 +1,2 @@
++'Atualiza uma consulta.'
+ return _update_subcollection_item(db, paciente_id, 'consultas', consulta_id, update_data)\n- listar_suportes_psicologicos:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,17 +1,13 @@
+-'Lista todos os recursos de suporte psicológico de um paciente, descriptografando dados sensíveis.'
++'Lista todos os suportes psicológicos de um paciente.'
+ suportes = []
+-query = db.collection('usuarios').document(paciente_id).collection('suporte_psicologico').order_by('data_criacao', direction=firestore.Query.DESCENDING)
+-sensitive_fields = ['titulo', 'conteudo']
+-for doc in query.stream():
+-    data = doc.to_dict()
+-    data['id'] = doc.id
+-    for field in sensitive_fields:
+-        if field in data and data[field] is not None:
+-            if isinstance(data[field], str) and data[field].strip():
+-                try:
+-                    data[field] = decrypt_data(data[field])
+-                except Exception as e:
+-                    logger.error(f'Erro ao descriptografar campo {field} do suporte psicológico {doc.id}: {e}')
+-                    data[field] = '[Erro na descriptografia]'
+-    suportes.append(data)
+-return suportes+try:
++    query = db.collection('suporte_psicologico').where('paciente_id', '==', paciente_id).order_by('created_at', direction=firestore.Query.DESCENDING)
++    for doc in query.stream():
++        suporte_data = doc.to_dict()
++        suporte_data['id'] = doc.id
++        suportes.append(suporte_data)
++    logger.info(f'Retornando {len(suportes)} suportes psicológicos para paciente {paciente_id}')
++    return suportes
++except Exception as e:
++    logger.error(f'Erro ao listar suportes psicológicos: {e}')
++    return []\n- marcar_notificacao_como_lida:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,10 +1,17 @@
+-'Marca uma notificação específica de um usuário como lida.'
++'Marca uma notificação como lida.'
+ try:
+-    notificacao_ref = db.collection('usuarios').document(usuario_id).collection('notificacoes').document(notificacao_id)
+-    if notificacao_ref.get().exists:
+-        notificacao_ref.update({'lida': True})
+-        return True
+-    return False
++    notif_ref = db.collection('notificacoes').document(notificacao_id)
++    notif_doc = notif_ref.get()
++    if not notif_doc.exists:
++        logger.warning(f'Notificação {notificacao_id} não encontrada')
++        return False
++    notif_data = notif_doc.to_dict()
++    if notif_data.get('destinatario_id') != usuario_id:
++        logger.warning(f'Usuário {usuario_id} tentou marcar notificação que não é sua')
++        return False
++    notif_ref.update({'lida': True, 'data_leitura': firestore.SERVER_TIMESTAMP, 'updated_at': firestore.SERVER_TIMESTAMP})
++    logger.info(f'Notificação {notificacao_id} marcada como lida')
++    return True
+ except Exception as e:
+-    logger.error(f'Erro ao marcar notificação {notificacao_id} como lida: {e}')
++    logger.error(f'Erro ao marcar notificação como lida: {e}')
+     return False\n- deletar_bloqueio:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,10 +1,17 @@
+-'Deleta um bloqueio da agenda de um profissional.'
++'Remove um bloqueio de horário.'
+ try:
+-    bloqueio_ref = db.collection('profissionais').document(profissional_id).collection('bloqueios').document(bloqueio_id)
+-    if bloqueio_ref.get().exists:
+-        bloqueio_ref.delete()
+-        return True
+-    return False
++    bloqueio_ref = db.collection('bloqueios').document(bloqueio_id)
++    bloqueio_doc = bloqueio_ref.get()
++    if not bloqueio_doc.exists:
++        logger.warning(f'Bloqueio {bloqueio_id} não encontrado')
++        return False
++    bloqueio_data = bloqueio_doc.to_dict()
++    if bloqueio_data.get('profissional_id') != profissional_id:
++        logger.warning(f'Bloqueio {bloqueio_id} não pertence ao profissional {profissional_id}')
++        return False
++    bloqueio_ref.delete()
++    logger.info(f'Bloqueio {bloqueio_id} removido com sucesso')
++    return True
+ except Exception as e:
+-    logger.error(f'Erro ao deletar bloqueio {bloqueio_id}: {e}')
++    logger.error(f'Erro ao remover bloqueio {bloqueio_id}: {e}')
+     return False\n- delete_orientacao:\n  - Body is different:\n--- backup
++++ crud
+@@ -1 +1,15 @@
+-return _delete_subcollection_item(db, paciente_id, 'orientacoes', orientacao_id)+'Remove uma orientação.'
++try:
++    orientacao_ref = db.collection('orientacoes').document(orientacao_id)
++    orientacao_doc = orientacao_ref.get()
++    if not orientacao_doc.exists:
++        return False
++    orientacao_data = orientacao_doc.to_dict()
++    if orientacao_data.get('paciente_id') != paciente_id:
++        return False
++    orientacao_ref.delete()
++    logger.info(f'Orientação {orientacao_id} removida')
++    return True
++except Exception as e:
++    logger.error(f'Erro ao deletar orientação: {e}')
++    return False\n- update_exame:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,16 +1,20 @@
+-'Atualiza um exame existente, validando as permissões de edição.'
+-exame_ref = db.collection('usuarios').document(paciente_id).collection('exames').document(exame_id)
+-exame_doc = exame_ref.get()
+-if not exame_doc.exists:
+-    return None
+-exame_atual = exame_doc.to_dict()
+-user_role = current_user.roles.get(negocio_id)
+-if user_role != 'admin' and exame_atual.get('criado_por') != current_user.firebase_uid:
+-    raise HTTPException(status_code=403, detail='Acesso negado: Enfermeiros só podem editar os exames que criaram.')
+-update_dict = update_data.model_dump(exclude_unset=True, mode='json')
+-update_dict['data_atualizacao'] = datetime.utcnow()
+-exame_ref.update(update_dict)
+-updated_doc = exame_ref.get()
+-data = updated_doc.to_dict()
+-data['id'] = updated_doc.id
+-return data+'Atualiza um exame específico.'
++try:
++    doc_ref = db.collection('exames').document(exame_id)
++    doc = doc_ref.get()
++    if not doc.exists:
++        return None
++    exame_data = doc.to_dict()
++    if exame_data.get('paciente_id') != paciente_id:
++        return None
++    update_dict = update_data.model_dump(exclude_unset=True)
++    update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
++    doc_ref.update(update_dict)
++    updated_doc = doc_ref.get()
++    updated_data = updated_doc.to_dict()
++    updated_data['id'] = updated_doc.id
++    logger.info(f'Exame {exame_id} atualizado')
++    return updated_data
++except Exception as e:
++    logger.error(f'Erro ao atualizar exame {exame_id}: {e}')
++    return None\n- delete_checklist_item:\n  - Body is different:\n--- backup
++++ crud
+@@ -1 +1,15 @@
+-return _delete_subcollection_item(db, paciente_id, 'checklist', item_id)+'Remove um item do checklist.'
++try:
++    item_ref = db.collection('checklist').document(item_id)
++    item_doc = item_ref.get()
++    if not item_doc.exists:
++        return False
++    item_data = item_doc.to_dict()
++    if item_data.get('paciente_id') != paciente_id:
++        return False
++    item_ref.delete()
++    logger.info(f'Item {item_id} removido do checklist')
++    return True
++except Exception as e:
++    logger.error(f'Erro ao deletar item do checklist: {e}')
++    return False\n- vincular_paciente_medico:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,30 +1,16 @@
+-'Vincula ou desvincula um paciente de um médico.'
+-paciente_ref = db.collection('usuarios').document(paciente_id)
+-if medico_id is None:
+-    paciente_ref.update({'medico_id': firestore.DELETE_FIELD})
+-    acao_log = 'DESVINCULO_PACIENTE_MEDICO'
+-    detalhes_log = {'paciente_id': paciente_id}
+-    logger.info(f'Paciente {paciente_id} desvinculado do médico.')
+-else:
+-    medico_doc = db.collection('usuarios').document(medico_id).get()
+-    if not medico_doc.exists:
+-        raise ValueError(f'Médico com ID {medico_id} não encontrado.')
+-    medico_data = medico_doc.to_dict()
+-    roles = medico_data.get('roles', {})
+-    if roles.get(negocio_id) != 'medico':
+-        raise ValueError(f"Usuário {medico_id} não possui a role 'medico' no negócio {negocio_id}.")
+-    paciente_ref.update({'medico_id': medico_id})
+-    acao_log = 'VINCULO_PACIENTE_MEDICO'
+-    detalhes_log = {'paciente_id': paciente_id, 'medico_id': medico_id}
+-    logger.info(f'Paciente {paciente_id} vinculado ao médico {medico_id}.')
+-criar_log_auditoria(db, autor_uid=autor_uid, negocio_id=negocio_id, acao=acao_log, detalhes=detalhes_log)
+-doc = paciente_ref.get()
+-if doc.exists:
+-    firebase_uid = doc.to_dict().get('firebase_uid')
+-    if firebase_uid:
+-        return buscar_usuario_por_firebase_uid(db, firebase_uid)
+-    else:
+-        data = doc.to_dict()
+-        data['id'] = doc.id
+-        return data
+-return None+'Vincula um paciente a um médico.'
++try:
++    paciente_ref = db.collection('usuarios').document(paciente_id)
++    paciente_doc = paciente_ref.get()
++    if not paciente_doc.exists:
++        return None
++    update_data = {f'vinculos.{negocio_id}.medico_id': medico_id, 'updated_at': firestore.SERVER_TIMESTAMP}
++    paciente_ref.update(update_data)
++    logger.info(f'Paciente {paciente_id} vinculado ao médico {medico_id}')
++    updated_doc = paciente_ref.get()
++    updated_data = updated_doc.to_dict()
++    updated_data['id'] = updated_doc.id
++    return updated_data
++except Exception as e:
++    logger.error(f'Erro ao vincular paciente ao médico: {e}')
++    return None\n- atualizar_dados_pessoais_paciente:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,84 +1,27 @@
+-'\n    Atualiza os dados pessoais básicos de um paciente.\n    Estes campos foram migrados da anamnese para centralizar no nível do paciente.\n    '
++'Atualiza dados pessoais de um paciente.'
+ try:
+     user_ref = db.collection('usuarios').document(paciente_id)
+     user_doc = user_ref.get()
+     if not user_doc.exists:
+-        logger.error(f'Paciente {paciente_id} não encontrado.')
++        logger.warning(f'Paciente {paciente_id} não encontrado')
+         return None
+-    update_data = {}
+-    if dados_pessoais.data_nascimento is not None:
+-        update_data['data_nascimento'] = dados_pessoais.data_nascimento
+-    if dados_pessoais.sexo is not None:
+-        update_data['sexo'] = dados_pessoais.sexo
+-    if dados_pessoais.estado_civil is not None:
+-        update_data['estado_civil'] = dados_pessoais.estado_civil
+-    if dados_pessoais.profissao is not None:
+-        update_data['profissao'] = dados_pessoais.profissao
+-    if dados_pessoais.nome is not None:
+-        update_data['nome'] = encrypt_data(dados_pessoais.nome)
+-    if dados_pessoais.telefone is not None:
+-        update_data['telefone'] = encrypt_data(dados_pessoais.telefone) if dados_pessoais.telefone else None
+-    if dados_pessoais.endereco is not None:
+-        endereco_criptografado = {'rua': encrypt_data(dados_pessoais.endereco.rua), 'numero': encrypt_data(dados_pessoais.endereco.numero), 'cidade': encrypt_data(dados_pessoais.endereco.cidade), 'estado': encrypt_data(dados_pessoais.endereco.estado), 'cep': encrypt_data(dados_pessoais.endereco.cep)}
+-        update_data['endereco'] = endereco_criptografado
+-    if not update_data:
+-        logger.info(f'Nenhum campo para atualizar no paciente {paciente_id}')
+-        current_data = user_doc.to_dict()
+-        current_data['id'] = user_doc.id
+-        if 'nome' in current_data and current_data['nome']:
+-            try:
+-                current_data['nome'] = decrypt_data(current_data['nome'])
+-            except Exception as e:
+-                logger.error(f'Erro ao descriptografar nome: {e}')
+-                current_data['nome'] = '[Erro na descriptografia]'
+-        if 'telefone' in current_data and current_data['telefone']:
+-            try:
+-                current_data['telefone'] = decrypt_data(current_data['telefone'])
+-            except Exception as e:
+-                logger.error(f'Erro ao descriptografar telefone: {e}')
+-                current_data['telefone'] = '[Erro na descriptografia]'
+-        if 'endereco' in current_data and current_data['endereco']:
+-            endereco_descriptografado = {}
+-            for key, value in current_data['endereco'].items():
+-                if value and isinstance(value, str) and value.strip():
+-                    try:
+-                        endereco_descriptografado[key] = decrypt_data(value)
+-                    except Exception as e:
+-                        logger.error(f'Erro ao descriptografar campo {key} do endereço: {e}')
+-                        endereco_descriptografado[key] = '[Erro na descriptografia]'
+-                else:
+-                    endereco_descriptografado[key] = value
+-            current_data['endereco'] = endereco_descriptografado
+-        return current_data
+-    user_ref.update(update_data)
+-    logger.info(f'Paciente {paciente_id} atualizado com sucesso: {list(update_data.keys())}')
++    update_dict = dados_pessoais.model_dump(exclude_unset=True)
++    if not update_dict:
++        updated_data = user_doc.to_dict()
++        updated_data['id'] = user_doc.id
++        updated_data = decrypt_user_sensitive_fields(updated_data, USER_SENSITIVE_FIELDS)
++        if 'endereco' in updated_data and updated_data['endereco']:
++            updated_data['endereco'] = decrypt_endereco_fields(updated_data['endereco'])
++        return updated_data
++    update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
++    user_ref.update(update_dict)
+     updated_doc = user_ref.get()
+     updated_data = updated_doc.to_dict()
+     updated_data['id'] = updated_doc.id
+-    if 'nome' in updated_data and updated_data['nome']:
+-        try:
+-            updated_data['nome'] = decrypt_data(updated_data['nome'])
+-        except Exception as e:
+-            logger.error(f'Erro ao descriptografar nome: {e}')
+-            updated_data['nome'] = '[Erro na descriptografia]'
+-    if 'telefone' in updated_data and updated_data['telefone']:
+-        try:
+-            updated_data['telefone'] = decrypt_data(updated_data['telefone'])
+-        except Exception as e:
+-            logger.error(f'Erro ao descriptografar telefone: {e}')
+-            updated_data['telefone'] = '[Erro na descriptografia]'
++    updated_data = decrypt_user_sensitive_fields(updated_data, USER_SENSITIVE_FIELDS)
+     if 'endereco' in updated_data and updated_data['endereco']:
+-        endereco_descriptografado = {}
+-        for key, value in updated_data['endereco'].items():
+-            if value and isinstance(value, str) and value.strip():
+-                try:
+-                    endereco_descriptografado[key] = decrypt_data(value)
+-                except Exception as e:
+-                    logger.error(f'Erro ao descriptografar campo {key} do endereço: {e}')
+-                    endereco_descriptografado[key] = '[Erro na descriptografia]'
+-            else:
+-                endereco_descriptografado[key] = value
+-        updated_data['endereco'] = endereco_descriptografado
++        updated_data['endereco'] = decrypt_endereco_fields(updated_data['endereco'])
++    logger.info(f'Dados pessoais do paciente {paciente_id} atualizados com sucesso')
+     return updated_data
+ except Exception as e:
+     logger.error(f'Erro ao atualizar dados pessoais do paciente {paciente_id}: {e}')
+\n- listar_resultados_pesquisas:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,14 +1,16 @@
+-'(Admin) Lista todos os resultados das pesquisas de satisfação respondidas.'
++'Lista os resultados das pesquisas de um negócio.'
+ resultados = []
+ try:
+-    query = db.collection('pesquisas_enviadas').where('negocio_id', '==', negocio_id).where('status', '==', 'respondida')
++    query = db.collection('pesquisas_enviadas').where('negocio_id', '==', negocio_id).where('respondida', '==', True)
+     if modelo_pesquisa_id:
+         query = query.where('modelo_pesquisa_id', '==', modelo_pesquisa_id)
+     query = query.order_by('data_resposta', direction=firestore.Query.DESCENDING)
+     for doc in query.stream():
+-        data = doc.to_dict()
+-        data['id'] = doc.id
+-        resultados.append(data)
++        resultado_data = doc.to_dict()
++        resultado_data['id'] = doc.id
++        resultados.append(resultado_data)
++    logger.info(f'Retornando {len(resultados)} resultados de pesquisas')
++    return resultados
+ except Exception as e:
+-    logger.error(f'Erro ao listar resultados de pesquisas para o negócio {negocio_id}: {e}')
+-return resultados+    logger.error(f'Erro ao listar resultados das pesquisas: {e}')
++    return []\n- listar_checklist_diario:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,15 +1,13 @@
+-'Busca os itens do checklist do *dia* para um paciente.\n\n    Lê da coleção ``usuarios/{paciente_id}/checklist`` filtrando:\n      - paciente_id == <paciente_id>\n      - negocio_id == <negocio_id>\n      - data_criacao >= {dia} 00:00:00  and  < {dia}+1 00:00:00\n    Retorna uma lista no formato esperado pelo schema ``ChecklistItemDiarioResponse``:\n      ``[{id, descricao, concluido}]``.\n    '
++'Lista o checklist diário de um paciente para um dia específico.'
++checklist = []
+ try:
+-    start_dt = datetime.combine(dia, time(0, 0, 0))
+-    end_dt = start_dt + timedelta(days=1)
+-    col_ref = db.collection('usuarios').document(paciente_id).collection('checklist')
+-    query = col_ref.where('paciente_id', '==', paciente_id).where('negocio_id', '==', negocio_id).where('data_criacao', '>=', start_dt).where('data_criacao', '<', end_dt).order_by('data_criacao')
+-    docs = list(query.stream())
+-    itens: List[Dict] = []
+-    for doc in docs:
+-        d = doc.to_dict() or {}
+-        itens.append({'id': doc.id, 'descricao': d.get('descricao_item', d.get('descricao', '')), 'concluido': bool(d.get('concluido', False))})
+-    return itens
++    query = db.collection('checklist_diario').where('paciente_id', '==', paciente_id).where('data', '==', dia.isoformat()).where('negocio_id', '==', negocio_id)
++    for doc in query.stream():
++        item_data = doc.to_dict()
++        item_data['id'] = doc.id
++        checklist.append(item_data)
++    logger.info(f'Retornando {len(checklist)} itens do checklist diário para {dia}')
++    return checklist
+ except Exception as e:
+-    logger.error(f'Erro ao listar checklist diário (paciente={paciente_id}, dia={dia}, negocio_id={negocio_id}): {e}')
+-    raise+    logger.error(f'Erro ao listar checklist diário: {e}')
++    return []\n- criar_orientacao:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,9 +1,13 @@
+-'Salva uma nova orientação na subcoleção de um paciente, vinculando-a a uma consulta.'
+-orientacao_dict = orientacao_data.model_dump()
+-orientacao_dict['data_criacao'] = datetime.utcnow()
+-orientacao_dict['consulta_id'] = consulta_id
+-paciente_ref = db.collection('usuarios').document(orientacao_data.paciente_id)
+-doc_ref = paciente_ref.collection('orientacoes').document()
+-doc_ref.set(orientacao_dict)
+-orientacao_dict['id'] = doc_ref.id
+-return orientacao_dict+'Cria uma nova orientação dentro de uma consulta.'
++try:
++    orientacao_dict = orientacao_data.model_dump()
++    orientacao_dict['consulta_id'] = consulta_id
++    orientacao_dict = add_timestamps(orientacao_dict, is_update=False)
++    doc_ref = db.collection('orientacoes').document()
++    doc_ref.set(orientacao_dict)
++    orientacao_dict['id'] = doc_ref.id
++    logger.info(f'Orientação criada para consulta {consulta_id}')
++    return orientacao_dict
++except Exception as e:
++    logger.error(f'Erro ao criar orientação: {e}')
++    raise\n- atualizar_endereco_paciente:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,28 +1,21 @@
+-'Atualiza o endereço de um paciente, criptografando dados sensíveis.'
+-paciente_ref = db.collection('usuarios').document(paciente_id)
+-if not paciente_ref.get().exists:
+-    return None
+-endereco_dict = endereco_data.model_dump()
+-endereco_criptografado = {}
+-for key, value in endereco_dict.items():
+-    if value is not None and isinstance(value, str) and value.strip():
+-        endereco_criptografado[key] = encrypt_data(value)
+-    else:
+-        endereco_criptografado[key] = value
+-paciente_ref.update({'endereco': endereco_criptografado})
+-updated_doc = paciente_ref.get()
+-data = updated_doc.to_dict()
+-data['id'] = updated_doc.id
+-if 'endereco' in data and data['endereco']:
+-    endereco_descriptografado = {}
+-    for key, value in data['endereco'].items():
+-        if value is not None and isinstance(value, str) and value.strip():
+-            try:
+-                endereco_descriptografado[key] = decrypt_data(value)
+-            except Exception as e:
+-                logger.error(f'Erro ao descriptografar campo de endereço {key} do paciente {paciente_id}: {e}')
+-                endereco_descriptografado[key] = '[Erro na descriptografia]'
+-        else:
+-            endereco_descriptografado[key] = value
+-    data['endereco'] = endereco_descriptografado
+-return data+'Atualiza o endereço de um paciente.'
++try:
++    user_ref = db.collection('usuarios').document(paciente_id)
++    user_doc = user_ref.get()
++    if not user_doc.exists:
++        logger.warning(f'Paciente {paciente_id} não encontrado')
++        return None
++    endereco_dict = endereco_data.model_dump(exclude_unset=True)
++    endereco_criptografado = encrypt_endereco_fields(endereco_dict)
++    user_ref.update({'endereco': endereco_criptografado, 'updated_at': firestore.SERVER_TIMESTAMP})
++    updated_doc = user_ref.get()
++    updated_data = updated_doc.to_dict()
++    updated_data['id'] = updated_doc.id
++    updated_data = decrypt_user_sensitive_fields(updated_data, USER_SENSITIVE_FIELDS)
++    if 'endereco' in updated_data and updated_data['endereco']:
++        updated_data['endereco'] = decrypt_endereco_fields(updated_data['endereco'])
++    logger.info(f'Endereço do paciente {paciente_id} atualizado com sucesso')
++    return updated_data
++except Exception as e:
++    logger.error(f'Erro ao atualizar endereço do paciente {paciente_id}: {e}')
++    return None\n- criar_suporte_psicologico:\n  - Parameters are different. Backup: ['db', 'paciente_id', 'negocio_id', 'suporte_data', 'criado_por_id'], Crud: ['db', 'suporte_data', 'psicologo_id']\n  - Body is different:\n--- backup
++++ crud
+@@ -1,23 +1,14 @@
+-'Cria um novo recurso de suporte psicológico para um paciente, criptografando dados sensíveis.'
+-suporte_dict = suporte_data.model_dump()
+-sensitive_fields = ['titulo', 'conteudo']
+-for field in sensitive_fields:
+-    if field in suporte_dict and suporte_dict[field] is not None:
+-        if isinstance(suporte_dict[field], str) and suporte_dict[field].strip():
+-            suporte_dict[field] = encrypt_data(suporte_dict[field])
+-suporte_dict.update({'paciente_id': paciente_id, 'negocio_id': negocio_id, 'criado_por': criado_por_id, 'tipo': _detectar_tipo_conteudo(suporte_data.conteudo), 'data_criacao': firestore.SERVER_TIMESTAMP, 'data_atualizacao': firestore.SERVER_TIMESTAMP})
+-doc_ref = db.collection('usuarios').document(paciente_id).collection('suporte_psicologico').document()
+-doc_ref.set(suporte_dict)
+-suporte_dict['id'] = doc_ref.id
+-now = datetime.utcnow()
+-suporte_dict['data_criacao'] = now
+-suporte_dict['data_atualizacao'] = now
+-for field in sensitive_fields:
+-    if field in suporte_dict and suporte_dict[field] is not None:
+-        if isinstance(suporte_dict[field], str) and suporte_dict[field].strip():
+-            try:
+-                suporte_dict[field] = decrypt_data(suporte_dict[field])
+-            except Exception as e:
+-                logger.error(f'Erro ao descriptografar campo {field} do suporte psicológico: {e}')
+-                suporte_dict[field] = '[Erro na descriptografia]'
+-return suporte_dict+'Cria um novo registro de suporte psicológico.'
++try:
++    suporte_dict = suporte_data.model_dump()
++    suporte_dict['psicologo_id'] = psicologo_id
++    suporte_dict['status'] = 'ativo'
++    suporte_dict = add_timestamps(suporte_dict, is_update=False)
++    doc_ref = db.collection('suporte_psicologico').document()
++    doc_ref.set(suporte_dict)
++    suporte_dict['id'] = doc_ref.id
++    logger.info(f'Suporte psicológico criado para paciente {suporte_data.paciente_id}')
++    return suporte_dict
++except Exception as e:
++    logger.error(f'Erro ao criar suporte psicológico: {e}')
++    raise\n- criar_registro_diario_estruturado:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,32 +1,12 @@
+-'\n    Adiciona um novo registro estruturado ao diário de acompanhamento de um paciente, criptografando dados sensíveis.\n    AGORA SIMPLIFICADO: Aceita um payload de texto livre para todos os tipos e\n    respeita o timestamp enviado pelo cliente.\n    '
++'Cria um registro diário estruturado.'
+ try:
+-    conteudo_ok = registro_data.conteudo
+-    conteudo_dict = conteudo_ok.model_dump()
+-    if 'descricao' in conteudo_dict and conteudo_dict['descricao'] is not None:
+-        if isinstance(conteudo_dict['descricao'], str) and conteudo_dict['descricao'].strip():
+-            conteudo_dict['descricao'] = encrypt_data(conteudo_dict['descricao'])
+-    registro_dict_para_salvar = {'negocio_id': registro_data.negocio_id, 'paciente_id': registro_data.paciente_id, 'tipo': registro_data.tipo, 'conteudo': conteudo_dict, 'tecnico_id': tecnico_id, 'data_registro': registro_data.data_hora}
+-    paciente_ref = db.collection('usuarios').document(registro_data.paciente_id)
+-    doc_ref = paciente_ref.collection('registros_diarios_estruturados').document()
+-    doc_ref.set(registro_dict_para_salvar)
+-    tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
+-    if tecnico_doc.exists:
+-        tdat = tecnico_doc.to_dict() or {}
+-        tecnico_perfil = {'id': tecnico_doc.id, 'nome': tdat.get('nome', 'Nome não disponível'), 'email': tdat.get('email', 'Email não disponível')}
+-    else:
+-        tecnico_perfil = {'id': tecnico_id, 'nome': 'Técnico Desconhecido', 'email': ''}
+-    resposta_dict = registro_dict_para_salvar.copy()
+-    resposta_dict['id'] = doc_ref.id
+-    resposta_dict['tecnico'] = tecnico_perfil
+-    if 'conteudo' in resposta_dict and resposta_dict['conteudo'] is not None:
+-        if 'descricao' in resposta_dict['conteudo'] and resposta_dict['conteudo']['descricao'] is not None:
+-            if isinstance(resposta_dict['conteudo']['descricao'], str) and resposta_dict['conteudo']['descricao'].strip():
+-                try:
+-                    resposta_dict['conteudo']['descricao'] = decrypt_data(resposta_dict['conteudo']['descricao'])
+-                except Exception as e:
+-                    logger.error(f'Erro ao descriptografar conteúdo do registro diário estruturado: {e}')
+-                    resposta_dict['conteudo']['descricao'] = '[Erro na descriptografia]'
+-    return resposta_dict
++    registro_dict = {'paciente_id': registro_data.paciente_id, 'tecnico_id': tecnico_id, 'data_registro': registro_data.data_registro, 'observacoes': registro_data.observacoes, 'humor': registro_data.humor, 'sintomas': registro_data.sintomas or [], 'medicamentos': registro_data.medicamentos_tomados or [], 'atividades': registro_data.atividades or [], 'sono': registro_data.sono, 'alimentacao': registro_data.alimentacao, 'outros_dados': registro_data.outros_dados or {}}
++    registro_dict = add_timestamps(registro_dict, is_update=False)
++    doc_ref = db.collection('registros_diarios_estruturados').document()
++    doc_ref.set(registro_dict)
++    registro_dict['id'] = doc_ref.id
++    logger.info(f'Registro diário estruturado criado para paciente {registro_data.paciente_id}')
++    return registro_dict
+ except Exception as e:
+-    logger.error(f'Erro inesperado ao criar registro diário estruturado: {e}')
+-    raise HTTPException(status_code=500, detail=f'Ocorreu um erro interno no servidor: {e}')+    logger.error(f'Erro ao criar registro estruturado: {e}')
++    raise\n- listar_checklist:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,11 +1,13 @@
+-'Lista todos os itens do checklist de um paciente, filtrando-os pelo ID da consulta.'
+-checklist_itens = []
++'Lista todos os itens do checklist de uma consulta específica.'
++checklist = []
+ try:
+-    query = db.collection('usuarios').document(paciente_id).collection('checklist').where('consulta_id', '==', consulta_id).order_by('data_criacao', direction=firestore.Query.DESCENDING)
++    query = db.collection('checklist').where('paciente_id', '==', paciente_id).where('consulta_id', '==', consulta_id).order_by('created_at', direction=firestore.Query.DESCENDING)
+     for doc in query.stream():
+         item_data = doc.to_dict()
+         item_data['id'] = doc.id
+-        checklist_itens.append(item_data)
++        checklist.append(item_data)
++    logger.info(f'Retornando {len(checklist)} itens do checklist para a consulta {consulta_id}')
++    return checklist
+ except Exception as e:
+-    logger.error(f'Erro ao listar checklist do paciente {paciente_id}: {e}')
+-return checklist_itens+    logger.error(f'Erro ao listar checklist da consulta {consulta_id}: {e}')
++    return []\n- vincular_tecnicos_paciente:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,23 +1,16 @@
+-'\n    Vincula uma lista de técnicos a um paciente.\n    O campo `tecnicos_ids` no documento do paciente será substituído pela lista fornecida.\n    '
++'Vincula múltiplos técnicos a um paciente.'
+ try:
+     paciente_ref = db.collection('usuarios').document(paciente_id)
+-    for tecnico_id in tecnicos_ids:
+-        tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
+-        if not tecnico_doc.exists:
+-            raise ValueError(f"Técnico com ID '{tecnico_id}' não encontrado.")
+-    paciente_ref.update({'tecnicos_ids': tecnicos_ids})
+     paciente_doc = paciente_ref.get()
+     if not paciente_doc.exists:
+-        raise ValueError('Paciente não encontrado após a atualização.')
+-    paciente_data = paciente_doc.to_dict()
+-    negocio_id = list(paciente_data.get('roles', {}).keys())[0] if paciente_data.get('roles') else None
+-    if not negocio_id:
+-        raise ValueError('Não foi possível determinar o negocio_id do paciente para o log de auditoria.')
+-    criar_log_auditoria(db, autor_uid=autor_uid, negocio_id=negocio_id, acao='VINCULO_PACIENTE_TECNICO', detalhes={'paciente_id': paciente_id, 'tecnicos_vinculados_ids': tecnicos_ids})
+-    logger.info(f'Técnicos {tecnicos_ids} vinculados ao paciente {paciente_id}.')
+-    updated_doc = paciente_data
+-    updated_doc['id'] = paciente_id
+-    return updated_doc
++        return None
++    update_data = {'tecnicos_vinculados': tecnicos_ids, 'updated_at': firestore.SERVER_TIMESTAMP}
++    paciente_ref.update(update_data)
++    logger.info(f'Paciente {paciente_id} vinculado aos técnicos {tecnicos_ids}')
++    updated_doc = paciente_ref.get()
++    updated_data = updated_doc.to_dict()
++    updated_data['id'] = updated_doc.id
++    return updated_data
+ except Exception as e:
+-    logger.error(f'Erro ao vincular técnicos ao paciente {paciente_id}: {e}')
+-    raise e+    logger.error(f'Erro ao vincular técnicos ao paciente: {e}')
++    return None\n- delete_registro_diario:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,14 +1,17 @@
+-'Deleta um registro do diário do técnico, verificando a autoria.'
++'Remove um registro diário.'
+ try:
+-    item_ref = db.collection('usuarios').document(paciente_id).collection('diario_tecnico').document(registro_id)
+-    doc = item_ref.get()
+-    if not doc.exists:
++    registro_ref = db.collection('registros_diarios').document(registro_id)
++    registro_doc = registro_ref.get()
++    if not registro_doc.exists:
+         return False
+-    if doc.to_dict().get('tecnico_id') != tecnico_id:
+-        raise PermissionError('Você só pode deletar seus próprios registros.')
+-    item_ref.delete()
+-    logger.info(f'Registro {registro_id} do paciente {paciente_id} deletado pelo técnico {tecnico_id}.')
++    registro_data = registro_doc.to_dict()
++    if registro_data.get('paciente_id') != paciente_id:
++        return False
++    if registro_data.get('tecnico_id') != tecnico_id:
++        return False
++    registro_ref.delete()
++    logger.info(f'Registro diário {registro_id} removido')
+     return True
+ except Exception as e:
+-    logger.error(f'Erro ao deletar registro {registro_id} do paciente {paciente_id}: {e}')
+-    raise e+    logger.error(f'Erro ao deletar registro diário: {e}')
++    return False\n- criar_log_auditoria:\n  - Parameters are different. Backup: ['db', 'autor_uid', 'negocio_id', 'acao', 'detalhes'], Crud: ['db', 'acao', 'usuario_id', 'detalhes']\n  - Body is different:\n--- backup
++++ crud
+@@ -1,7 +1,11 @@
+-"\n    Cria um registro de log na coleção 'auditoria'.\n\n    Args:\n        autor_uid (str): Firebase UID do usuário que realizou a ação.\n        negocio_id (str): ID do negócio onde a ação ocorreu.\n        acao (str): Descrição da ação (ex: 'ARQUIVOU_PACIENTE').\n        detalhes (Dict): Dicionário com informações contextuais (ex: {'paciente_id': 'xyz'}).\n    "
++'Cria um log de auditoria para rastreamento de ações.'
+ try:
+-    log_entry = {'autor_uid': autor_uid, 'negocio_id': negocio_id, 'acao': acao, 'detalhes': detalhes, 'timestamp': datetime.utcnow()}
+-    db.collection('auditoria').add(log_entry)
+-    logger.info(f"Log de auditoria criado para ação '{acao}' por UID {autor_uid}.")
++    log_dict = {'acao': acao, 'usuario_id': usuario_id, 'detalhes': detalhes, 'timestamp': firestore.SERVER_TIMESTAMP, 'ip_address': detalhes.get('ip_address'), 'user_agent': detalhes.get('user_agent')}
++    doc_ref = db.collection('logs_auditoria').document()
++    doc_ref.set(log_dict)
++    log_dict['id'] = doc_ref.id
++    logger.info(f'Log de auditoria criado: {acao} por {usuario_id}')
++    return log_dict
+ except Exception as e:
+-    logger.error(f'Falha ao criar log de auditoria: {e}')+    logger.error(f'Erro ao criar log de auditoria: {e}')
++    raise\n- marcar_todas_como_lidas:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,17 +1,15 @@
+-'Marca todas as notificações não lidas de um usuário como lidas.'
++'Marca todas as notificações de um usuário como lidas.'
+ try:
+-    notificacoes_ref = db.collection('usuarios').document(usuario_id).collection('notificacoes')
+-    query = notificacoes_ref.where('lida', '==', False)
+-    docs = query.stream()
++    query = db.collection('notificacoes').where('destinatario_id', '==', usuario_id).where('lida', '==', False)
+     batch = db.batch()
+-    doc_count = 0
+-    for doc in docs:
+-        batch.update(doc.reference, {'lida': True})
+-        doc_count += 1
+-    if doc_count > 0:
++    count = 0
++    for doc in query.stream():
++        batch.update(doc.reference, {'lida': True, 'data_leitura': firestore.SERVER_TIMESTAMP, 'updated_at': firestore.SERVER_TIMESTAMP})
++        count += 1
++    if count > 0:
+         batch.commit()
+-        logger.info(f'{doc_count} notificações marcadas como lidas para o usuário {usuario_id}.')
++    logger.info(f'Marcadas {count} notificações como lidas para usuário {usuario_id}')
+     return True
+ except Exception as e:
+-    logger.error(f'Erro ao marcar todas as notificações como lidas para o usuário {usuario_id}: {e}')
++    logger.error(f'Erro ao marcar todas notificações como lidas: {e}')
+     return False\n- update_medicacao:\n  - Body is different:\n--- backup
++++ crud
+@@ -1 +1,20 @@
+-return _update_subcollection_item(db, paciente_id, 'medicacoes', medicacao_id, update_data)+'Atualiza uma medicação.'
++try:
++    medicacao_ref = db.collection('medicacoes').document(medicacao_id)
++    medicacao_doc = medicacao_ref.get()
++    if not medicacao_doc.exists:
++        return None
++    medicacao_data = medicacao_doc.to_dict()
++    if medicacao_data.get('paciente_id') != paciente_id:
++        return None
++    update_dict = update_data.model_dump(exclude_unset=True)
++    update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
++    medicacao_ref.update(update_dict)
++    updated_doc = medicacao_ref.get()
++    updated_data = updated_doc.to_dict()
++    updated_data['id'] = updated_doc.id
++    logger.info(f'Medicação {medicacao_id} atualizada')
++    return updated_data
++except Exception as e:
++    logger.error(f'Erro ao atualizar medicação: {e}')
++    return None\n- atualizar_registro_diario_estruturado:\n  - Parameters are different. Backup: ['db', 'paciente_id', 'registro_id', 'update_data', 'tecnico_id'], Crud: ['db', 'registro_id', 'update_data', 'tecnico_id']\n  - Body is different:\n--- backup
++++ crud
+@@ -1,23 +1,20 @@
+-'Atualiza um registro estruturado, validando a autoria.'
++'Atualiza um registro diário estruturado.'
+ try:
+-    item_ref = db.collection('usuarios').document(paciente_id).collection('registros_diarios_estruturados').document(registro_id)
+-    doc = item_ref.get()
+-    if not doc.exists:
+-        logger.warning(f'Registro estruturado {registro_id} não encontrado.')
++    registro_ref = db.collection('registros_diarios_estruturados').document(registro_id)
++    registro_doc = registro_ref.get()
++    if not registro_doc.exists:
+         return None
+-    if doc.to_dict().get('tecnico_id') != tecnico_id:
+-        raise PermissionError('Você só pode editar seus próprios registros.')
++    registro_data = registro_doc.to_dict()
++    if registro_data.get('tecnico_id') != tecnico_id:
++        return None
+     update_dict = update_data.model_dump(exclude_unset=True)
+-    if not update_dict:
+-        data = doc.to_dict()
+-        data['id'] = doc.id
+-        return data
+-    item_ref.update(update_dict)
+-    updated_doc = item_ref.get()
+-    data = updated_doc.to_dict()
+-    data['id'] = updated_doc.id
+-    logger.info(f'Registro estruturado {registro_id} do paciente {paciente_id} atualizado pelo técnico {tecnico_id}.')
+-    return data
++    update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
++    registro_ref.update(update_dict)
++    updated_doc = registro_ref.get()
++    updated_data = updated_doc.to_dict()
++    updated_data['id'] = updated_doc.id
++    logger.info(f'Registro estruturado {registro_id} atualizado')
++    return updated_data
+ except Exception as e:
+-    logger.error(f'Erro ao atualizar registro estruturado {registro_id} do paciente {paciente_id}: {e}')
+-    raise e+    logger.error(f'Erro ao atualizar registro estruturado: {e}')
++    return None\n- agendar_notificacao:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,8 +1,12 @@
+-'\n    Salva uma notificação no Firestore para ser enviada posteriormente por um worker.\n    '
+-agendamento_dict = notificacao_data.model_dump()
+-agendamento_dict.update({'status': 'agendada', 'criado_em': datetime.utcnow(), 'criado_por_uid': criador_uid, 'tentativas_envio': 0, 'ultimo_erro': None})
+-doc_ref = db.collection('notificacoes_agendadas').document()
+-doc_ref.set(agendamento_dict)
+-agendamento_dict['id'] = doc_ref.id
+-logger.info(f'Notificação agendada para paciente {notificacao_data.paciente_id} com ID: {doc_ref.id}')
+-return agendamento_dict+'Agenda uma notificação para ser enviada posteriormente.'
++try:
++    notif_dict = {'tipo': notificacao_data.tipo, 'titulo': notificacao_data.titulo, 'mensagem': notificacao_data.mensagem, 'destinatario_id': notificacao_data.destinatario_id, 'data_envio_agendada': notificacao_data.data_envio, 'status': 'agendada', 'criador_id': criador_uid, 'lida': False, 'dados_extras': notificacao_data.dados_extras or {}}
++    notif_dict = add_timestamps(notif_dict, is_update=False)
++    doc_ref = db.collection('notificacoes').document()
++    doc_ref.set(notif_dict)
++    notif_dict['id'] = doc_ref.id
++    logger.info(f'Notificação agendada para {notificacao_data.destinatario_id}')
++    return notif_dict
++except Exception as e:
++    logger.error(f'Erro ao agendar notificação: {e}')
++    raise\n- update_registro_diario:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,24 +1,22 @@
+-'Atualiza um registro no diário do técnico, verificando a autoria.'
++'Atualiza um registro diário.'
+ try:
+-    item_ref = db.collection('usuarios').document(paciente_id).collection('diario_tecnico').document(registro_id)
+-    doc = item_ref.get()
+-    if not doc.exists:
+-        logger.warning(f'Registro do diário {registro_id} não encontrado.')
++    registro_ref = db.collection('registros_diarios').document(registro_id)
++    registro_doc = registro_ref.get()
++    if not registro_doc.exists:
+         return None
+-    if doc.to_dict().get('tecnico_id') != tecnico_id:
+-        logger.error(f'Técnico {tecnico_id} tentou editar registro de outro técnico.')
+-        raise PermissionError('Você só pode editar seus próprios registros.')
++    registro_data = registro_doc.to_dict()
++    if registro_data.get('paciente_id') != paciente_id:
++        return None
++    if registro_data.get('tecnico_id') != tecnico_id:
++        return None
+     update_dict = update_data.model_dump(exclude_unset=True)
+-    if not update_dict:
+-        data = doc.to_dict()
+-        data['id'] = doc.id
+-        return data
+-    item_ref.update(update_dict)
+-    updated_doc = item_ref.get()
+-    data = updated_doc.to_dict()
+-    data['id'] = updated_doc.id
+-    logger.info(f'Registro {registro_id} do paciente {paciente_id} atualizado pelo técnico {tecnico_id}.')
+-    return data
++    update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
++    registro_ref.update(update_dict)
++    updated_doc = registro_ref.get()
++    updated_data = updated_doc.to_dict()
++    updated_data['id'] = updated_doc.id
++    logger.info(f'Registro diário {registro_id} atualizado')
++    return updated_data
+ except Exception as e:
+-    logger.error(f'Erro ao atualizar registro {registro_id} do paciente {paciente_id}: {e}')
+-    raise e+    logger.error(f'Erro ao atualizar registro diário: {e}')
++    return None\n- listar_pesquisas_por_paciente:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,11 +1,13 @@
+-'Lista todas as pesquisas (pendentes e respondidas) de um paciente.'
++'Lista todas as pesquisas enviadas para um paciente.'
+ pesquisas = []
+ try:
+-    query = db.collection('pesquisas_enviadas').where('negocio_id', '==', negocio_id).where('paciente_id', '==', paciente_id).order_by('data_envio', direction=firestore.Query.DESCENDING)
++    query = db.collection('pesquisas_enviadas').where('paciente_id', '==', paciente_id).where('negocio_id', '==', negocio_id).order_by('data_envio', direction=firestore.Query.DESCENDING)
+     for doc in query.stream():
+-        data = doc.to_dict()
+-        data['id'] = doc.id
+-        pesquisas.append(data)
++        pesquisa_data = doc.to_dict()
++        pesquisa_data['id'] = doc.id
++        pesquisas.append(pesquisa_data)
++    logger.info(f'Retornando {len(pesquisas)} pesquisas para paciente {paciente_id}')
++    return pesquisas
+ except Exception as e:
+-    logger.error(f'Erro ao listar pesquisas do paciente {paciente_id}: {e}')
+-return pesquisas+    logger.error(f'Erro ao listar pesquisas do paciente: {e}')
++    return []\n- listar_notificacoes:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,8 +1,13 @@
+-'Lista o histórico de notificações de um usuário.'
++'Lista todas as notificações de um usuário.'
+ notificacoes = []
+-query = db.collection('usuarios').document(usuario_id).collection('notificacoes').order_by('data_criacao', direction=firestore.Query.DESCENDING)
+-for doc in query.stream():
+-    notificacao_data = doc.to_dict()
+-    notificacao_data['id'] = doc.id
+-    notificacoes.append(notificacao_data)
+-return notificacoes+try:
++    query = db.collection('notificacoes').where('destinatario_id', '==', usuario_id).order_by('created_at', direction=firestore.Query.DESCENDING)
++    for doc in query.stream():
++        notificacao_data = doc.to_dict()
++        notificacao_data['id'] = doc.id
++        notificacoes.append(notificacao_data)
++    logger.info(f'Retornando {len(notificacoes)} notificações para usuário {usuario_id}')
++    return notificacoes
++except Exception as e:
++    logger.error(f'Erro ao listar notificações do usuário {usuario_id}: {e}')
++    return []\n- criar_registro_diario:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,21 +1,12 @@
+-'Salva um novo registro do técnico na subcoleção de um paciente, criptografando dados sensíveis.'
+-registro_dict = registro_data.model_dump()
+-sensitive_fields = ['anotacao_geral', 'medicamentos', 'atividades', 'intercorrencias']
+-for field in sensitive_fields:
+-    if field in registro_dict and registro_dict[field] is not None:
+-        if isinstance(registro_dict[field], str) and registro_dict[field].strip():
+-            registro_dict[field] = encrypt_data(registro_dict[field])
+-registro_dict.update({'data_ocorrencia': datetime.utcnow(), 'tecnico_id': tecnico.id, 'tecnico_nome': tecnico.nome})
+-paciente_ref = db.collection('usuarios').document(registro_data.paciente_id)
+-doc_ref = paciente_ref.collection('diario_tecnico').document()
+-doc_ref.set(registro_dict)
+-registro_dict['id'] = doc_ref.id
+-for field in sensitive_fields:
+-    if field in registro_dict and registro_dict[field] is not None:
+-        if isinstance(registro_dict[field], str) and registro_dict[field].strip():
+-            try:
+-                registro_dict[field] = decrypt_data(registro_dict[field])
+-            except Exception as e:
+-                logger.error(f'Erro ao descriptografar campo {field} do registro diário: {e}')
+-                registro_dict[field] = '[Erro na descriptografia]'
+-return registro_dict+'Cria um novo registro diário.'
++try:
++    registro_dict = {'paciente_id': registro_data.paciente_id, 'tecnico_id': tecnico.id, 'tecnico_nome': tecnico.nome, 'data_registro': registro_data.data_registro, 'titulo': registro_data.titulo, 'conteudo': registro_data.conteudo, 'tipo': registro_data.tipo or 'observacao', 'prioridade': registro_data.prioridade or 'normal', 'categoria': registro_data.categoria, 'tags': registro_data.tags or [], 'anexos': registro_data.anexos or []}
++    registro_dict = add_timestamps(registro_dict, is_update=False)
++    doc_ref = db.collection('registros_diarios').document()
++    doc_ref.set(registro_dict)
++    registro_dict['id'] = doc_ref.id
++    logger.info(f'Registro diário criado para paciente {registro_data.paciente_id}')
++    return registro_dict
++except Exception as e:
++    logger.error(f'Erro ao criar registro diário: {e}')
++    raise\n- criar_comentario:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,11 +1,14 @@
+-'Cria um novo comentário e atualiza o contador na postagem.'
+-post_ref = db.collection('postagens').document(comentario_data.postagem_id)
+-comentario_dict = comentario_data.dict()
+-comentario_dict['data'] = datetime.utcnow()
+-comentario_dict['cliente_id'] = usuario.id
+-comentario_dict['cliente_nome'] = usuario.nome
+-doc_ref = post_ref.collection('comentarios').document()
+-doc_ref.set(comentario_dict)
+-post_ref.update({'total_comentarios': firestore.Increment(1)})
+-comentario_dict['id'] = doc_ref.id
+-return comentario_dict+'Cria um novo comentário em uma postagem.'
++try:
++    comentario_dict = {'postagem_id': comentario_data.postagem_id, 'user_id': usuario.id, 'user_nome': usuario.nome, 'conteudo': comentario_data.conteudo, 'tipo': comentario_data.tipo or 'texto'}
++    comentario_dict = add_timestamps(comentario_dict, is_update=False)
++    doc_ref = db.collection('comentarios').document()
++    doc_ref.set(comentario_dict)
++    comentario_dict['id'] = doc_ref.id
++    post_ref = db.collection('postagens').document(comentario_data.postagem_id)
++    post_ref.update({'comentarios': firestore.Increment(1)})
++    logger.info(f'Comentário criado na postagem {comentario_data.postagem_id}')
++    return comentario_dict
++except Exception as e:
++    logger.error(f'Erro ao criar comentário: {e}')
++    raise\n- adicionar_foto_relatorio:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,4 +1,4 @@
+-"Adiciona a URL de uma foto ao array 'fotos' de um relatório médico usando operação atômica (ArrayUnion)."
++"Adiciona a URL de uma foto ao array 'fotos' de um relatório médico usando operação atômica."
+ try:
+     relatorio_ref = db.collection('relatorios_medicos').document(relatorio_id)
+     snapshot = relatorio_ref.get()
+@@ -9,7 +9,8 @@
+     updated = relatorio_ref.get()
+     data = updated.to_dict() or {}
+     data['id'] = updated.id
++    logger.info(f'Foto adicionada ao relatório {relatorio_id}')
+     return data
+ except Exception as e:
+-    logger.error(f'Erro ao adicionar foto (ArrayUnion) ao relatório {relatorio_id}: {e}')
++    logger.error(f'Erro ao adicionar foto ao relatório {relatorio_id}: {e}')
+     raise\n- listar_feed_por_negocio:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,22 +1,19 @@
+-'Lista o feed de postagens de um negócio específico.'
++'Lista o feed de postagens de um negócio.'
+ postagens = []
+-query = db.collection('postagens').where('negocio_id', '==', negocio_id).order_by('data_postagem', direction=firestore.Query.DESCENDING)
+-perfis_profissionais_cache = {}
+-for doc in query.stream():
+-    post_data = doc.to_dict()
+-    post_data['id'] = doc.id
+-    profissional_id = post_data.get('profissional_id')
+-    if profissional_id in perfis_profissionais_cache:
+-        perfil_profissional = perfis_profissionais_cache[profissional_id]
+-    else:
+-        perfil_profissional = buscar_profissional_por_id(db, profissional_id)
+-        perfis_profissionais_cache[profissional_id] = perfil_profissional
+-    if perfil_profissional:
+-        post_data['profissional_foto_thumbnail'] = perfil_profissional.get('fotos', {}).get('thumbnail')
+-    post_data['curtido_pelo_usuario'] = False
+-    if user_id:
+-        curtida_ref = db.collection('postagens').document(doc.id).collection('curtidas').document(user_id)
+-        if curtida_ref.get().exists:
+-            post_data['curtido_pelo_usuario'] = True
+-    postagens.append(post_data)
+-return postagens+try:
++    query = db.collection('postagens').where('negocio_id', '==', negocio_id).where('visibilidade', '==', 'publica').order_by('created_at', direction=firestore.Query.DESCENDING).limit(50)
++    for doc in query.stream():
++        postagem_data = doc.to_dict()
++        postagem_data['id'] = doc.id
++        if user_id:
++            curtida_query = db.collection('curtidas').where('postagem_id', '==', doc.id).where('user_id', '==', user_id).limit(1)
++            curtidas = list(curtida_query.stream())
++            postagem_data['user_curtiu'] = len(curtidas) > 0
++        else:
++            postagem_data['user_curtiu'] = False
++        postagens.append(postagem_data)
++    logger.info(f'Retornando {len(postagens)} postagens do feed do negócio {negocio_id}')
++    return postagens
++except Exception as e:
++    logger.error(f'Erro ao listar feed do negócio: {e}')
++    return []\n- adicionar_exame:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,11 +1,15 @@
+ 'Salva um novo exame, adicionando os campos de auditoria.'
+-exame_dict = exame_data.model_dump(mode='json')
+-now = datetime.utcnow()
+-exame_dict['criado_por'] = criador_uid
+-exame_dict['data_criacao'] = now
+-exame_dict['data_atualizacao'] = now
+-paciente_ref = db.collection('usuarios').document(exame_data.paciente_id)
+-doc_ref = paciente_ref.collection('exames').document()
+-doc_ref.set(exame_dict)
+-exame_dict['id'] = doc_ref.id
+-return exame_dict+try:
++    exame_dict = exame_data.model_dump(mode='json')
++    now = firestore.SERVER_TIMESTAMP
++    exame_dict['criado_por'] = criador_uid
++    exame_dict['created_at'] = now
++    exame_dict['updated_at'] = now
++    doc_ref = db.collection('exames').document()
++    doc_ref.set(exame_dict)
++    exame_dict['id'] = doc_ref.id
++    logger.info(f'Exame adicionado para paciente {exame_data.paciente_id}')
++    return exame_dict
++except Exception as e:
++    logger.error(f'Erro ao adicionar exame: {e}')
++    raise\n- atualizar_servico:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,18 +1,22 @@
+-'Atualiza um serviço, garantindo que ele pertence ao profissional correto.'
++'Atualiza um serviço específico.'
+ try:
+     servico_ref = db.collection('servicos').document(servico_id)
+     servico_doc = servico_ref.get()
+-    if not servico_doc.exists or servico_doc.to_dict().get('profissional_id') != profissional_id:
+-        logger.warning(f'Tentativa de atualização do serviço {servico_id} por profissional não autorizado ({profissional_id}).')
++    if not servico_doc.exists:
++        logger.warning(f'Serviço {servico_id} não encontrado')
++        return None
++    servico_data = servico_doc.to_dict()
++    if servico_data.get('profissional_id') != profissional_id:
++        logger.warning(f'Serviço {servico_id} não pertence ao profissional {profissional_id}')
+         return None
+     update_dict = update_data.model_dump(exclude_unset=True)
+-    if not update_dict:
+-        return servico_doc.to_dict()
++    update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
+     servico_ref.update(update_dict)
+-    logger.info(f'Serviço {servico_id} atualizado pelo profissional {profissional_id}.')
+-    updated_doc = servico_ref.get().to_dict()
+-    updated_doc['id'] = servico_id
+-    return updated_doc
++    updated_doc = servico_ref.get()
++    updated_data = updated_doc.to_dict()
++    updated_data['id'] = updated_doc.id
++    logger.info(f'Serviço {servico_id} atualizado com sucesso')
++    return updated_data
+ except Exception as e:
+     logger.error(f'Erro ao atualizar serviço {servico_id}: {e}')
+     return None\n- registrar_confirmacao_leitura_plano:\n  - Parameters are different. Backup: ['db', 'paciente_id', 'confirmacao'], Crud: ['db', 'paciente_id', 'plano_id', 'data_leitura']\n  - Body is different:\n--- backup
++++ crud
+@@ -1,8 +1,10 @@
+-'Cria o registro de auditoria da confirmação de leitura.'
+-confirmacao_dict = confirmacao.model_dump()
+-confirmacao_dict.update({'paciente_id': paciente_id, 'data_confirmacao': datetime.utcnow()})
+-paciente_ref = db.collection('usuarios').document(paciente_id)
+-doc_ref = paciente_ref.collection('confirmacoes_leitura').document()
+-doc_ref.set(confirmacao_dict)
+-confirmacao_dict['id'] = doc_ref.id
+-return confirmacao_dict+'Registra a confirmação de leitura de um plano pelo paciente.'
++try:
++    confirmacao_dict = {'paciente_id': paciente_id, 'plano_id': plano_id, 'data_leitura': data_leitura, 'confirmado': True, 'created_at': firestore.SERVER_TIMESTAMP}
++    doc_ref = db.collection('confirmacoes_leitura').document()
++    doc_ref.set(confirmacao_dict)
++    logger.info(f'Confirmação de leitura registrada para plano {plano_id}')
++    return True
++except Exception as e:
++    logger.error(f'Erro ao registrar confirmação de leitura: {e}')
++    return False\n- listar_medicacoes:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,11 +1,13 @@
+-'Lista todas as medicações de um paciente, filtrando-as pelo ID da consulta.'
++'Lista todas as medicações de uma consulta específica.'
+ medicacoes = []
+ try:
+-    query = db.collection('usuarios').document(paciente_id).collection('medicacoes').where('consulta_id', '==', consulta_id).order_by('data_criacao', direction=firestore.Query.DESCENDING)
++    query = db.collection('medicacoes').where('paciente_id', '==', paciente_id).where('consulta_id', '==', consulta_id).order_by('created_at', direction=firestore.Query.DESCENDING)
+     for doc in query.stream():
+         medicacao_data = doc.to_dict()
+         medicacao_data['id'] = doc.id
+         medicacoes.append(medicacao_data)
++    logger.info(f'Retornando {len(medicacoes)} medicações para a consulta {consulta_id}')
++    return medicacoes
+ except Exception as e:
+-    logger.error(f'Erro ao listar medicações do paciente {paciente_id}: {e}')
+-return medicacoes+    logger.error(f'Erro ao listar medicações da consulta {consulta_id}: {e}')
++    return []\n- deletar_postagem:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,13 +1,24 @@
+-'Deleta uma postagem, garantindo que ela pertence ao profissional correto.'
++'Remove uma postagem (apenas o autor pode deletar).'
+ try:
+     post_ref = db.collection('postagens').document(postagem_id)
+     post_doc = post_ref.get()
+-    if not post_doc.exists or post_doc.to_dict().get('profissional_id') != profissional_id:
+-        logger.warning(f'Tentativa de exclusão da postagem {postagem_id} por profissional não autorizado ({profissional_id}).')
++    if not post_doc.exists:
+         return False
+-    post_ref.delete()
+-    logger.info(f'Postagem {postagem_id} deletada pelo profissional {profissional_id}.')
++    post_data = post_doc.to_dict()
++    if post_data.get('profissional_id') != profissional_id:
++        logger.warning(f'Profissional {profissional_id} tentou deletar postagem que não é sua')
++        return False
++    comentarios_query = db.collection('comentarios').where('postagem_id', '==', postagem_id)
++    batch = db.batch()
++    for doc in comentarios_query.stream():
++        batch.delete(doc.reference)
++    curtidas_query = db.collection('curtidas').where('postagem_id', '==', postagem_id)
++    for doc in curtidas_query.stream():
++        batch.delete(doc.reference)
++    batch.delete(post_ref)
++    batch.commit()
++    logger.info(f'Postagem {postagem_id} deletada')
+     return True
+ except Exception as e:
+-    logger.error(f'Erro ao deletar postagem {postagem_id}: {e}')
++    logger.error(f'Erro ao deletar postagem: {e}')
+     return False\n- criar_bloqueio:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,6 +1,12 @@
+-'Cria um novo bloqueio na agenda de um profissional.'
+-bloqueio_dict = bloqueio_data.dict()
+-bloqueios_ref = db.collection('profissionais').document(profissional_id).collection('bloqueios')
+-time_created, doc_ref = bloqueios_ref.add(bloqueio_dict)
+-bloqueio_dict['id'] = doc_ref.id
+-return bloqueio_dict+'Cria um bloqueio de horário para um profissional.'
++try:
++    bloqueio_dict = {'profissional_id': profissional_id, 'data_inicio': bloqueio_data.data_inicio, 'data_fim': bloqueio_data.data_fim, 'motivo': bloqueio_data.motivo, 'ativo': True}
++    bloqueio_dict = add_timestamps(bloqueio_dict, is_update=False)
++    doc_ref = db.collection('bloqueios').document()
++    doc_ref.set(bloqueio_dict)
++    bloqueio_dict['id'] = doc_ref.id
++    logger.info(f'Bloqueio criado para profissional {profissional_id}')
++    return bloqueio_dict
++except Exception as e:
++    logger.error(f'Erro ao criar bloqueio: {e}')
++    raise\n- recusar_relatorio:\n  - Body is different:\n--- backup
++++ crud
+@@ -1,10 +1,21 @@
+-"\n    Muda o status de um relatório para 'recusado' e adiciona o motivo.\n    "
+-relatorio_ref = db.collection('relatorios_medicos').document(relatorio_id)
+-relatorio_doc = relatorio_ref.get()
+-if not relatorio_doc.exists or relatorio_doc.to_dict().get('medico_id') != medico_id:
+-    raise HTTPException(status_code=403, detail='Acesso negado: este relatório não está atribuído a você.')
+-relatorio_ref.update({'status': 'recusado', 'data_revisao': datetime.utcnow(), 'motivo_recusa': motivo})
+-updated_doc = relatorio_ref.get()
+-data = updated_doc.to_dict()
+-data['id'] = updated_doc.id
+-return data+"Muda o status de um relatório para 'recusado' e adiciona o motivo."
++try:
++    relatorio_ref = db.collection('relatorios_medicos').document(relatorio_id)
++    relatorio_doc = relatorio_ref.get()
++    if not relatorio_doc.exists:
++        logger.warning(f'Relatório {relatorio_id} não encontrado')
++        return None
++    relatorio_data = relatorio_doc.to_dict()
++    medico_responsavel = relatorio_data.get('medico_responsavel_id')
++    if medico_responsavel and medico_responsavel != medico_id:
++        logger.warning(f'Médico {medico_id} tentou recusar relatório {relatorio_id} sem permissão')
++        return None
++    relatorio_ref.update({'status': 'recusado', 'data_revisao': firestore.SERVER_TIMESTAMP, 'motivo_recusa': motivo, 'medico_responsavel_id': medico_id, 'updated_at': firestore.SERVER_TIMESTAMP})
++    updated_doc = relatorio_ref.get()
++    updated_data = updated_doc.to_dict()
++    updated_data['id'] = updated_doc.id
++    logger.info(f'Relatório {relatorio_id} recusado pelo médico {medico_id}')
++    return updated_data
++except Exception as e:
++    logger.error(f'Erro ao recusar relatório {relatorio_id}: {e}')
++    return None\n\nFunções exclusivas do backup:\nNenhuma\n\nFunções exclusivas da pasta crud:\ndecrypt_endereco_fields, atualizar_negocio, buscar_negocio_por_id, criar_medicacao, encrypt_endereco_fields, criar_exame, validate_phone_number, validate_cep, atualizar_agendamento, decrypt_user_sensitive_fields, encrypt_user_sensitive_fields, criar_checklist_item, add_timestamps\n
