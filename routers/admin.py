@@ -42,6 +42,61 @@ def admin_listar_negocios(
 # Router para Admin - Gestão do Negócio
 business_admin_router = APIRouter(prefix="/negocios/{negocio_id}", tags=["Admin - Gestão do Negócio"])
 
+@business_admin_router.get("/debug-usuarios", response_model=dict)
+def debug_usuarios_do_negocio(
+    negocio_id: str = Depends(validate_path_negocio_id),
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """DEBUG: Verificar problemas com listagem de usuários."""
+    from firebase_admin import firestore
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    # 1. Testar busca do usuário atual
+    current_firebase_uid = current_user.firebase_uid
+    current_found = crud.buscar_usuario_por_firebase_uid(db, current_firebase_uid)
+    
+    # 2. Testar query da função admin_listar_usuarios_por_negocio
+    query = db.collection('usuarios').where(f'roles.{negocio_id}', 'in', ['cliente', 'profissional', 'admin', 'tecnico', 'medico'])
+    query_results = []
+    for doc in query.stream():
+        data = doc.to_dict()
+        data['id'] = doc.id
+        query_results.append({
+            'id': data['id'],
+            'email': data.get('email'),
+            'roles': data.get('roles', {}),
+            'firebase_uid': data.get('firebase_uid')
+        })
+    
+    # 3. Buscar TODOS os usuários com o firebase_uid atual
+    all_with_uid_query = db.collection('usuarios').where('firebase_uid', '==', current_firebase_uid)
+    all_with_uid = []
+    for doc in all_with_uid_query.stream():
+        data = doc.to_dict()
+        data['id'] = doc.id
+        all_with_uid.append({
+            'id': data['id'],
+            'email': data.get('email'),
+            'roles': data.get('roles', {}),
+            'firebase_uid': data.get('firebase_uid')
+        })
+    
+    return {
+        'debug_info': {
+            'negocio_id': negocio_id,
+            'current_user_firebase_uid': current_firebase_uid,
+            'current_user_found_by_crud': current_found is not None,
+            'current_user_id_from_crud': current_found.get('id') if current_found else None,
+            'current_user_roles_from_crud': current_found.get('roles', {}) if current_found else None,
+            'query_results_count': len(query_results),
+            'query_results': query_results,
+            'all_users_with_same_uid': all_with_uid
+        }
+    }
+
 @business_admin_router.get("/usuarios", response_model=List[schemas.UsuarioProfile])
 def listar_usuarios_do_negocio(
     negocio_id: str = Depends(validate_path_negocio_id),
