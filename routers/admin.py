@@ -162,7 +162,7 @@ def alterar_role_usuario(
     db: firestore.client = Depends(get_db)
 ):
     """(Admin) Altera o role de um usuário no negócio."""
-    result = crud.admin_atualizar_role_usuario(db, negocio_id, user_id, request.novo_role, admin.firebase_uid)
+    result = crud.admin_atualizar_role_usuario(db, negocio_id, user_id, request.role, admin.firebase_uid)
     if not result:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
     return result
