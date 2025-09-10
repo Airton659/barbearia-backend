@@ -141,6 +141,14 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
     # Criptografa os dados antes de salvar
     nome_criptografado = encrypt_data(user_data.nome)
     telefone_criptografado = encrypt_data(user_data.telefone) if user_data.telefone else None
+    endereco_criptografado = None
+    if user_data.endereco:
+        endereco_criptografado = {}
+        for k, v in user_data.endereco.dict().items():
+            if v and isinstance(v, str) and v.strip():
+                endereco_criptografado[k] = encrypt_data(v)
+            else:
+                endereco_criptografado[k] = v
 
     # Fluxo de Super Admin (sem negocio_id)
     is_super_admin_flow = not negocio_id
@@ -155,6 +163,8 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
             }
             if telefone_criptografado:
                 user_dict['telefone'] = telefone_criptografado
+            if endereco_criptografado:
+                user_dict['endereco'] = endereco_criptografado
             doc_ref = db.collection('usuarios').document()
             doc_ref.set(user_dict)
             user_dict['id'] = doc_ref.id
@@ -163,6 +173,8 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
             # Descriptografa para retornar ao usuário
             user_dict['nome'] = user_data.nome
             user_dict['telefone'] = user_data.telefone
+            if user_data.endereco:
+                user_dict['endereco'] = user_data.endereco.dict()
             return user_dict
         else:
             raise ValueError("Não é possível se registrar sem um negócio específico.")
@@ -192,12 +204,17 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
             # NUNCA criar novo usuário duplicado!
             user_ref = db.collection('usuarios').document(user_existente['id'])
             
-            # Atualizar dados do usuário existente (nome, email podem ter mudado)
+            # Atualizar dados do usuário existente (nome, email, telefone, endereco podem ter mudado)
             update_data = {}
             if user_data.nome and user_data.nome != user_existente.get('nome', ''):
                 update_data['nome'] = nome_criptografado
             if user_data.email and user_data.email != user_existente.get('email', ''):
                 update_data['email'] = user_data.email
+            if user_data.telefone and user_data.telefone != user_existente.get('telefone', ''):
+                update_data['telefone'] = telefone_criptografado
+            if user_data.endereco and endereco_criptografado:
+                # Sempre atualizar endereço se for enviado (pode ter campos diferentes)
+                update_data['endereco'] = endereco_criptografado
             
             # Adicionar role se não tiver para este negócio
             if negocio_id not in user_existente.get("roles", {}):
@@ -210,6 +227,16 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
             if update_data:
                 transaction.update(user_ref, update_data)
                 logger.info(f"Usuário existente {user_existente['id']} atualizado para {user_data.email}")
+                
+                # Atualizar os valores no objeto de retorno com os novos dados descriptografados
+                if 'nome' in update_data:
+                    user_existente['nome'] = user_data.nome
+                if 'email' in update_data:
+                    user_existente['email'] = user_data.email
+                if 'telefone' in update_data:
+                    user_existente['telefone'] = user_data.telefone
+                if 'endereco' in update_data and user_data.endereco:
+                    user_existente['endereco'] = user_data.endereco.dict()
             else:
                 logger.info(f"Usuário existente {user_existente['id']} retornado sem alterações para {user_data.email}")
                 
@@ -237,9 +264,8 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
         }
         if telefone_criptografado:
             user_dict['telefone'] = telefone_criptografado
-        if hasattr(user_data, 'endereco') and user_data.endereco:
-            # O ideal é criptografar campo a campo do endereço
-            user_dict['endereco'] = {k: encrypt_data(v) for k, v in user_data.endereco.dict().items()}
+        if endereco_criptografado:
+            user_dict['endereco'] = endereco_criptografado
         
         new_user_ref = db.collection('usuarios').document()
         transaction.set(new_user_ref, user_dict)
@@ -251,8 +277,8 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
         # Descriptografa para retornar ao usuário
         user_dict['nome'] = user_data.nome
         user_dict['telefone'] = user_data.telefone
-        if 'endereco' in user_dict and user_dict['endereco']:
-             user_dict['endereco'] = user_data.endereco.dict()
+        if user_data.endereco:
+            user_dict['endereco'] = user_data.endereco.dict()
 
         return user_dict
     

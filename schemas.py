@@ -80,7 +80,7 @@ class UsuarioSync(BaseModel):
     negocio_id: Optional[str] = None
     codigo_convite: Optional[str] = None
     telefone: Optional[str] = None
-    # endereco: ... # LINHA REMOVIDA
+    endereco: Optional[Endereco] = None
 
 class FCMTokenUpdate(BaseModel):
     fcm_token: str
