@@ -136,6 +136,13 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
     Cria ou atualiza um usuário no Firestore, criptografando dados sensíveis.
     Esta função é a única fonte da verdade para a lógica de onboarding.
     """
+    # DEBUG: Log dos dados recebidos
+    logger.critical(f"🔍 DEBUG ENDERECO - user_data: nome={user_data.nome}, telefone={user_data.telefone}, endereco={user_data.endereco}")
+    if user_data.endereco:
+        logger.critical(f"🔍 DEBUG ENDERECO - endereco.dict(): {user_data.endereco.dict()}")
+    else:
+        logger.critical(f"🔍 DEBUG ENDERECO - endereco é None ou vazio!")
+        
     negocio_id = user_data.negocio_id
 
     # Criptografa os dados antes de salvar
@@ -149,6 +156,9 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
                 endereco_criptografado[k] = encrypt_data(v)
             else:
                 endereco_criptografado[k] = v
+        logger.critical(f"🔍 DEBUG ENDERECO - endereco_criptografado: {endereco_criptografado}")
+    else:
+        logger.critical(f"🔍 DEBUG ENDERECO - Pulando criptografia, endereco é None")
 
     # Fluxo de Super Admin (sem negocio_id)
     is_super_admin_flow = not negocio_id
@@ -215,6 +225,9 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
             if user_data.endereco and endereco_criptografado:
                 # Sempre atualizar endereço se for enviado (pode ter campos diferentes)
                 update_data['endereco'] = endereco_criptografado
+                logger.critical(f"🔍 DEBUG ENDERECO - Adicionando endereco ao update_data: {endereco_criptografado}")
+            else:
+                logger.critical(f"🔍 DEBUG ENDERECO - NÃO adicionando endereco (user_data.endereco={user_data.endereco}, endereco_criptografado={endereco_criptografado})")
             
             # Adicionar role se não tiver para este negócio
             if negocio_id not in user_existente.get("roles", {}):

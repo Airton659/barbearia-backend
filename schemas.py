@@ -31,11 +31,11 @@ class NegocioResponse(NegocioBase):
 # =================================================================================
 
 class Endereco(BaseModel):
-    rua: str
-    numero: str
-    cidade: str
-    estado: str
-    cep: str
+    rua: Optional[str] = None
+    numero: Optional[str] = None  
+    cidade: Optional[str] = None
+    estado: Optional[str] = None
+    cep: Optional[str] = None
 
 class EnderecoUpdate(Endereco):
     pass
