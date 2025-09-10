@@ -129,10 +129,12 @@ def admin_set_usuario_status(db: firestore.client, negocio_id: str, user_id: str
 
     criar_log_auditoria(
         db,
-        autor_uid=autor_uid,
-        negocio_id=negocio_id,
         acao=f"USUARIO_STATUS_{status.upper()}",
-        detalhes={"usuario_alvo_id": user_id}
+        usuario_id=autor_uid,
+        detalhes={
+            "negocio_id": negocio_id,
+            "usuario_alvo_id": user_id
+        }
     )
     logger.info(f"Status do usuário {user_id} definido como '{status}' no negócio {negocio_id}.")
 
@@ -204,10 +206,14 @@ def admin_atualizar_role_usuario(db: firestore.client, negocio_id: str, user_id:
 
     criar_log_auditoria(
         db,
-        autor_uid=autor_uid,
-        negocio_id=negocio_id,
         acao="ROLE_UPDATE",
-        detalhes={"usuario_alvo_id": user_id, "role_antiga": role_antiga, "nova_role": novo_role}
+        usuario_id=autor_uid,
+        detalhes={
+            "negocio_id": negocio_id,
+            "usuario_alvo_id": user_id, 
+            "role_antiga": role_antiga, 
+            "nova_role": novo_role
+        }
     )
 
     # Lógica para perfil profissional
