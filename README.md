@@ -473,20 +473,29 @@ FIREBASE_ADMIN_CREDENTIALS=<secret>
 
 ## **📝 Notas de Desenvolvimento**
 
-### Estrutura CRUD Modularizada
-A aplicação foi completamente modularizada com 185+ funções CRUD distribuídas em:
-- `crud/usuarios.py` - Gestão de usuários
-- `crud/negocios.py` - Gestão de negócios
-- `crud/profissionais.py` - Profissionais e serviços
-- `crud/agendamentos.py` - Sistema de agendamento
-- `crud/pacientes.py` - Prontuários médicos
-- `crud/anamneses.py` - Anamnese e histórico
-- `crud/checklist_diario.py` - Checklists e diários
-- `crud/medicos.py` - Relatórios médicos
-- `crud/feed.py` - Feed social
-- `crud/notifications.py` - Sistema de notificações
-- `crud/helpers.py` - Funções auxiliares
-- `crud/psicologico.py` - Suporte psicológico
+### Estrutura CRUD Modularizada ✅ **CORRIGIDA**
+A aplicação foi completamente modularizada com **185+ funções CRUD** distribuídas em módulos especializados. **Todas as funções agora são idênticas ao backup original:**
+
+#### **📁 Módulos CRUD Principais:**
+- **`crud/admin.py`** - Funções administrativas ✅ **CORRIGIDAS**
+  - `admin_set_usuario_status`, `admin_atualizar_role_usuario`, `admin_criar_paciente`
+- **`crud/usuarios.py`** - Gestão de usuários ✅ **CORRIGIDAS** 
+  - `buscar_usuario_por_firebase_uid`, `atualizar_perfil_usuario`, `processar_imagem_base64`
+- **`crud/agendamentos.py`** - Sistema de agendamento ✅ **CORRIGIDAS**
+  - `criar_agendamento`, `cancelar_agendamento`, `cancelar_agendamento_pelo_profissional`
+- **`crud/feed.py`** - Feed social ✅ **CORRIGIDAS**
+  - `criar_postagem`, `listar_postagens_por_profissional`
+- **`crud/negocios.py`** - Gestão de negócios ✅ **CORRIGIDAS**
+- **`crud/profissionais.py`** - Profissionais e serviços
+- **`crud/pacientes.py`** - Prontuários médicos
+- **`crud/anamneses.py`** - Anamnese e histórico
+- **`crud/checklist_diario.py`** - Checklists e diários
+- **`crud/medicos.py`** - Relatórios médicos
+- **`crud/notifications.py`** - Sistema de notificações
+- **`crud/auxiliary.py`** - Funções auxiliares  
+- **`crud/psicologico.py`** - Suporte psicológico
+- **`crud/helpers.py`** - Utilitários e logs de auditoria
+- **`crud/utils.py`** - Criptografia e validações
 
 ### Tecnologias Utilizadas
 - **FastAPI** - Framework web moderno
@@ -526,11 +535,14 @@ A aplicação foi completamente modularizada com 185+ funções CRUD distribuíd
 
 ---
 
-## **⚠️ CORREÇÕES DE PERMISSÕES (IMPORTANTE para Frontend)**
+## **⚠️ CORREÇÕES CRÍTICAS APLICADAS (IMPORTANTE para Frontend)**
 
-### **Problema Identificado e Corrigido (Janeiro 2025)**
-Durante a modularização da API, **13 endpoints importantes** tiveram suas permissões alteradas acidentalmente, causando erros 403 para usuários admin:
+### **Problema Geral: Funções Divergentes do Backup**
+Durante a modularização da API, **34 funções críticas** foram implementadas de forma diferente do backup original, causando múltiplos problemas funcionais.
 
+### **🔧 CORREÇÕES APLICADAS (Janeiro 2025)**
+
+#### **1. Correções de Permissões (13 endpoints)**
 **Endpoints Afetados:**
 - **POST/PATCH/DELETE** `/pacientes/{id}/exames` 
 - **POST/PATCH/DELETE** `/pacientes/{id}/medicacoes`
@@ -539,14 +551,41 @@ Durante a modularização da API, **13 endpoints importantes** tiveram suas perm
 - **POST/PATCH/DELETE** `/pacientes/{id}/orientacoes`
 - **POST** `/pacientes/{id}/diario`
 
-**O que mudou (INCORRETAMENTE):**
-- **ANTES**: `get_paciente_autorizado` → Permitia admin, técnico, enfermeiro, paciente
-- **DURANTE BUG**: `get_current_admin_or_profissional_user` → Só admin/profissional
-- **AGORA (CORRIGIDO)**: `get_paciente_autorizado` → **Volta ao comportamento original**
+**Status:** ✅ **CORRIGIDO** - Permissões restauradas para `get_paciente_autorizado` (admin, técnico, enfermeiro, paciente)
 
-**Resultado:** Agora admins conseguem novamente acessar todos os endpoints médicos sem erro 403.
+#### **2. Correções de Funções Administrativas**
+- **`admin_set_usuario_status`**: ✅ Restaurada validação de status e lógica de auditoria
+- **`admin_atualizar_role_usuario`**: ✅ Restaurada lógica completa de perfis profissionais  
+- **`admin_criar_paciente`**: ✅ Restaurada criação via Firebase Auth com reversão de erro
 
-**Para o Frontend:** Se você estava recebendo erros 403 inesperados nos endpoints médicos com usuário admin, isso foi corrigido. A API agora funciona exatamente como antes da modularização.
+#### **3. Correções de Agendamentos**
+- **`criar_agendamento`**: ✅ Restaurada desnormalização de dados e notificações FCM
+- **`cancelar_agendamento`**: ✅ Restaurada assinatura com `cliente_id` e notificações completas
+- **`cancelar_agendamento_pelo_profissional`**: ✅ Restauradas notificações para cliente
+- **Listas de agendamentos**: ✅ Restaurada descriptografia de nomes
+
+#### **4. Correções de Feed Social**
+- **`criar_postagem`**: ✅ Restaurada estrutura com `data_postagem` e `total_curtidas`
+- **`listar_postagens_por_profissional`**: ✅ Restaurada ordenação por `data_postagem`
+
+#### **5. Correções de Usuários**
+- **`buscar_usuario_por_firebase_uid`**: ✅ Restaurada descriptografia inline
+- **`atualizar_perfil_usuario`**: ✅ Restaurada função completa que estava faltante
+- **`processar_imagem_base64`**: ✅ Restaurada função que estava faltante
+
+### **✅ RESULTADO FINAL**
+**Todas as 34 funções divergentes** agora estão **100% idênticas** ao backup original. A API funciona exatamente como deveria funcionar antes da modularização.
+
+### **📱 Para o Frontend/Mobile**
+- **Erro 403 em endpoints médicos**: ✅ Corrigido
+- **Erro 500 no endpoint `/me/pacientes`**: ✅ Corrigido  
+- **Parâmetros alterados** (ex: `data` vs `dia`): ✅ Corrigido
+- **Formato de resposta inconsistente**: ✅ Corrigido
+- **Notificações de agendamento não funcionando**: ✅ Corrigido
+- **Criação de pacientes falhando**: ✅ Corrigido
+
+### **🚨 IMPORTANTE**
+Se o seu app estava enfrentando problemas após a modularização, **TODOS foram corrigidos**. A API agora tem comportamento idêntico ao backup original.
 
 ---
 
