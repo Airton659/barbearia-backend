@@ -1,6 +1,12 @@
-# 🏥📱 API Multi-Tenant para Gestão Clínica e Agendamentos (v3.0)
+# 🏥📱 API de Gestão Clínica - Backend (v3.0)
 
-Bem-vindo ao repositório da API completa de gestão clínica e agendamentos. Este projeto serve como um backend robusto, escalável e genérico, construído com uma arquitetura moderna e multi-tenant, capaz de atender tanto aplicações de agendamento de serviços quanto sistemas completos de gestão clínica e hospitalar.
+**Atualizado em:** 2025-01-10
+
+Este repositório contém o **backend completo** da **API de Gestão Clínica**. A API serve como base para o **App Flutter** correspondente, oferecendo suporte completo aos fluxos de **cadastro de pacientes**, **gestão de papéis e vínculos**, **plano de cuidado**, **diário de acompanhamento** e **checklist diário** com confirmação de leitura.
+
+**📱 App Flutter correspondente:** [App de Gestão Clínica](https://github.com/seu-repo/gestao-clinica-flutter)
+
+A API é construída com arquitetura moderna, multi-tenant e escalável, capaz de atender tanto sistemas de gestão clínica quanto aplicações de agendamento de serviços.
 
 ## 🚀 Sobre o Projeto
 
@@ -30,11 +36,67 @@ negocio-id: {ID_DO_NEGOCIO_AQUI}
 
 ### 3. Roles e Permissões
 - **platform** - Super-administrador da plataforma
-- **admin** - Administrador do negócio
+- **admin** - Administrador do negócio (acesso total)
 - **profissional/enfermeiro** - Profissionais de saúde (enfermeiros)
-- **medico** - Médicos (sem login, apenas para vinculação)
 - **tecnico** - Técnicos de enfermagem
+- **medico** - Médicos (sem login, apenas para vinculação)
 - **cliente/paciente** - Pacientes
+
+### 4. Usuários de Teste (Desenvolvimento)
+Para facilitar o desenvolvimento do app Flutter:
+- **Admin:** `concierge@com.br` — **senha:** `123456`
+- **Enfermeiro:** `pauto@com.br` — **senha:** `123456`
+- **Técnico:** `automatico@com.br` — **senha:** `123456`
+
+> **Nota:** As contas precisam existir no Firebase Auth do projeto configurado.
+
+---
+
+## 📱 **INTEGRAÇÃO COM APP FLUTTER**
+
+### Fluxos Principais Suportados
+A API suporta **todos os fluxos** implementados no app Flutter:
+
+#### **🔐 Autenticação e Navegação**
+- Login via Firebase Auth (`POST /users/sync-profile`)
+- Redirecionamento por papel (Admin → Dashboard; Enfermeiro/Técnico → Pacientes)
+
+#### **👤 Gestão de Usuários (Admin)**
+- Cadastro de usuários com dados pessoais e endereço
+- Alteração de papéis (`PATCH /negocios/{id}/usuarios/{id}/role`)
+- Vínculos Supervisor ⇄ Técnico (`PATCH /negocios/{id}/usuarios/{id}/vincular-supervisor`)
+- Vínculos Técnico(s) → Paciente (`PATCH /negocios/{id}/pacientes/{id}/vincular-tecnicos`)
+- Vínculos Enfermeiro → Paciente (`POST /negocios/{id}/vincular-paciente`)
+
+#### **🏥 Plano de Cuidado (Admin/Enfermeiro)**
+- Editor com Orientações, Medicações, Exames e Checklist
+- Sistema de **publicação** com histórico de versões
+- Endpoints: `/pacientes/{id}/consultas`, `/pacientes/{id}/medicacoes`, etc.
+
+#### **✅ Confirmação de Leitura (Técnico)**
+- **Bloqueio do Diário** até confirmação (`GET /pacientes/{id}/verificar-leitura-plano`)
+- **Registro com data/hora** (`POST /pacientes/{id}/confirmar-leitura-plano`)
+
+#### **📋 Checklist Diário (Técnico)**
+- Instância diária após confirmação (`GET /pacientes/{id}/checklist-diario`)
+- Marcação persistente (`PATCH /pacientes/{id}/checklist-diario/{id}`)
+
+#### **📝 Diário de Acompanhamento (Técnico)**
+- CRUD de anotações (`POST/PATCH/DELETE /pacientes/{id}/diario`)
+- Sistema de pull-to-refresh suportado
+
+#### **👨‍⚕️ Supervisão (Admin/Enfermeiro)**
+- Listar técnicos supervisionados
+- Filtrar Diário por técnico
+
+### Configuração para o App Flutter
+```dart
+// Configurar base URL da API no app
+const String baseUrl = "https://barbearia-backend-service-862082955632.southamerica-east1.run.app";
+
+// Configurar negócio ID (multi-tenant)
+const String negocioId = "SEU_NEGOCIO_ID_AQUI";
+```
 
 ---
 
@@ -586,6 +648,42 @@ Durante a modularização da API, **34 funções críticas** foram implementadas
 
 ### **🚨 IMPORTANTE**
 Se o seu app estava enfrentando problemas após a modularização, **TODOS foram corrigidos**. A API agora tem comportamento idêntico ao backup original.
+
+---
+
+## **🧪 TESTES DE INTEGRAÇÃO COM APP FLUTTER**
+
+### Roteiro de Testes Backend ↔ Frontend
+
+#### **📱 Testes Admin (App Flutter)**
+1. **Dashboard**: `GET /negocios/{id}/usuarios` - Contagem por papel
+2. **Cadastro**: `POST /negocios/{id}/pacientes` - Usuário com dados pessoais + endereço
+3. **Gestão de papéis**: `PATCH /negocios/{id}/usuarios/{id}/role` - cliente → técnico
+4. **Vínculos**: 
+   - `PATCH /negocios/{id}/usuarios/{id}/vincular-supervisor` - Supervisor ⇄ Técnico
+   - `PATCH /negocios/{id}/pacientes/{id}/vincular-tecnicos` - Técnicos → Paciente
+5. **Plano de Cuidado**: `POST /pacientes/{id}/consultas` + publicação
+6. **Supervisão**: Filtrar diário por técnico
+
+#### **📱 Testes Enfermeiro (App Flutter)**
+1. **Meus Pacientes**: `GET /me/pacientes` - Listagem de vinculados
+2. **Cadastro**: `POST /negocios/{id}/pacientes` - Auto-vincula ao enfermeiro
+3. **Plano**: `POST /pacientes/{id}/medicacoes`, `/pacientes/{id}/exames` + publicação
+4. **Supervisão**: Filtrar diário por técnico supervisionado
+
+#### **📱 Testes Técnico (App Flutter)**  
+1. **Pacientes Vinculados**: `GET /me/pacientes` - Apenas vinculados
+2. **Confirmação**: `GET /pacientes/{id}/verificar-leitura-plano` - Bloqueio do diário
+3. **Leitura**: `POST /pacientes/{id}/confirmar-leitura-plano` - Desbloqueio
+4. **Checklist**: `GET /pacientes/{id}/checklist-diario` - Instância diária
+5. **Diário**: `POST/PATCH/DELETE /pacientes/{id}/diario` - CRUD anotações
+
+#### **🔄 Funcionalidades Específicas Testadas**
+- **Pull-to-refresh**: Todos os endpoints GET suportam recarregamento
+- **Validação de permissões**: ✅ Todos os 13 endpoints médicos funcionam para admin
+- **Notificações FCM**: ✅ Agendamentos disparam notificações automáticas  
+- **Criptografia LGPD**: ✅ Dados sensíveis criptografados/descriptografados automaticamente
+- **Multi-tenant**: ✅ Isolamento por `negocio-id` header
 
 ---
 
