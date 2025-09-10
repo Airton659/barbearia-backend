@@ -18,24 +18,73 @@ logger = logging.getLogger(__name__)
 USER_SENSITIVE_FIELDS = ['nome', 'telefone']
 
 def buscar_usuario_por_firebase_uid(db: firestore.client, firebase_uid: str) -> Optional[Dict]:
-    """Busca um usuário na coleção 'usuarios' pelo seu firebase_uid e descriptografa os dados sensíveis."""
+    """
+    Busca um usuário na coleção 'usuarios' pelo seu firebase_uid e descriptografa os dados sensíveis.
+    
+    CORREÇÃO CRÍTICA: Se existir múltiplos usuários com mesmo firebase_uid (problema de duplicação),
+    retorna o usuário com maior privilégio (admin > profissional > tecnico > medico > cliente).
+    """
     try:
-        query = db.collection('usuarios').where('firebase_uid', '==', firebase_uid).limit(1)
+        # BUSCAR TODOS os usuários com este firebase_uid (não só limit(1))
+        query = db.collection('usuarios').where('firebase_uid', '==', firebase_uid)
         docs = list(query.stream())
-        if docs:
+        
+        if not docs:
+            return None
+            
+        # Se só tem 1 usuário, retornar ele
+        if len(docs) == 1:
             user_doc = docs[0].to_dict()
             user_doc['id'] = docs[0].id
+        else:
+            # PROBLEMA CRÍTICO: Múltiplos usuários com mesmo firebase_uid!
+            logger.warning(f"DUPLICAÇÃO DETECTADA: {len(docs)} usuários com firebase_uid {firebase_uid}")
+            
+            # Definir hierarquia de privilégios (maior para menor)
+            role_priority = {
+                'admin': 5,
+                'profissional': 4, 
+                'enfermeiro': 4,  # enfermeiro = profissional
+                'tecnico': 3,
+                'medico': 2,
+                'cliente': 1,
+                'platform': 6  # super admin
+            }
+            
+            best_user = None
+            best_priority = 0
+            
+            for doc in docs:
+                user_data = doc.to_dict()
+                user_data['id'] = doc.id
+                
+                # Calcular prioridade máxima deste usuário (considerando todos os seus roles)
+                user_priority = 0
+                roles = user_data.get('roles', {})
+                
+                for negocio_id, role in roles.items():
+                    role_prio = role_priority.get(role, 0)
+                    if role_prio > user_priority:
+                        user_priority = role_prio
+                
+                # Se este usuário tem prioridade maior, escolher ele
+                if user_priority > best_priority:
+                    best_priority = user_priority
+                    best_user = user_data
+                    
+            user_doc = best_user
+            logger.info(f"Selecionado usuário {user_doc['id']} com maior privilégio (prioridade {best_priority})")
 
-            # Descriptografa os campos
-            if 'nome' in user_doc:
-                user_doc['nome'] = decrypt_data(user_doc['nome'])
-            if 'telefone' in user_doc and user_doc['telefone']:
-                user_doc['telefone'] = decrypt_data(user_doc['telefone'])
-            if 'endereco' in user_doc and user_doc['endereco']:
-                user_doc['endereco'] = {k: decrypt_data(v) for k, v in user_doc['endereco'].items()}
+        # Descriptografa os campos
+        if 'nome' in user_doc and user_doc['nome']:
+            user_doc['nome'] = decrypt_data(user_doc['nome'])
+        if 'telefone' in user_doc and user_doc['telefone']:
+            user_doc['telefone'] = decrypt_data(user_doc['telefone'])
+        if 'endereco' in user_doc and user_doc['endereco']:
+            user_doc['endereco'] = {k: decrypt_data(v) for k, v in user_doc['endereco'].items()}
 
-            return user_doc
-        return None
+        return user_doc
+        
     except Exception as e:
         logger.error(f"Erro ao buscar/descriptografar usuário por firebase_uid {firebase_uid}: {e}")
         # Se a descriptografia falhar (ex: chave errada), não retorna dados corrompidos
