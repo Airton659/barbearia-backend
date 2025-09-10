@@ -126,11 +126,12 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
         else:
             raise ValueError("Não é possível se registrar sem um negócio específico.")
     
-    # Fluxo multi-tenant
+    # Fluxo multi-tenant  
+    # CORREÇÃO CRÍTICA: Buscar usuário FORA da transação para ver dados já commitados
+    user_existente = buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
+    
     @firestore.transactional
     def transaction_sync_user(transaction):
-        # A função buscar_usuario_por_firebase_uid precisa ser ajustada para descriptografar
-        user_existente = buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
         
         negocio_doc_ref = db.collection('negocios').document(negocio_id)
         negocio_doc = negocio_doc_ref.get(transaction=transaction)
