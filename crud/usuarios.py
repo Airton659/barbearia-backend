@@ -75,19 +75,60 @@ def buscar_usuario_por_firebase_uid(db: firestore.client, firebase_uid: str) -> 
             user_doc = best_user
             logger.info(f"Selecionado usuário {user_doc['id']} com maior privilégio (prioridade {best_priority})")
 
-        # Descriptografa os campos
+        # Descriptografa os campos com tratamento de erro individual
         if 'nome' in user_doc and user_doc['nome']:
-            user_doc['nome'] = decrypt_data(user_doc['nome'])
+            try:
+                user_doc['nome'] = decrypt_data(user_doc['nome'])
+            except Exception as e:
+                logger.error(f"Erro ao descriptografar nome do usuário {user_doc.get('id', 'unknown')}: {e}")
+                user_doc['nome'] = "[ERRO_DESCRIPTOGRAFIA]"
+                
         if 'telefone' in user_doc and user_doc['telefone']:
-            user_doc['telefone'] = decrypt_data(user_doc['telefone'])
+            try:
+                user_doc['telefone'] = decrypt_data(user_doc['telefone'])
+            except Exception as e:
+                logger.error(f"Erro ao descriptografar telefone do usuário {user_doc.get('id', 'unknown')}: {e}")
+                user_doc['telefone'] = "[ERRO_DESCRIPTOGRAFIA]"
+                
         if 'endereco' in user_doc and user_doc['endereco']:
-            user_doc['endereco'] = {k: decrypt_data(v) for k, v in user_doc['endereco'].items()}
+            try:
+                endereco_descriptografado = {}
+                for k, v in user_doc['endereco'].items():
+                    if v and isinstance(v, str) and v.strip():
+                        try:
+                            endereco_descriptografado[k] = decrypt_data(v)
+                        except Exception as e:
+                            logger.error(f"Erro ao descriptografar endereço.{k} do usuário {user_doc.get('id', 'unknown')}: {e}")
+                            endereco_descriptografado[k] = "[ERRO_DESCRIPTOGRAFIA]"
+                    else:
+                        endereco_descriptografado[k] = v
+                user_doc['endereco'] = endereco_descriptografado
+            except Exception as e:
+                logger.error(f"Erro ao descriptografar endereço completo do usuário {user_doc.get('id', 'unknown')}: {e}")
 
+        logger.info(f"Usuário {user_doc.get('id', 'unknown')} ({firebase_uid}) encontrado e descriptografado com sucesso")
         return user_doc
         
     except Exception as e:
-        logger.error(f"Erro ao buscar/descriptografar usuário por firebase_uid {firebase_uid}: {e}")
-        # Se a descriptografia falhar (ex: chave errada), não retorna dados corrompidos
+        logger.error(f"ERRO CRÍTICO ao buscar usuário por firebase_uid {firebase_uid}: {e}")
+        logger.error(f"Tipo do erro: {type(e).__name__}")
+        import traceback
+        logger.error(f"Stack trace: {traceback.format_exc()}")
+        # NUNCA retornar None - isso causa 404! Tentar busca alternativa
+        
+        try:
+            logger.warning(f"Tentando busca alternativa sem descriptografia para firebase_uid {firebase_uid}")
+            # Busca simples sem descriptografia como fallback
+            query = db.collection('usuarios').where('firebase_uid', '==', firebase_uid).limit(1)
+            docs = list(query.stream())
+            if docs:
+                user_doc = docs[0].to_dict()
+                user_doc['id'] = docs[0].id
+                logger.warning(f"FALLBACK: Usuário {user_doc['id']} encontrado sem descriptografia")
+                return user_doc
+        except Exception as fallback_e:
+            logger.error(f"FALLBACK também falhou: {fallback_e}")
+            
         return None
 
 def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioSync) -> Dict:
