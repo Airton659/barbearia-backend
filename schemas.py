@@ -82,6 +82,11 @@ class UsuarioSync(BaseModel):
     telefone: Optional[str] = None
     endereco: Optional[Endereco] = None
 
+class UsuarioProfileUpdate(BaseModel):
+    nome: Optional[str] = None
+    telefone: Optional[str] = None
+    endereco: Optional[Endereco] = None
+
 class FCMTokenUpdate(BaseModel):
     fcm_token: str
 

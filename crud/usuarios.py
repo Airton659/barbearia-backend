@@ -304,6 +304,56 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
     
     return transaction_sync_user(db.transaction())
 
+def atualizar_perfil_usuario(db: firestore.client, user_id: str, profile_data: schemas.UsuarioProfileUpdate) -> Dict:
+    """
+    Atualiza apenas os campos especificados do perfil do usuário.
+    """
+    logger.critical(f"🔍 DEBUG PROFILE UPDATE - user_id: {user_id}, dados: {profile_data.dict(exclude_unset=True)}")
+    
+    user_ref = db.collection('usuarios').document(user_id)
+    user_doc = user_ref.get()
+    
+    if not user_doc.exists:
+        raise ValueError("Usuário não encontrado")
+    
+    update_data = {}
+    
+    # Atualizar nome se fornecido
+    if profile_data.nome is not None:
+        nome_criptografado = encrypt_data(profile_data.nome)
+        update_data['nome'] = nome_criptografado
+        logger.critical(f"🔍 DEBUG PROFILE UPDATE - Atualizando nome para: '{profile_data.nome}'")
+    
+    # Atualizar telefone se fornecido
+    if profile_data.telefone is not None:
+        telefone_criptografado = encrypt_data(profile_data.telefone)
+        update_data['telefone'] = telefone_criptografado
+        logger.critical(f"🔍 DEBUG PROFILE UPDATE - Atualizando telefone para: '{profile_data.telefone}'")
+    
+    # Atualizar endereço se fornecido
+    if profile_data.endereco is not None:
+        endereco_criptografado = {}
+        for k, v in profile_data.endereco.dict().items():
+            if v and isinstance(v, str) and v.strip():
+                endereco_criptografado[k] = encrypt_data(v)
+            else:
+                endereco_criptografado[k] = v
+        update_data['endereco'] = endereco_criptografado
+        logger.critical(f"🔍 DEBUG PROFILE UPDATE - Atualizando endereco")
+    
+    # Aplicar atualizações
+    if update_data:
+        user_ref.update(update_data)
+        logger.critical(f"🔍 DEBUG PROFILE UPDATE - {len(update_data)} campos atualizados no Firestore")
+    else:
+        logger.critical(f"🔍 DEBUG PROFILE UPDATE - Nenhum campo para atualizar")
+    
+    # Buscar dados atualizados e descriptografar
+    updated_user = buscar_usuario_por_firebase_uid(db, user_doc.to_dict()['firebase_uid'])
+    logger.critical(f"🔍 DEBUG PROFILE UPDATE - Retornando usuário atualizado")
+    
+    return updated_user
+
 def adicionar_fcm_token(db: firestore.client, firebase_uid: str, fcm_token: str):
     """Adiciona um FCM token a um usuário, evitando duplicatas."""
     try:

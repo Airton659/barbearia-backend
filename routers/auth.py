@@ -93,6 +93,33 @@ def get_my_profile(current_user: schemas.UsuarioProfile = Depends(get_current_us
     """Retorna o perfil completo do usuário autenticado."""
     return current_user
 
+@router.put("/me/profile", response_model=schemas.UsuarioProfile)
+@router.patch("/me/profile", response_model=schemas.UsuarioProfile)
+def update_my_profile(
+    profile_data: schemas.UsuarioProfileUpdate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db: firestore.client = Depends(get_db)
+):
+    """Atualiza o perfil do usuário autenticado (apenas campos fornecidos)."""
+    try:
+        logger.critical(f"🔍 DEBUG UPDATE PROFILE - Chamado para user_id: {current_user.id}")
+        logger.critical(f"🔍 DEBUG UPDATE PROFILE - Dados recebidos: {profile_data.dict(exclude_unset=True)}")
+        
+        updated_user = crud.atualizar_perfil_usuario(db, current_user.id, profile_data)
+        
+        if not updated_user:
+            raise HTTPException(status_code=404, detail="Não foi possível atualizar o perfil")
+            
+        logger.critical(f"🔍 DEBUG UPDATE PROFILE - Perfil atualizado com sucesso")
+        return updated_user
+        
+    except ValueError as ve:
+        logger.error(f"Erro de validação na atualização de perfil: {ve}")
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Erro inesperado na atualização de perfil: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro interno do servidor: {str(e)}")
+
 @router.post("/me/register-fcm-token", status_code=status.HTTP_200_OK)
 def registrar_fcm_token(
     token_data: schemas.FCMTokenRequest,
