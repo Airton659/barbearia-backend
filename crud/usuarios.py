@@ -137,6 +137,7 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
     Esta função é a única fonte da verdade para a lógica de onboarding.
     """
     # DEBUG: Log dos dados recebidos
+    logger.critical(f"🔍 DEBUG NOME - user_data.nome enviado: '{user_data.nome}'")
     logger.critical(f"🔍 DEBUG ENDERECO - user_data: nome={user_data.nome}, telefone={user_data.telefone}, endereco={user_data.endereco}")
     if user_data.endereco:
         logger.critical(f"🔍 DEBUG ENDERECO - endereco.dict(): {user_data.endereco.dict()}")
@@ -212,12 +213,16 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
         if user_existente:
             # CORREÇÃO CRÍTICA: Se usuário já existe, SEMPRE atualizar dados e retornar
             # NUNCA criar novo usuário duplicado!
+            logger.critical(f"🔍 DEBUG NOME - user_existente.nome atual no banco: '{user_existente.get('nome', 'N/A')}'")
             user_ref = db.collection('usuarios').document(user_existente['id'])
             
             # Atualizar dados do usuário existente (nome, email, telefone, endereco podem ter mudado)
             update_data = {}
             if user_data.nome and user_data.nome != user_existente.get('nome', ''):
+                logger.critical(f"🔍 DEBUG NOME - Nome será atualizado de '{user_existente.get('nome', '')}' para '{user_data.nome}'")
                 update_data['nome'] = nome_criptografado
+            else:
+                logger.critical(f"🔍 DEBUG NOME - Nome NÃO será atualizado (igual ou vazio): enviado='{user_data.nome}', atual='{user_existente.get('nome', '')}')")
             if user_data.email and user_data.email != user_existente.get('email', ''):
                 update_data['email'] = user_data.email
             if user_data.telefone and user_data.telefone != user_existente.get('telefone', ''):
@@ -244,6 +249,7 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
                 # Atualizar os valores no objeto de retorno com os novos dados descriptografados
                 if 'nome' in update_data:
                     user_existente['nome'] = user_data.nome
+                    logger.critical(f"🔍 DEBUG NOME - Nome atualizado no objeto de retorno para: '{user_data.nome}'")
                 if 'email' in update_data:
                     user_existente['email'] = user_data.email
                 if 'telefone' in update_data:
@@ -252,7 +258,8 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
                     user_existente['endereco'] = user_data.endereco.dict()
             else:
                 logger.info(f"Usuário existente {user_existente['id']} retornado sem alterações para {user_data.email}")
-                
+            
+            logger.critical(f"🔍 DEBUG NOME - Retornando user_existente com nome: '{user_existente.get('nome', 'N/A')}'")
             return user_existente
 
         # PROTEÇÃO EXTRA: Fazer busca dupla para garantir que não existe
