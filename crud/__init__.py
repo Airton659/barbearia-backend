@@ -23,7 +23,9 @@ from crud.usuarios import (
     buscar_usuario_por_firebase_uid,
     criar_ou_atualizar_usuario,
     adicionar_fcm_token,
-    remover_fcm_token
+    remover_fcm_token,
+    atualizar_perfil_usuario,
+    processar_imagem_base64
 )
 
 # Negócios
@@ -215,7 +217,6 @@ __all__ = [
     'validate_phone_number',
     'validate_cep',
     'add_timestamps',
-    'processar_imagem_base64',
     'decrypt_data',
     
     # Usuários
@@ -224,6 +225,7 @@ __all__ = [
     'adicionar_fcm_token',
     'remover_fcm_token',
     'atualizar_perfil_usuario',
+    'processar_imagem_base64',
     
     # Negócios
     'admin_criar_negocio',
