@@ -86,6 +86,7 @@ class UsuarioProfileUpdate(BaseModel):
     nome: Optional[str] = None
     telefone: Optional[str] = None
     endereco: Optional[Endereco] = None
+    profile_image: Optional[str] = Field(None, description="Imagem de perfil em Base64")
 
 class FCMTokenUpdate(BaseModel):
     fcm_token: str

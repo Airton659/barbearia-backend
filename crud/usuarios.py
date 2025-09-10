@@ -341,6 +341,17 @@ def atualizar_perfil_usuario(db: firestore.client, user_id: str, profile_data: s
         update_data['endereco'] = endereco_criptografado
         logger.critical(f"🔍 DEBUG PROFILE UPDATE - Atualizando endereco")
     
+    # Processar imagem de perfil se fornecida
+    if profile_data.profile_image is not None:
+        logger.critical(f"🔍 DEBUG PROFILE UPDATE - Processando imagem de perfil")
+        image_url = processar_imagem_base64(profile_data.profile_image, user_id)
+        if image_url:
+            update_data['profile_image_url'] = image_url
+            logger.critical(f"🔍 DEBUG PROFILE UPDATE - URL da imagem salva: {image_url}")
+        else:
+            logger.error(f"🔍 DEBUG PROFILE UPDATE - Falha ao processar imagem")
+            raise ValueError("Falha ao processar imagem de perfil")
+    
     # Aplicar atualizações
     if update_data:
         user_ref.update(update_data)
