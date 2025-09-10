@@ -101,15 +101,10 @@ def admin_listar_usuarios_por_negocio(db: firestore.client, negocio_id: str, sta
                         perfil_profissional = buscar_profissional_por_uid(db, negocio_id, firebase_uid)
                         usuario_data['profissional_id'] = perfil_profissional.get('id') if perfil_profissional else None
                 elif user_role == 'cliente':
-                    enfermeiro_user_id = usuario_data.get('enfermeiro_id')
-                    if enfermeiro_user_id:
-                        enfermeiro_doc = db.collection('usuarios').document(enfermeiro_user_id).get()
-                        if enfermeiro_doc.exists:
-                            firebase_uid_enfermeiro = enfermeiro_doc.to_dict().get('firebase_uid')
-                            perfil_enfermeiro = buscar_profissional_por_uid(db, negocio_id, firebase_uid_enfermeiro)
-                            usuario_data['enfermeiro_vinculado_id'] = perfil_enfermeiro.get('id') if perfil_enfermeiro else None
+                    # Padrão unificado: sempre retornar ID do usuário com nome consistente
+                    usuario_data['enfermeiro_vinculado_id'] = usuario_data.get('enfermeiro_id')
                     usuario_data['tecnicos_vinculados_ids'] = usuario_data.get('tecnicos_ids', [])
-                    usuario_data['medico_id'] = usuario_data.get('medico_id')
+                    usuario_data['medico_vinculado_id'] = usuario_data.get('medico_id')
 
                 usuarios.append(usuario_data)
 
