@@ -146,14 +146,46 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
             role = "admin"
         
         if user_existente:
+            # CORREÇÃO CRÍTICA: Se usuário já existe, SEMPRE atualizar dados e retornar
+            # NUNCA criar novo usuário duplicado!
             user_ref = db.collection('usuarios').document(user_existente['id'])
+            
+            # Atualizar dados do usuário existente (nome, email podem ter mudado)
+            update_data = {}
+            if user_data.nome and user_data.nome != user_existente.get('nome', ''):
+                update_data['nome'] = nome_criptografado
+            if user_data.email and user_data.email != user_existente.get('email', ''):
+                update_data['email'] = user_data.email
+            
+            # Adicionar role se não tiver para este negócio
             if negocio_id not in user_existente.get("roles", {}):
-                transaction.update(user_ref, {f'roles.{negocio_id}': role})
+                update_data[f'roles.{negocio_id}'] = role
                 user_existente["roles"][negocio_id] = role
                 if role == "admin":
                     transaction.update(negocio_doc_ref, {'admin_uid': user_data.firebase_uid})
+            
+            # Aplicar atualizações se houver alguma
+            if update_data:
+                transaction.update(user_ref, update_data)
+                logger.info(f"Usuário existente {user_existente['id']} atualizado para {user_data.email}")
+            else:
+                logger.info(f"Usuário existente {user_existente['id']} retornado sem alterações para {user_data.email}")
+                
             return user_existente
 
+        # PROTEÇÃO EXTRA: Fazer busca dupla para garantir que não existe
+        # (proteção contra condições de corrida)
+        double_check_query = db.collection('usuarios').where('firebase_uid', '==', user_data.firebase_uid).limit(1)
+        existing_docs = list(double_check_query.get(transaction=transaction))
+        
+        if existing_docs:
+            logger.warning(f"DOUBLE CHECK: Usuário {user_data.firebase_uid} encontrado na segunda busca! Impedindo criação duplicada.")
+            existing_user = existing_docs[0].to_dict()
+            existing_user['id'] = existing_docs[0].id
+            return existing_user
+
+        # Só criar se realmente não existe
+        logger.info(f"Criando NOVO usuário para {user_data.email} com firebase_uid {user_data.firebase_uid}")
         user_dict = {
             "nome": nome_criptografado, 
             "email": user_data.email, 
