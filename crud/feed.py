@@ -7,61 +7,39 @@ import logging
 from typing import Optional, List, Dict
 from firebase_admin import firestore
 import schemas
+from datetime import datetime
 from crud.utils import add_timestamps
 
 logger = logging.getLogger(__name__)
 
 
 def criar_postagem(db: firestore.client, postagem_data: schemas.PostagemCreate, profissional: Dict) -> Dict:
-    """Cria uma nova postagem no feed."""
-    try:
-        postagem_dict = {
-            'profissional_id': profissional['id'],
-            'profissional_nome': profissional.get('nome', 'Profissional'),
-            'negocio_id': postagem_data.negocio_id,
-            'titulo': postagem_data.titulo,
-            'conteudo': postagem_data.conteudo,
-            'tipo': postagem_data.tipo or 'texto',
-            'tags': postagem_data.tags or [],
-            'anexos': postagem_data.anexos or [],
-            'curtidas': 0,
-            'comentarios': 0,
-            'visibilidade': postagem_data.visibilidade or 'publica'
-        }
-        
-        postagem_dict = add_timestamps(postagem_dict, is_update=False)
-        
-        doc_ref = db.collection('postagens').document()
-        doc_ref.set(postagem_dict)
-        postagem_dict['id'] = doc_ref.id
-        
-        logger.info(f"Postagem criada por profissional {profissional['id']}")
-        return postagem_dict
-        
-    except Exception as e:
-        logger.error(f"Erro ao criar postagem: {e}")
-        raise
+    """Cria uma nova postagem, desnormalizando os dados do profissional."""
+    post_dict = postagem_data.dict()
+    post_dict['data_postagem'] = datetime.utcnow()
+    post_dict['profissional_nome'] = profissional.get('nome')
+    post_dict['profissional_foto_thumbnail'] = profissional.get('fotos', {}).get('thumbnail')
+    post_dict['total_curtidas'] = 0
+    post_dict['total_comentarios'] = 0
+    
+    doc_ref = db.collection('postagens').document()
+    doc_ref.set(post_dict)
+    post_dict['id'] = doc_ref.id
+    return post_dict
 
 
 def listar_postagens_por_profissional(db: firestore.client, profissional_id: str) -> List[Dict]:
-    """Lista todas as postagens de um profissional."""
+    """Lista todas as postagens de um profissional específico para seu portfólio."""
     postagens = []
-    try:
-        query = db.collection('postagens') \
-                 .where('profissional_id', '==', profissional_id) \
-                 .order_by('created_at', direction=firestore.Query.DESCENDING)
+    query = db.collection('postagens')\
+        .where('profissional_id', '==', profissional_id)\
+        .order_by('data_postagem', direction=firestore.Query.DESCENDING)
         
-        for doc in query.stream():
-            postagem_data = doc.to_dict()
-            postagem_data['id'] = doc.id
-            postagens.append(postagem_data)
-        
-        logger.info(f"Retornando {len(postagens)} postagens do profissional {profissional_id}")
-        return postagens
-        
-    except Exception as e:
-        logger.error(f"Erro ao listar postagens do profissional: {e}")
-        return []
+    for doc in query.stream():
+        post_data = doc.to_dict()
+        post_data['id'] = doc.id
+        postagens.append(post_data)
+    return postagens
 
 
 def listar_feed_por_negocio(db: firestore.client, negocio_id: str, user_id: Optional[str] = None) -> List[Dict]:

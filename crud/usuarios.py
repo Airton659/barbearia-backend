@@ -44,107 +44,120 @@ def buscar_usuario_por_firebase_uid(db: firestore.client, firebase_uid: str) -> 
 def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioSync) -> Dict:
     """
     Cria ou atualiza um usuário no Firestore, criptografando dados sensíveis.
-    Esta função é a fonte da verdade para a lógica de onboarding, como no backup.
+    Esta função é a única fonte da verdade para a lógica de onboarding.
     """
     negocio_id = user_data.negocio_id
-    
+
     # Criptografa os dados antes de salvar
-    dados_para_criptografar = {'nome': user_data.nome, 'telefone': user_data.telefone}
-    dados_criptografados = encrypt_user_sensitive_fields(dados_para_criptografar, USER_SENSITIVE_FIELDS)
-    
-    # Fluxo de Super Admin (lógica do backup)
-    if not negocio_id:
+    nome_criptografado = encrypt_data(user_data.nome)
+    telefone_criptografado = encrypt_data(user_data.telefone) if user_data.telefone else None
+
+    # Fluxo de Super Admin (sem negocio_id)
+    is_super_admin_flow = not negocio_id
+    if is_super_admin_flow:
         if not db.collection('usuarios').limit(1).get():
             user_dict = {
-                "nome": dados_criptografados['nome'], "email": user_data.email, "firebase_uid": user_data.firebase_uid,
-                "roles": {"platform": "super_admin"}, "fcm_tokens": []
+                "nome": nome_criptografado, 
+                "email": user_data.email, 
+                "firebase_uid": user_data.firebase_uid,
+                "roles": {"platform": "super_admin"}, 
+                "fcm_tokens": []
             }
-            if dados_criptografados['telefone']:
-                user_dict['telefone'] = dados_criptografados['telefone']
-            
+            if telefone_criptografado:
+                user_dict['telefone'] = telefone_criptografado
             doc_ref = db.collection('usuarios').document()
             doc_ref.set(user_dict)
             user_dict['id'] = doc_ref.id
             logger.info(f"Novo usuário {user_data.email} criado como Super Admin.")
             
+            # Descriptografa para retornar ao usuário
             user_dict['nome'] = user_data.nome
             user_dict['telefone'] = user_data.telefone
             return user_dict
         else:
             raise ValueError("Não é possível se registrar sem um negócio específico.")
     
-    # Fluxo multi-tenant (lógica do backup)
+    # Fluxo multi-tenant
     @firestore.transactional
     def transaction_sync_user(transaction):
+        # A função buscar_usuario_por_firebase_uid precisa ser ajustada para descriptografar
         user_existente = buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
+        
         negocio_doc_ref = db.collection('negocios').document(negocio_id)
         negocio_doc = negocio_doc_ref.get(transaction=transaction)
-        
+
         if not negocio_doc.exists:
             raise ValueError(f"O negócio com ID '{negocio_id}' não foi encontrado.")
 
         negocio_data = negocio_doc.to_dict()
-        role = "cliente"
         has_admin = negocio_data.get('admin_uid') is not None
         
+        role = "cliente"
         if not has_admin and user_data.codigo_convite and user_data.codigo_convite == negocio_data.get('codigo_convite'):
             role = "admin"
         
         if user_existente:
             user_ref = db.collection('usuarios').document(user_existente['id'])
-            # Atualiza os dados principais se estiverem sendo enviados (lógica de update)
-            update_fields = {}
-            if user_data.nome:
-                update_fields['nome'] = dados_criptografados['nome']
-            if user_data.telefone:
-                update_fields['telefone'] = dados_criptografados['telefone']
-            
-            if update_fields:
-                 transaction.update(user_ref, update_fields)
-
             if negocio_id not in user_existente.get("roles", {}):
                 transaction.update(user_ref, {f'roles.{negocio_id}': role})
+                user_existente["roles"][negocio_id] = role
                 if role == "admin":
                     transaction.update(negocio_doc_ref, {'admin_uid': user_data.firebase_uid})
-            
-            # Retorna os dados atualizados (já descriptografados pela busca)
-            return buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
-        
-        # Criar novo usuário
+            return user_existente
+
         user_dict = {
-            "nome": dados_criptografados['nome'], "email": user_data.email, "firebase_uid": user_data.firebase_uid,
-            "roles": {negocio_id: role}, "fcm_tokens": []
+            "nome": nome_criptografado, 
+            "email": user_data.email, 
+            "firebase_uid": user_data.firebase_uid,
+            "roles": {negocio_id: role}, 
+            "fcm_tokens": []
         }
-        if dados_criptografados['telefone']:
-            user_dict['telefone'] = dados_criptografados['telefone']
+        if telefone_criptografado:
+            user_dict['telefone'] = telefone_criptografado
+        if hasattr(user_data, 'endereco') and user_data.endereco:
+            # O ideal é criptografar campo a campo do endereço
+            user_dict['endereco'] = {k: encrypt_data(v) for k, v in user_data.endereco.dict().items()}
         
         new_user_ref = db.collection('usuarios').document()
         transaction.set(new_user_ref, user_dict)
         user_dict['id'] = new_user_ref.id
-        
+
         if role == "admin":
             transaction.update(negocio_doc_ref, {'admin_uid': user_data.firebase_uid})
         
         # Descriptografa para retornar ao usuário
         user_dict['nome'] = user_data.nome
         user_dict['telefone'] = user_data.telefone
+        if 'endereco' in user_dict and user_dict['endereco']:
+             user_dict['endereco'] = user_data.endereco.dict()
+
         return user_dict
     
     return transaction_sync_user(db.transaction())
 
 def adicionar_fcm_token(db: firestore.client, firebase_uid: str, fcm_token: str):
     """Adiciona um FCM token a um usuário, evitando duplicatas."""
-    user_doc = buscar_usuario_por_firebase_uid(db, firebase_uid)
-    if user_doc:
-        doc_ref = db.collection('usuarios').document(user_doc['id'])
-        doc_ref.update({'fcm_tokens': firestore.ArrayUnion([fcm_token])})
+    try:
+        user_doc = buscar_usuario_por_firebase_uid(db, firebase_uid)
+        if user_doc:
+            doc_ref = db.collection('usuarios').document(user_doc['id'])
+            doc_ref.update({
+                'fcm_tokens': firestore.ArrayUnion([fcm_token])
+            })
+    except Exception as e:
+        logger.error(f"Erro ao adicionar FCM token para o UID {firebase_uid}: {e}")
 
 def remover_fcm_token(db: firestore.client, firebase_uid: str, fcm_token: str):
     """Remove um FCM token de um usuário."""
-    user_doc = buscar_usuario_por_firebase_uid(db, firebase_uid)
-    if user_doc:
-        doc_ref = db.collection('usuarios').document(user_doc['id'])
-        doc_ref.update({'fcm_tokens': firestore.ArrayRemove([fcm_token])})
+    try:
+        user_doc = buscar_usuario_por_firebase_uid(db, firebase_uid)
+        if user_doc:
+            doc_ref = db.collection('usuarios').document(user_doc['id'])
+            doc_ref.update({
+                'fcm_tokens': firestore.ArrayRemove([fcm_token])
+            })
+    except Exception as e:
+        logger.error(f"Erro ao remover FCM token para o UID {firebase_uid}: {e}")
 
 def atualizar_perfil_usuario(db: firestore.client, user_id: str, negocio_id: str, update_data: schemas.UserProfileUpdate, profile_image_url: Optional[str] = None) -> Optional[Dict]:
     """

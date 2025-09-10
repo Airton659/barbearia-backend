@@ -5,8 +5,13 @@ CRUD para funções administrativas
 
 import logging
 from typing import Optional, List, Dict
-from firebase_admin import firestore
+from firebase_admin import firestore, auth
 import schemas
+from crypto_utils import decrypt_data
+from crud.profissionais import buscar_profissional_por_uid, criar_profissional
+from crud.helpers import criar_log_auditoria
+from crud.usuarios import criar_ou_atualizar_usuario
+from crud.pacientes import atualizar_endereco_paciente
 from crud.utils import (
     decrypt_user_sensitive_fields,
     encrypt_user_sensitive_fields,
@@ -20,183 +25,329 @@ USER_SENSITIVE_FIELDS = ['nome', 'telefone']
 
 
 def check_admin_status(db: firestore.client, negocio_id: str) -> bool:
-    """Verifica se um negócio já possui um administrador."""
+    """Verifica se o negócio já tem um admin."""
     try:
         negocio_doc = db.collection('negocios').document(negocio_id).get()
-        if negocio_doc.exists:
-            negocio_data = negocio_doc.to_dict()
-            return negocio_data.get('admin_uid') is not None
-        return False
+        return negocio_doc.exists and negocio_doc.to_dict().get("admin_uid") is not None
     except Exception as e:
-        logger.error(f"Erro ao verificar status do admin para o negócio {negocio_id}: {e}")
+        logger.error(f"Erro ao verificar o status do admin para o negócio {negocio_id}: {e}")
         return False
 
 
 def admin_listar_usuarios_por_negocio(db: firestore.client, negocio_id: str, status: str = 'ativo') -> List[Dict]:
-    """Lista todos os usuários de um negócio específico com um status específico."""
+    """
+    Lista todos os usuários de um negócio, com filtro de status.
+    VERSÃO FINAL: Retorna o campo de status corretamente para cada usuário.
+    """
     usuarios = []
     try:
-        query = db.collection('usuarios').where(f'roles.{negocio_id}', '!=', None)
-        
+        query = db.collection('usuarios').where(f'roles.{negocio_id}', 'in', ['cliente', 'profissional', 'admin', 'tecnico', 'medico'])
+
         for doc in query.stream():
             usuario_data = doc.to_dict()
             
-            # Verificar se o usuário tem o status correto neste negócio
-            status_por_negocio = usuario_data.get('status_por_negocio', {})
-            user_status = status_por_negocio.get(negocio_id, 'ativo')  # Default: ativo
+            # Pega o status do usuário para o negócio específico, com 'ativo' como padrão.
+            status_no_negocio = usuario_data.get('status_por_negocio', {}).get(negocio_id, 'ativo')
             
-            if user_status == status:
+            # LÓGICA DE FILTRO (continua a mesma)
+            deve_incluir = False
+            if status == 'all':
+                deve_incluir = True
+            elif status_no_negocio == status:
+                deve_incluir = True
+
+            if deve_incluir:
                 usuario_data['id'] = doc.id
                 
-                # Descriptografar campos sensíveis
-                usuario_data = decrypt_user_sensitive_fields(usuario_data, USER_SENSITIVE_FIELDS)
+                # Descriptografa campos sensíveis do usuário
+                if 'nome' in usuario_data and usuario_data['nome']:
+                    try:
+                        usuario_data['nome'] = decrypt_data(usuario_data['nome'])
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar nome do usuário {doc.id}: {e}")
+                        usuario_data['nome'] = "[Erro na descriptografia]"
                 
+                if 'telefone' in usuario_data and usuario_data['telefone']:
+                    try:
+                        usuario_data['telefone'] = decrypt_data(usuario_data['telefone'])
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar telefone do usuário {doc.id}: {e}")
+                        usuario_data['telefone'] = "[Erro na descriptografia]"
+                
+                if 'endereco' in usuario_data and usuario_data['endereco']:
+                    endereco_descriptografado = {}
+                    for key, value in usuario_data['endereco'].items():
+                        if value and isinstance(value, str) and value.strip():
+                            try:
+                                endereco_descriptografado[key] = decrypt_data(value)
+                            except Exception as e:
+                                logger.error(f"Erro ao descriptografar campo de endereço {key} do usuário {doc.id}: {e}")
+                                endereco_descriptografado[key] = "[Erro na descriptografia]"
+                        else:
+                            endereco_descriptografado[key] = value
+                    usuario_data['endereco'] = endereco_descriptografado
+                
+                # ***** A CORREÇÃO ESTÁ AQUI *****
+                # Adiciona o status do negócio ao dicionário de resposta.
+                # O nome do campo foi corrigido no schema para 'status_por_negocio' para ser mais claro.
+                # Esta linha garante que o dado seja populado na resposta da API.
+                usuario_data['status_por_negocio'] = {negocio_id: status_no_negocio}
+
+                # A lógica de enriquecimento de dados continua a mesma...
+                user_role = usuario_data.get("roles", {}).get(negocio_id)
+                if user_role in ['profissional', 'admin']:
+                    firebase_uid = usuario_data.get('firebase_uid')
+                    if firebase_uid:
+                        perfil_profissional = buscar_profissional_por_uid(db, negocio_id, firebase_uid)
+                        usuario_data['profissional_id'] = perfil_profissional.get('id') if perfil_profissional else None
+                elif user_role == 'cliente':
+                    enfermeiro_user_id = usuario_data.get('enfermeiro_id')
+                    if enfermeiro_user_id:
+                        enfermeiro_doc = db.collection('usuarios').document(enfermeiro_user_id).get()
+                        if enfermeiro_doc.exists:
+                            firebase_uid_enfermeiro = enfermeiro_doc.to_dict().get('firebase_uid')
+                            perfil_enfermeiro = buscar_profissional_por_uid(db, negocio_id, firebase_uid_enfermeiro)
+                            usuario_data['enfermeiro_vinculado_id'] = perfil_enfermeiro.get('id') if perfil_enfermeiro else None
+                    usuario_data['tecnicos_vinculados_ids'] = usuario_data.get('tecnicos_ids', [])
+
                 usuarios.append(usuario_data)
-        
-        logger.info(f"Retornando {len(usuarios)} usuários para o negócio {negocio_id} com status {status}")
+
         return usuarios
     except Exception as e:
-        logger.error(f"Erro ao listar usuários do negócio {negocio_id}: {e}")
+        logger.error(f"Erro ao listar usuários para o negocio_id {negocio_id}: {e}")
         return []
 
 
 def admin_set_usuario_status(db: firestore.client, negocio_id: str, user_id: str, status: str, autor_uid: str) -> Optional[Dict]:
-    """Define o status de um usuário em um negócio específico."""
-    try:
-        user_ref = db.collection('usuarios').document(user_id)
-        user_doc = user_ref.get()
+    """Define o status de um usuário ('ativo' ou 'inativo') em um negócio."""
+    if status not in ['ativo', 'inativo']:
+        raise ValueError("Status inválido. Use 'ativo' ou 'inativo'.")
+
+    user_ref = db.collection('usuarios').document(user_id)
+    status_path = f'status_por_negocio.{negocio_id}'
+    user_ref.update({status_path: status})
+
+    criar_log_auditoria(
+        db,
+        autor_uid=autor_uid,
+        negocio_id=negocio_id,
+        acao=f"USUARIO_STATUS_{status.upper()}",
+        detalhes={"usuario_alvo_id": user_id}
+    )
+    logger.info(f"Status do usuário {user_id} definido como '{status}' no negócio {negocio_id}.")
+
+    doc = user_ref.get()
+    if doc.exists:
+        data = doc.to_dict()
+        data['id'] = doc.id
         
-        if not user_doc.exists:
-            logger.warning(f"Usuário {user_id} não encontrado")
-            return None
+        # Descriptografa campos sensíveis do usuário
+        if 'nome' in data and data['nome']:
+            try:
+                data['nome'] = decrypt_data(data['nome'])
+            except Exception as e:
+                logger.error(f"Erro ao descriptografar nome do usuário {doc.id}: {e}")
+                data['nome'] = "[Erro na descriptografia]"
         
-        user_data = user_doc.to_dict()
+        if 'telefone' in data and data['telefone']:
+            try:
+                data['telefone'] = decrypt_data(data['telefone'])
+            except Exception as e:
+                logger.error(f"Erro ao descriptografar telefone do usuário {doc.id}: {e}")
+                data['telefone'] = "[Erro na descriptografia]"
         
-        # Verificar se o usuário pertence ao negócio
-        if negocio_id not in user_data.get('roles', {}):
-            logger.warning(f"Usuário {user_id} não pertence ao negócio {negocio_id}")
-            return None
+        if 'endereco' in data and data['endereco']:
+            endereco_descriptografado = {}
+            for key, value in data['endereco'].items():
+                if value and isinstance(value, str) and value.strip():
+                    try:
+                        endereco_descriptografado[key] = decrypt_data(value)
+                    except Exception as e:
+                        logger.error(f"Erro ao descriptografar campo de endereço {key} do usuário {doc.id}: {e}")
+                        endereco_descriptografado[key] = "[Erro na descriptografia]"
+                else:
+                    endereco_descriptografado[key] = value
+            data['endereco'] = endereco_descriptografado
         
-        # Atualizar o status
-        user_ref.update({
-            f'status_por_negocio.{negocio_id}': status,
-            'updated_at': firestore.SERVER_TIMESTAMP
-        })
-        
-        logger.info(f"Status do usuário {user_id} alterado para {status} no negócio {negocio_id} pelo admin {autor_uid}")
-        
-        # Retornar dados atualizados
-        updated_doc = user_ref.get()
-        updated_data = updated_doc.to_dict()
-        updated_data['id'] = updated_doc.id
-        
-        # Descriptografar campos sensíveis
-        updated_data = decrypt_user_sensitive_fields(updated_data, USER_SENSITIVE_FIELDS)
-        
-        return updated_data
-        
-    except Exception as e:
-        logger.error(f"Erro ao alterar status do usuário {user_id}: {e}")
-        return None
+        return data
+    return None
 
 
 def admin_atualizar_role_usuario(db: firestore.client, negocio_id: str, user_id: str, novo_role: str, autor_uid: str) -> Optional[Dict]:
-    """Atualiza o role de um usuário em um negócio específico."""
-    try:
-        user_ref = db.collection('usuarios').document(user_id)
-        user_doc = user_ref.get()
-        
-        if not user_doc.exists:
-            logger.warning(f"Usuário {user_id} não encontrado")
-            return None
-        
-        user_data = user_doc.to_dict()
-        
-        # Verificar se o usuário pertence ao negócio
-        if negocio_id not in user_data.get('roles', {}):
-            logger.warning(f"Usuário {user_id} não pertence ao negócio {negocio_id}")
-            return None
-        
-        # Atualizar o role
-        user_ref.update({
-            f'roles.{negocio_id}': novo_role,
-            'updated_at': firestore.SERVER_TIMESTAMP
-        })
-        
-        logger.info(f"Role do usuário {user_id} alterado para {novo_role} no negócio {negocio_id} pelo admin {autor_uid}")
-        
-        # Retornar dados atualizados
-        updated_doc = user_ref.get()
-        updated_data = updated_doc.to_dict()
-        updated_data['id'] = updated_doc.id
-        
-        # Descriptografar campos sensíveis
-        updated_data = decrypt_user_sensitive_fields(updated_data, USER_SENSITIVE_FIELDS)
-        
-        return updated_data
-        
-    except Exception as e:
-        logger.error(f"Erro ao alterar role do usuário {user_id}: {e}")
+    """
+    Atualiza a role de um usuário dentro de um negócio específico.
+    Cria/desativa o perfil profissional conforme necessário.
+    """
+    # --- ALTERAÇÃO AQUI: Adicionando 'medico' à lista de roles válidas ---
+    if novo_role not in ['cliente', 'profissional', 'admin', 'tecnico', 'medico']:
+        raise ValueError("Role inválida. As roles permitidas são 'cliente', 'profissional', 'admin', 'tecnico' e 'medico'.")
+    # --- FIM DA ALTERAÇÃO ---
+
+    user_ref = db.collection('usuarios').document(user_id)
+    user_doc = user_ref.get()
+
+    if not user_doc.exists:
+        logger.warning(f"Tentativa de atualizar role de usuário inexistente com ID: {user_id}")
         return None
+
+    user_data = user_doc.to_dict()
+
+    # Verifica se o usuário pertence ao negócio
+    if negocio_id not in user_data.get("roles", {}):
+        logger.warning(f"Usuário {user_id} não pertence ao negócio {negocio_id}.")
+        return None
+
+    role_antiga = user_data.get("roles", {}).get(negocio_id)
+
+    role_path = f'roles.{negocio_id}'
+    user_ref.update({role_path: novo_role})
+
+    criar_log_auditoria(
+        db,
+        autor_uid=autor_uid,
+        negocio_id=negocio_id,
+        acao="ROLE_UPDATE",
+        detalhes={"usuario_alvo_id": user_id, "role_antiga": role_antiga, "nova_role": novo_role}
+    )
+
+    # Lógica para perfil profissional
+    perfil_profissional = buscar_profissional_por_uid(db, negocio_id, user_data['firebase_uid'])
+
+    if novo_role == 'profissional' or novo_role == 'admin':
+        if not perfil_profissional:
+            # Cria o perfil profissional se não existir
+            novo_profissional_data = schemas.ProfissionalCreate(
+                negocio_id=negocio_id,
+                usuario_uid=user_data['firebase_uid'],
+                nome=user_data.get('nome', 'Profissional sem nome'),
+                ativo=True,
+                fotos={}
+            )
+            criar_profissional(db, novo_profissional_data)
+            logger.info(f"Perfil profissional criado para o usuário {user_data['email']} no negócio {negocio_id}.")
+        elif not perfil_profissional.get('ativo'):
+            # Reativa o perfil se já existir e estiver inativo
+            prof_ref = db.collection('profissionais').document(perfil_profissional['id'])
+            prof_ref.update({"ativo": True})
+            logger.info(f"Perfil profissional reativado para o usuário {user_data['email']} no negócio {negocio_id}.")
+
+    elif novo_role == 'cliente' or novo_role == 'tecnico' or novo_role == 'medico': # Desativa perfil se virar cliente, tecnico ou medico
+        if perfil_profissional and perfil_profissional.get('ativo'):
+            # Desativa o perfil profissional se existir e estiver ativo
+            prof_ref = db.collection('profissionais').document(perfil_profissional['id'])
+            prof_ref.update({"ativo": False})
+            logger.info(f"Perfil profissional desativado para o usuário {user_data['email']} no negócio {negocio_id}.")
+
+    logger.info(f"Role do usuário {user_data['email']} atualizada para '{novo_role}' no negócio {negocio_id}.")
+
+    updated_user_doc = user_ref.get()
+    updated_user_data = updated_user_doc.to_dict()
+    updated_user_data['id'] = updated_user_doc.id
+    
+    # Descriptografa campos sensíveis do usuário
+    if 'nome' in updated_user_data and updated_user_data['nome']:
+        try:
+            updated_user_data['nome'] = decrypt_data(updated_user_data['nome'])
+        except Exception as e:
+            logger.error(f"Erro ao descriptografar nome do usuário {updated_user_doc.id}: {e}")
+            updated_user_data['nome'] = "[Erro na descriptografia]"
+    
+    if 'telefone' in updated_user_data and updated_user_data['telefone']:
+        try:
+            updated_user_data['telefone'] = decrypt_data(updated_user_data['telefone'])
+        except Exception as e:
+            logger.error(f"Erro ao descriptografar telefone do usuário {updated_user_doc.id}: {e}")
+            updated_user_data['telefone'] = "[Erro na descriptografia]"
+    
+    if 'endereco' in updated_user_data and updated_user_data['endereco']:
+        endereco_descriptografado = {}
+        for key, value in updated_user_data['endereco'].items():
+            if value and isinstance(value, str) and value.strip():
+                try:
+                    endereco_descriptografado[key] = decrypt_data(value)
+                except Exception as e:
+                    logger.error(f"Erro ao descriptografar campo de endereço {key} do usuário {updated_user_doc.id}: {e}")
+                    endereco_descriptografado[key] = "[Erro na descriptografia]"
+            else:
+                endereco_descriptografado[key] = value
+        updated_user_data['endereco'] = endereco_descriptografado
+    
+    return updated_user_data
 
 
 def admin_criar_paciente(db: firestore.client, negocio_id: str, paciente_data: schemas.PacienteCreateByAdmin) -> Dict:
-    """Cria um novo paciente via interface administrativa."""
+    """
+    (Admin ou Enfermeiro) Cria um novo usuário de paciente no Firebase Auth e o sincroniza no Firestore,
+    lidando corretamente com o endereço como um campo exclusivo do paciente.
+    """
+    # 1. Criar usuário no Firebase Auth (lógica inalterada)
     try:
-        # Criptografar dados sensíveis
-        dados_para_criptografar = {
-            'nome': paciente_data.nome,
-            'telefone': paciente_data.telefone
-        }
-        dados_criptografados = encrypt_user_sensitive_fields(dados_para_criptografar, USER_SENSITIVE_FIELDS)
-        
-        # Preparar dados do usuário
-        user_dict = {
-            "nome": dados_criptografados['nome'],
-            "email": paciente_data.email,
-            "firebase_uid": None,  # Será preenchido quando o usuário fizer login
-            "roles": {negocio_id: "cliente"},
-            "fcm_tokens": [],
-            "status_por_negocio": {negocio_id: "ativo"}
-        }
-        
-        # Adicionar telefone se fornecido
-        if dados_criptografados['telefone']:
-            user_dict['telefone'] = dados_criptografados['telefone']
-        
-        # Adicionar endereço se fornecido
-        if paciente_data.endereco:
-            from crud.utils import encrypt_endereco_fields
-            user_dict['endereco'] = encrypt_endereco_fields(paciente_data.endereco.model_dump())
-        
-        # Adicionar dados pessoais básicos se fornecidos
-        if paciente_data.data_nascimento:
-            user_dict['data_nascimento'] = paciente_data.data_nascimento
-        if paciente_data.sexo:
-            user_dict['sexo'] = paciente_data.sexo
-        if paciente_data.estado_civil:
-            user_dict['estado_civil'] = paciente_data.estado_civil
-        if paciente_data.profissao:
-            user_dict['profissao'] = paciente_data.profissao
-        
-        # Adicionar timestamps
-        user_dict = add_timestamps(user_dict, is_update=False)
-        
-        # Salvar no Firestore
-        doc_ref = db.collection('usuarios').document()
-        doc_ref.set(user_dict)
-        user_dict['id'] = doc_ref.id
-        
-        logger.info(f"Paciente {paciente_data.email} criado via admin para o negócio {negocio_id}")
-        
-        # Descriptografar dados para resposta
-        user_dict = decrypt_user_sensitive_fields(user_dict, USER_SENSITIVE_FIELDS)
-        
-        return user_dict
-        
+        firebase_user = auth.create_user(
+            email=paciente_data.email,
+            password=paciente_data.password,
+            display_name=paciente_data.nome,
+            email_verified=False
+        )
+        logger.info(f"Usuário paciente criado no Firebase Auth com UID: {firebase_user.uid}")
+    except auth.EmailAlreadyExistsError:
+        raise ValueError(f"O e-mail {paciente_data.email} já está em uso.")
     except Exception as e:
-        logger.error(f"Erro ao criar paciente via admin: {e}")
+        logger.error(f"Erro ao criar usuário paciente no Firebase Auth: {e}")
         raise
+
+    # 2. Sincronizar o usuário no Firestore, SEM o endereço.
+    # O schema UsuarioSync não tem mais o campo 'endereco'.
+    sync_data = schemas.UsuarioSync(
+        nome=paciente_data.nome,
+        email=paciente_data.email,
+        firebase_uid=firebase_user.uid,
+        negocio_id=negocio_id,
+        telefone=paciente_data.telefone
+    )
+
+    try:
+        # Cria o perfil básico do usuário (sem endereço)
+        user_profile = criar_ou_atualizar_usuario(db, sync_data)
+        
+        # 3. Se um endereço foi fornecido na requisição, ATUALIZA o documento recém-criado
+        if paciente_data.endereco:
+            logger.info(f"Adicionando endereço ao paciente recém-criado: {user_profile['id']}")
+            # Chama a função específica para adicionar/atualizar o endereço
+            atualizar_endereco_paciente(db, user_profile['id'], paciente_data.endereco)
+            # Adiciona o endereço ao dicionário de resposta para consistência
+            user_profile['endereco'] = paciente_data.endereco.model_dump()
+        
+        # 4. Adicionar dados pessoais básicos se fornecidos
+        dados_pessoais_update = {}
+        if paciente_data.data_nascimento:
+            dados_pessoais_update['data_nascimento'] = paciente_data.data_nascimento
+        if paciente_data.sexo:
+            dados_pessoais_update['sexo'] = paciente_data.sexo
+        if paciente_data.estado_civil:
+            dados_pessoais_update['estado_civil'] = paciente_data.estado_civil
+        if paciente_data.profissao:
+            dados_pessoais_update['profissao'] = paciente_data.profissao
+            
+        if dados_pessoais_update:
+            logger.info(f"Adicionando dados pessoais ao paciente recém-criado: {user_profile['id']}")
+            # Atualizar documento com dados pessoais
+            user_ref = db.collection('usuarios').document(user_profile['id'])
+            user_ref.update(dados_pessoais_update)
+            # Adicionar aos dados de resposta
+            user_profile.update(dados_pessoais_update)
+
+        logger.info(f"Perfil do paciente {paciente_data.email} sincronizado com sucesso no Firestore.")
+        return user_profile
+
+    except Exception as e:
+        # A lógica de reversão em caso de erro continua a mesma
+        logger.error(f"Erro ao sincronizar paciente no Firestore. Tentando reverter a criação no Auth... UID: {firebase_user.uid}")
+        try:
+            auth.delete_user(firebase_user.uid)
+            logger.info(f"Reversão bem-sucedida: usuário {firebase_user.uid} deletado do Auth.")
+        except Exception as delete_e:
+            logger.critical(f"FALHA CRÍTICA NA REVERSÃO: não foi possível deletar o usuário {firebase_user.uid} do Auth. {delete_e}")
+        raise e
 
 
 def admin_listar_clientes_por_negocio(db: firestore.client, negocio_id: str, status: str = 'ativo') -> List[Dict]:
