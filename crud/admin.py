@@ -369,6 +369,20 @@ def admin_listar_clientes_por_negocio(db: firestore.client, negocio_id: str, sta
                 # Descriptografar campos sensíveis
                 cliente_data = decrypt_user_sensitive_fields(cliente_data, USER_SENSITIVE_FIELDS)
                 
+                # Descriptografar endereço se existir
+                if 'endereco' in cliente_data and cliente_data['endereco']:
+                    endereco_descriptografado = {}
+                    for key, value in cliente_data['endereco'].items():
+                        if value and isinstance(value, str) and value.strip():
+                            try:
+                                endereco_descriptografado[key] = decrypt_data(value)
+                            except Exception as e:
+                                logger.error(f"Erro ao descriptografar campo de endereço {key} do cliente {doc.id}: {e}")
+                                endereco_descriptografado[key] = "[Erro na descriptografia]"
+                        else:
+                            endereco_descriptografado[key] = value
+                    cliente_data['endereco'] = endereco_descriptografado
+                
                 clientes.append(cliente_data)
         
         logger.info(f"Retornando {len(clientes)} clientes para o negócio {negocio_id} com status {status}")
