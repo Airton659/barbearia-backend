@@ -100,8 +100,13 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
     # Fluxo multi-tenant
     @firestore.transactional
     def transaction_sync_user(transaction):
-        # A função buscar_usuario_por_firebase_uid precisa ser ajustada para descriptografar
+        # CRITICAL DEBUG: Verificar usuário existente
         user_existente = buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
+        logger.info(f"🔍 SYNC DEBUG - Firebase UID: {user_data.firebase_uid}")
+        logger.info(f"🔍 SYNC DEBUG - Usuário existente encontrado: {user_existente is not None}")
+        if user_existente:
+            logger.info(f"🔍 SYNC DEBUG - ID do usuário existente: {user_existente.get('id')}")
+            logger.info(f"🔍 SYNC DEBUG - Roles atuais: {user_existente.get('roles', {})}")
         
         negocio_doc_ref = db.collection('negocios').document(negocio_id)
         negocio_doc = negocio_doc_ref.get(transaction=transaction)
@@ -117,14 +122,40 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
             role = "admin"
         
         if user_existente:
+            logger.info(f"✅ SYNC DEBUG - Usuário existe, atualizando roles se necessário")
             user_ref = db.collection('usuarios').document(user_existente['id'])
-            if negocio_id not in user_existente.get("roles", {}):
+            current_roles = user_existente.get("roles", {})
+            
+            if negocio_id not in current_roles:
+                logger.info(f"🔄 SYNC DEBUG - Adicionando role '{role}' para negócio {negocio_id}")
                 transaction.update(user_ref, {f'roles.{negocio_id}': role})
                 user_existente["roles"][negocio_id] = role
                 if role == "admin":
                     transaction.update(negocio_doc_ref, {'admin_uid': user_data.firebase_uid})
+            else:
+                logger.info(f"✅ SYNC DEBUG - Role já existe para este negócio: {current_roles[negocio_id]}")
+            
+            # CRITICAL: Sempre atualizar dados básicos se necessário
+            updates_needed = {}
+            if user_existente.get('nome') != user_data.nome:
+                updates_needed['nome'] = encrypt_data(user_data.nome)
+                logger.info(f"🔄 SYNC DEBUG - Atualizando nome")
+            if user_existente.get('email') != user_data.email:
+                updates_needed['email'] = user_data.email
+                logger.info(f"🔄 SYNC DEBUG - Atualizando email")
+            
+            if updates_needed:
+                transaction.update(user_ref, updates_needed)
+                user_existente.update(updates_needed)
+                # Descriptografar nome para resposta
+                if 'nome' in updates_needed:
+                    user_existente['nome'] = user_data.nome
+            
+            logger.info(f"✅ SYNC DEBUG - Retornando usuário existente ID: {user_existente['id']}")
             return user_existente
 
+        # CRIAR NOVO USUÁRIO
+        logger.info(f"🆕 SYNC DEBUG - Criando novo usuário com role '{role}'")
         user_dict = {
             "nome": nome_criptografado, 
             "email": user_data.email, 
@@ -153,7 +184,8 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
 
         return user_dict
     
-    return transaction_sync_user(db.transaction())
+    # Executar como transação Firestore
+    return transaction_sync_user()
 
 
 def check_admin_status(db: firestore.client, negocio_id: str) -> bool:
@@ -4434,6 +4466,11 @@ def atualizar_perfil_usuario(db: firestore.client, user_id: str, negocio_id: str
         # Adicionar timestamp de atualização
         update_dict['updated_at'] = firestore.SERVER_TIMESTAMP
         
+        # SEGURANÇA: Garantir que firebase_uid nunca seja perdido
+        firebase_uid = user_data.get('firebase_uid')
+        if firebase_uid and 'firebase_uid' not in update_dict:
+            update_dict['firebase_uid'] = firebase_uid
+        
         # Executar atualização
         user_ref.update(update_dict)
         logger.info(f"Perfil do usuário {user_id} atualizado com sucesso")
@@ -4442,6 +4479,14 @@ def atualizar_perfil_usuario(db: firestore.client, user_id: str, negocio_id: str
         updated_doc = user_ref.get()
         updated_data = updated_doc.to_dict()
         updated_data['id'] = updated_doc.id
+        
+        # VERIFICAÇÃO: Confirmar que firebase_uid ainda existe
+        if not updated_data.get('firebase_uid'):
+            logger.error(f"CRITICAL: firebase_uid perdido para usuário {user_id}")
+            # Restaurar firebase_uid se perdido
+            if firebase_uid:
+                user_ref.update({'firebase_uid': firebase_uid})
+                updated_data['firebase_uid'] = firebase_uid
         
         # Descriptografar dados para resposta
         if 'nome' in updated_data and updated_data['nome']:
