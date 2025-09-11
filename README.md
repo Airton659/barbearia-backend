@@ -2,6 +2,10 @@
 
 **Atualizado em:** 2025-01-10
 
+⚠️ **IMPORTANTE: RESTAURAÇÃO PARA ARQUITETURA ORIGINAL**
+
+Este projeto foi **restaurado para a arquitetura original** com arquivo único `main.py` e `crud.py` após uma tentativa mal-sucedida de migração para arquitetura modular. A arquitetura atual é estável e funcionalmente completa.
+
 Este repositório contém o **backend completo** da **API de Gestão Clínica**. A API serve como base para o **App Flutter** correspondente, oferecendo suporte completo aos fluxos de **cadastro de pacientes**, **gestão de papéis e vínculos**, **plano de cuidado**, **diário de acompanhamento** e **checklist diário** com confirmação de leitura.
 
 **📱 App Flutter correspondente:** [App de Gestão Clínica](https://github.com/seu-repo/gestao-clinica-flutter)
@@ -17,6 +21,32 @@ O projeto utiliza **FastAPI**, **Firebase Authentication**, **Firestore**, **Goo
 **URL Base da API:** `https://barbearia-backend-service-862082955632.southamerica-east1.run.app`
 
 **Documentação Interativa:** `https://barbearia-backend-service-862082955632.southamerica-east1.run.app/docs`
+
+---
+
+## 📁 Estrutura do Projeto
+
+### Arquitetura Original (Atual)
+```
+barbearia-backend/
+├── main.py          # Arquivo principal com todos os endpoints
+├── crud.py          # Arquivo único com todas as operações CRUD
+├── schemas.py       # Modelos Pydantic para validação
+├── auth.py          # Sistema de autenticação e autorização
+├── requirements.txt # Dependências do projeto
+└── README.md        # Documentação
+```
+
+### Padrão de Dados (Subcoleções Firestore)
+```
+usuarios/{paciente_id}/
+├── consultas/       # Planos de cuidado
+├── orientacoes/     # Orientações de cada consulta
+├── medicacoes/      # Medicações de cada consulta
+├── checklist/       # Itens de checklist de cada consulta
+├── diario/         # Entradas do diário de acompanhamento
+└── exames/         # Exames do paciente
+```
 
 ---
 
