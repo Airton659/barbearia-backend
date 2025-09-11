@@ -47,14 +47,32 @@ def buscar_usuario_por_firebase_uid(db: firestore.client, firebase_uid: str) -> 
             user_doc = docs[0].to_dict()
             user_doc['id'] = docs[0].id
             logger.info(f"🔍 BUSCAR_USUARIO DEBUG - Usuário encontrado ID: {user_doc['id']}")
+            logger.info(f"🔍 BUSCAR_USUARIO DEBUG - Dados brutos: nome_len={len(user_doc.get('nome', ''))}, telefone={user_doc.get('telefone', 'None')}, email={user_doc.get('email', 'None')}")
 
-            # Descriptografa os campos
+            # Descriptografa os campos com tratamento individual de erros
             if 'nome' in user_doc:
-                user_doc['nome'] = decrypt_data(user_doc['nome'])
+                try:
+                    user_doc['nome'] = decrypt_data(user_doc['nome'])
+                    logger.info(f"✅ BUSCAR_USUARIO DEBUG - Nome descriptografado com sucesso")
+                except Exception as e:
+                    logger.error(f"❌ BUSCAR_USUARIO DEBUG - Erro ao descriptografar NOME: {e}")
+                    user_doc['nome'] = '[Erro na descriptografia do nome]'
+            
             if 'telefone' in user_doc and user_doc['telefone']:
-                user_doc['telefone'] = decrypt_data(user_doc['telefone'])
+                try:
+                    user_doc['telefone'] = decrypt_data(user_doc['telefone'])
+                    logger.info(f"✅ BUSCAR_USUARIO DEBUG - Telefone descriptografado com sucesso")
+                except Exception as e:
+                    logger.error(f"❌ BUSCAR_USUARIO DEBUG - Erro ao descriptografar TELEFONE: {e}")
+                    user_doc['telefone'] = None
+            
             if 'endereco' in user_doc and user_doc['endereco']:
-                user_doc['endereco'] = {k: decrypt_data(v) for k, v in user_doc['endereco'].items()}
+                try:
+                    user_doc['endereco'] = {k: decrypt_data(v) for k, v in user_doc['endereco'].items()}
+                    logger.info(f"✅ BUSCAR_USUARIO DEBUG - Endereço descriptografado com sucesso")
+                except Exception as e:
+                    logger.error(f"❌ BUSCAR_USUARIO DEBUG - Erro ao descriptografar ENDERECO: {e}")
+                    user_doc['endereco'] = None
 
             logger.info(f"✅ BUSCAR_USUARIO DEBUG - Retornando usuário: ID={user_doc['id']}, Nome={user_doc.get('nome', 'N/A')}")
             return user_doc
@@ -62,6 +80,8 @@ def buscar_usuario_por_firebase_uid(db: firestore.client, firebase_uid: str) -> 
         return None
     except Exception as e:
         logger.error(f"Erro ao buscar/descriptografar usuário por firebase_uid {firebase_uid}: {e}")
+        import traceback
+        logger.error(f"Stack trace completo: {traceback.format_exc()}")
         # Se a descriptografia falhar (ex: chave errada), não retorna dados corrompidos
         return None
 
@@ -127,6 +147,8 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
                 user_existente = user_doc
             except Exception as e:
                 logger.error(f"Erro ao descriptografar usuário existente: {e}")
+                import traceback
+                logger.error(f"Stack trace na transação: {traceback.format_exc()}")
                 # Em caso de erro de descriptografia, tratar como usuário não encontrado
                 user_existente = None
         
