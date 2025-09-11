@@ -681,6 +681,156 @@ Se o seu app estava enfrentando problemas após a modularização, **TODOS foram
 
 ---
 
+## **📋 MUDANÇAS CRÍTICAS PARA FRONTEND - GUIA DE MIGRAÇÃO COMPLETO**
+
+### **🚨 ATENÇÃO: NENHUMA URL FOI ALTERADA**
+**Todas as URLs dos endpoints permanecem EXATAMENTE iguais** após a restauração do backup. A arquitetura voltou ao estado original. **Não há URLs quebradas ou alteradas**.
+
+### **🔐 MUDANÇAS DE AUTENTICAÇÃO (CRÍTICO)**
+
+#### **Endpoints que voltaram para autenticação original:**
+```http
+# ANTES (durante migração bugada): get_paciente_autorizado_anamnese
+# AGORA (restaurado): get_paciente_autorizado
+
+# Endpoints afetados que VOLTARAM ao normal:
+POST   /pacientes/{id}/exames           # ✅ Volta: Admin, Enfermeiro, Técnico, Paciente
+PUT    /pacientes/{id}/exames/{id}      # ✅ Volta: Admin, Enfermeiro, Técnico, Paciente  
+PATCH  /pacientes/{id}/exames/{id}      # ✅ Volta: Admin, Enfermeiro, Técnico, Paciente
+DELETE /pacientes/{id}/exames/{id}      # ✅ Volta: Admin, Enfermeiro, Técnico, Paciente
+
+POST   /pacientes/{id}/medicacoes       # ✅ Volta: Admin, Enfermeiro, Técnico, Paciente
+PATCH  /pacientes/{id}/medicacoes/{id}  # ✅ Volta: Admin, Enfermeiro, Técnico, Paciente
+DELETE /pacientes/{id}/medicacoes/{id}  # ✅ Volta: Admin, Enfermeiro, Técnico, Paciente
+
+POST   /pacientes/{id}/checklist-itens          # ✅ Volta: Admin, Enfermeiro, Técnico, Paciente
+PATCH  /pacientes/{id}/checklist-itens/{id}     # ✅ Volta: Admin, Enfermeiro, Técnico, Paciente
+DELETE /pacientes/{id}/checklist-itens/{id}     # ✅ Volta: Admin, Enfermeiro, Técnico, Paciente
+
+POST   /pacientes/{id}/consultas         # ✅ Volta: Admin, Enfermeiro, Técnico, Paciente
+PATCH  /pacientes/{id}/consultas/{id}    # ✅ Volta: Admin, Enfermeiro, Técnico, Paciente
+DELETE /pacientes/{id}/consultas/{id}    # ✅ Volta: Admin, Enfermeiro, Técnico, Paciente
+
+POST   /pacientes/{id}/orientacoes       # ✅ Volta: Admin, Enfermeiro, Técnico, Paciente
+PATCH  /pacientes/{id}/orientacoes/{id}  # ✅ Volta: Admin, Enfermeiro, Técnico, Paciente
+DELETE /pacientes/{id}/orientacoes/{id}  # ✅ Volta: Admin, Enfermeiro, Técnico, Paciente
+
+POST   /pacientes/{id}/diario            # ✅ Volta: Admin, Enfermeiro, Técnico, Paciente
+PATCH  /pacientes/{id}/diario/{id}       # ✅ Volta: Admin, Enfermeiro, Técnico, Paciente
+DELETE /pacientes/{id}/diario/{id}       # ✅ Volta: Admin, Enfermeiro, Técnico, Paciente
+```
+
+#### **Problema e Solução:**
+- **PROBLEMA**: Durante a migração, os endpoints médicos foram limitados apenas a `get_paciente_autorizado_anamnese` (apenas Admin e Profissional)
+- **SOLUÇÃO**: Restaurados para `get_paciente_autorizado` (Admin, Enfermeiro, Técnico e Paciente podem acessar)
+
+### **📊 MUDANÇAS DE ESTRUTURA DE DADOS (CRÍTICO)**
+
+#### **Estrutura de Coleções Firestore - RESTAURADA**
+```bash
+# ANTES (durante migração bugada): Coleções separadas
+usuarios/
+medicos/
+consultas/
+medicacoes/
+etc...
+
+# AGORA (restaurado): Subcoleções hierárquicas  
+usuarios/{paciente_id}/
+├── consultas/           # ✅ RESTAURADO
+├── orientacoes/         # ✅ RESTAURADO  
+├── medicacoes/          # ✅ RESTAURADO
+├── checklist/           # ✅ RESTAURADO
+├── diario/             # ✅ RESTAURADO
+├── exames/             # ✅ RESTAURADO
+├── anamneses/          # ✅ RESTAURADO
+└── relatorios/         # ✅ RESTAURADO
+```
+
+#### **Impacto para Frontend:**
+- **NENHUM**: A estrutura de dados voltou ao estado original que o frontend já conhece
+- **Caching**: Se o app fazia cache de dados durante a migração, recomenda-se limpar cache
+
+### **🔄 MUDANÇAS DE FUNÇÕES CRUD (CRÍTICO)**
+
+#### **Funções que voltaram ao comportamento original:**
+```javascript
+// 1. AGENDAMENTOS - Assinatura restaurada
+// ANTES (bugado): cancelar_agendamento(agendamento_id)  
+// AGORA (restaurado): cancelar_agendamento(agendamento_id, cliente_id)
+
+// 2. NOTIFICAÇÕES - FCM restaurado
+// ANTES (bugado): Sem notificações automáticas
+// AGORA (restaurado): Notificações FCM funcionando
+
+// 3. PERFIL USUÁRIO - Função restaurada  
+// ANTES (bugado): atualizar_perfil_usuario incompleta
+// AGORA (restaurado): atualizar_perfil_usuario completa
+
+// 4. CRIAÇÃO PACIENTES - Lógica restaurada
+// ANTES (bugado): admin_criar_paciente sem reversão de erro
+// AGORA (restaurado): admin_criar_paciente com Firebase Auth completo
+```
+
+### **🎯 ENDPOINTS QUE FUNCIONAM NORMALMENTE (NENHUMA MUDANÇA)**
+
+#### **Endpoints não afetados pela migração:**
+```http
+# Autenticação
+POST   /users/sync-profile              # ✅ Sem mudanças
+GET    /me/profile                      # ✅ Sem mudanças
+PUT    /users/update-profile            # ✅ Sem mudanças
+
+# Administração  
+GET    /negocios/{id}/usuarios          # ✅ Sem mudanças
+PATCH  /negocios/{id}/usuarios/{id}/role # ✅ Sem mudanças
+POST   /negocios/{id}/pacientes         # ✅ Sem mudanças
+
+# Agendamentos
+POST   /agendamentos                    # ✅ Sem mudanças
+GET    /agendamentos/me                 # ✅ Sem mudanças
+
+# Profissionais
+GET    /me/profissional                 # ✅ Sem mudanças
+PUT    /me/profissional                 # ✅ Sem mudanças
+GET    /me/pacientes                    # ✅ Sem mudanças
+
+# Notificações
+GET    /notificacoes                    # ✅ Sem mudanças
+POST   /notificacoes/agendar            # ✅ Sem mudanças
+
+# Feed e Uploads
+POST   /postagens                       # ✅ Sem mudanças
+POST   /upload-foto                     # ✅ Sem mudanças
+POST   /upload-file                     # ✅ Sem mudanças
+```
+
+### **✅ RESUMO PARA O FRONTEND**
+
+#### **O que o Frontend NÃO precisa alterar:**
+1. ❌ **URLs de endpoints** - Todas iguais
+2. ❌ **Headers de autenticação** - Mesmo formato
+3. ❌ **Formato de requisições** - Mesmo JSON
+4. ❌ **Formato de respostas** - Mesmo JSON  
+5. ❌ **Lógica de autenticação** - Mesma lógica
+
+#### **O que foi corrigido automaticamente no Backend:**
+1. ✅ **Permissões de endpoints médicos** - Restauradas
+2. ✅ **Estrutura de subcoleções** - Restaurada 
+3. ✅ **Notificações FCM** - Funcionando
+4. ✅ **Funções CRUD** - Comportamento original
+5. ✅ **Criptografia LGPD** - Funcionando
+
+#### **Ação recomendada para Frontend:**
+1. 🧪 **Teste os fluxos** que estavam quebrados antes
+2. 🔄 **Limpe cache** se necessário  
+3. 📱 **Verifique notificações push** 
+4. ✅ **Confirme que está tudo funcionando** 
+
+**A API está EXATAMENTE como estava antes da migração mal-sucedida**
+
+---
+
 ## **🧪 TESTES DE INTEGRAÇÃO COM APP FLUTTER**
 
 ### Roteiro de Testes Backend ↔ Frontend
