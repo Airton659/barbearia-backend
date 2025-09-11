@@ -1694,6 +1694,31 @@ def listar_notificacoes(db: firestore.client, usuario_id: str) -> List[Dict]:
     for doc in query.stream():
         notificacao_data = doc.to_dict()
         notificacao_data['id'] = doc.id
+        
+        # Mapear campos para compatibilidade com schema
+        # Se tem 'titulo', mapear para 'title'
+        if 'titulo' in notificacao_data and 'title' not in notificacao_data:
+            notificacao_data['title'] = notificacao_data['titulo']
+        
+        # Se tem 'corpo', mapear para 'body'  
+        if 'corpo' in notificacao_data and 'body' not in notificacao_data:
+            notificacao_data['body'] = notificacao_data['corpo']
+            
+        # Garantir campos obrigatórios estão presentes
+        if 'title' not in notificacao_data:
+            notificacao_data['title'] = notificacao_data.get('titulo', 'Notificação')
+            
+        if 'body' not in notificacao_data:
+            notificacao_data['body'] = notificacao_data.get('corpo', 'Conteúdo da notificação')
+        
+        # Garantir campo 'lida' existe
+        if 'lida' not in notificacao_data:
+            notificacao_data['lida'] = False
+            
+        # Garantir campo 'data_criacao' existe
+        if 'data_criacao' not in notificacao_data:
+            notificacao_data['data_criacao'] = firestore.SERVER_TIMESTAMP
+        
         notificacoes.append(notificacao_data)
     return notificacoes
 
@@ -2297,18 +2322,37 @@ def listar_consultas(db: firestore.client, paciente_id: str) -> List[Dict]:
     consultas = []
     try:
         col = db.collection('usuarios').document(paciente_id).collection('consultas')
-        query = col.order_by('created_at', direction=firestore.Query.DESCENDING).order_by('__name__', direction=firestore.Query.DESCENDING)
-        for doc in query.stream():
-            consulta_data = doc.to_dict()
-            consulta_data['id'] = doc.id
-            consultas.append(consulta_data)
-        # Fallback: histórico antigo sem created_at → ordenar por ID do doc desc
-        if not consultas:
-            query2 = col.order_by('__name__', direction=firestore.Query.DESCENDING)
-            for doc in query2.stream():
+        
+        # Tentar primeiro ordenar por created_at (consultas mais recentes)
+        try:
+            query = col.order_by('created_at', direction=firestore.Query.DESCENDING)
+            for doc in query.stream():
                 consulta_data = doc.to_dict()
                 consulta_data['id'] = doc.id
                 consultas.append(consulta_data)
+        except Exception as created_at_error:
+            logger.warning(f"Não foi possível ordenar por created_at: {created_at_error}")
+            
+        # Se não conseguiu usar created_at ou não tem resultados, usar fallback
+        if not consultas:
+            try:
+                query2 = col.order_by('__name__', direction=firestore.Query.DESCENDING)
+                for doc in query2.stream():
+                    consulta_data = doc.to_dict()
+                    consulta_data['id'] = doc.id
+                    consultas.append(consulta_data)
+            except Exception as name_error:
+                logger.warning(f"Não foi possível ordenar por __name__: {name_error}")
+                
+                # Último fallback: sem ordenação
+                for doc in col.stream():
+                    consulta_data = doc.to_dict()
+                    consulta_data['id'] = doc.id
+                    consultas.append(consulta_data)
+                
+                # Ordenar em Python se necessário
+                consultas.sort(key=lambda x: x.get('created_at', x.get('id', '')), reverse=True)
+                
     except Exception as e:
         logger.error(f"Erro ao listar consultas do paciente {paciente_id}: {e}")
     return consultas
@@ -4280,14 +4324,14 @@ def _notificar_criador_relatorio_avaliado(db: firestore.client, relatorio: Dict,
             "relatorio_id": relatorio.get('id'),
             "paciente_id": paciente_id,
             "status": status,
-            "titulo": titulo,
-            "corpo": corpo
+            "title": titulo,
+            "body": corpo
         }
         
         # Persistir notificação no Firestore
         notificacao_data = {
-            "titulo": titulo,
-            "corpo": corpo,
+            "title": titulo,
+            "body": corpo,
             "tipo": "RELATORIO_AVALIADO",
             "relatorio_id": relatorio.get('id'),
             "paciente_id": paciente_id,
@@ -4334,8 +4378,8 @@ def _notificar_tecnicos_plano_atualizado(db: firestore.client, paciente_id: str,
             "tipo": "PLANO_CUIDADO_ATUALIZADO",
             "paciente_id": paciente_id,
             "consulta_id": consulta_id,
-            "titulo": titulo,
-            "corpo": corpo
+            "title": titulo,
+            "body": corpo
         }
         
         # Notificar cada técnico
@@ -4352,8 +4396,8 @@ def _notificar_tecnicos_plano_atualizado(db: firestore.client, paciente_id: str,
                 
                 # Persistir notificação no Firestore
                 notificacao_data = {
-                    "titulo": titulo,
-                    "corpo": corpo,
+                    "title": titulo,
+                    "body": corpo,
                     "tipo": "PLANO_CUIDADO_ATUALIZADO",
                     "paciente_id": paciente_id,
                     "consulta_id": consulta_id,
@@ -4410,14 +4454,14 @@ def _notificar_profissional_associacao(db: firestore.client, profissional_id: st
             "tipo": "ASSOCIACAO_PACIENTE",
             "paciente_id": paciente_id,
             "tipo_profissional": tipo_profissional,
-            "titulo": titulo,
-            "corpo": corpo
+            "title": titulo,
+            "body": corpo
         }
         
         # Persistir notificação no Firestore
         notificacao_data = {
-            "titulo": titulo,
-            "corpo": corpo,
+            "title": titulo,
+            "body": corpo,
             "tipo": "ASSOCIACAO_PACIENTE",
             "paciente_id": paciente_id,
             "tipo_profissional": tipo_profissional,
@@ -4539,8 +4583,8 @@ def _notificar_checklist_concluido(db: firestore.client, paciente_id: str, data_
             "tipo": "CHECKLIST_CONCLUIDO",
             "paciente_id": paciente_id,
             "data": data_checklist.isoformat(),
-            "titulo": titulo,
-            "corpo": corpo
+            "title": titulo,
+            "body": corpo
         }
         
         # Lista de pessoas para notificar (evitar duplicatas)
@@ -4563,8 +4607,8 @@ def _notificar_checklist_concluido(db: firestore.client, paciente_id: str, data_
                 
                 # Persistir notificação no Firestore
                 notificacao_data = {
-                    "titulo": titulo,
-                    "corpo": corpo,
+                    "title": titulo,
+                    "body": corpo,
                     "tipo": "CHECKLIST_CONCLUIDO",
                     "paciente_id": paciente_id,
                     "data": data_checklist.isoformat(),
