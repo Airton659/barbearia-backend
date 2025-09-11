@@ -100,9 +100,31 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
     # Fluxo multi-tenant
     @firestore.transactional
     def transaction_sync_user(transaction):
-        # CRITICAL DEBUG: Verificar usuário existente
-        user_existente = buscar_usuario_por_firebase_uid(db, user_data.firebase_uid)
+        # CRITICAL DEBUG: Verificar usuário existente DENTRO da transação
         logger.info(f"🔍 SYNC DEBUG - Firebase UID: {user_data.firebase_uid}")
+        
+        # Buscar usuário existente DENTRO da transação para evitar race conditions
+        user_query = db.collection('usuarios').where('firebase_uid', '==', user_data.firebase_uid).limit(1)
+        user_docs = list(user_query.stream(transaction=transaction))
+        
+        user_existente = None
+        if user_docs:
+            user_doc = user_docs[0].to_dict()
+            user_doc['id'] = user_docs[0].id
+            # Descriptografar campos para uso na lógica
+            try:
+                if 'nome' in user_doc:
+                    user_doc['nome'] = decrypt_data(user_doc['nome'])
+                if 'telefone' in user_doc and user_doc['telefone']:
+                    user_doc['telefone'] = decrypt_data(user_doc['telefone'])
+                if 'endereco' in user_doc and user_doc['endereco']:
+                    user_doc['endereco'] = {k: decrypt_data(v) for k, v in user_doc['endereco'].items()}
+                user_existente = user_doc
+            except Exception as e:
+                logger.error(f"Erro ao descriptografar usuário existente: {e}")
+                # Em caso de erro de descriptografia, tratar como usuário não encontrado
+                user_existente = None
+        
         logger.info(f"🔍 SYNC DEBUG - Usuário existente encontrado: {user_existente is not None}")
         if user_existente:
             logger.info(f"🔍 SYNC DEBUG - ID do usuário existente: {user_existente.get('id')}")
@@ -156,6 +178,24 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
 
         # CRIAR NOVO USUÁRIO
         logger.info(f"🆕 SYNC DEBUG - Criando novo usuário com role '{role}'")
+        
+        # DOUBLE CHECK: Verificação final antes de criar usuário para prevenir duplicação
+        final_check_query = db.collection('usuarios').where('firebase_uid', '==', user_data.firebase_uid).limit(1)
+        final_check_docs = list(final_check_query.stream(transaction=transaction))
+        if final_check_docs:
+            logger.warning(f"⚠️ SYNC DEBUG - Usuário encontrado na verificação final! Usando usuário existente em vez de criar novo.")
+            existing_doc = final_check_docs[0].to_dict()
+            existing_doc['id'] = final_check_docs[0].id
+            # Descriptografar e retornar usuário existente
+            try:
+                if 'nome' in existing_doc:
+                    existing_doc['nome'] = decrypt_data(existing_doc['nome'])
+                if 'telefone' in existing_doc and existing_doc['telefone']:
+                    existing_doc['telefone'] = decrypt_data(existing_doc['telefone'])
+                return existing_doc
+            except Exception as e:
+                logger.error(f"Erro ao descriptografar usuário na verificação final: {e}")
+        
         user_dict = {
             "nome": nome_criptografado, 
             "email": user_data.email, 
