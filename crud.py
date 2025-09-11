@@ -1811,13 +1811,14 @@ def vincular_paciente_medico(db: firestore.client, negocio_id: str, paciente_id:
     
     # LÓGICA DE DESVINCULAÇÃO
     if medico_id is None:
-        paciente_ref.update({'medico_id': firestore.DELETE_FIELD})
+        # --- CORREÇÃO APLICADA AQUI ---
+        paciente_ref.update({'medico_vinculado_id': firestore.DELETE_FIELD})
         acao_log = "DESVINCULO_PACIENTE_MEDICO"
         detalhes_log = {"paciente_id": paciente_id}
         logger.info(f"Paciente {paciente_id} desvinculado do médico.")
     # LÓGICA DE VINCULAÇÃO
     else:
-        # Verificar se o médico existe e tem a role correta
+        # (A lógica de validação do médico permanece a mesma)
         medico_doc = db.collection('usuarios').document(medico_id).get()
         if not medico_doc.exists:
             raise ValueError(f"Médico com ID {medico_id} não encontrado.")
@@ -1825,25 +1826,23 @@ def vincular_paciente_medico(db: firestore.client, negocio_id: str, paciente_id:
         medico_data = medico_doc.to_dict()
         roles = medico_data.get('roles', {})
         
-        # Verificar se o usuário tem role de médico no negócio especificado
         if roles.get(negocio_id) != 'medico':
             raise ValueError(f"Usuário {medico_id} não possui a role 'medico' no negócio {negocio_id}.")
         
-        paciente_ref.update({'medico_id': medico_id})
+        # --- CORREÇÃO APLICADA AQUI ---
+        paciente_ref.update({'medico_vinculado_id': medico_id})
         acao_log = "VINCULO_PACIENTE_MEDICO"
         detalhes_log = {"paciente_id": paciente_id, "medico_id": medico_id}
         logger.info(f"Paciente {paciente_id} vinculado ao médico {medico_id}.")
 
     criar_log_auditoria(db, autor_uid=autor_uid, negocio_id=negocio_id, acao=acao_log, detalhes=detalhes_log)
     
-    # Retornar o perfil atualizado do paciente usando a função que descriptografa os dados
     doc = paciente_ref.get()
     if doc.exists:
         firebase_uid = doc.to_dict().get('firebase_uid')
         if firebase_uid:
             return buscar_usuario_por_firebase_uid(db, firebase_uid)
         else:
-            # Fallback caso não tenha firebase_uid
             data = doc.to_dict()
             data['id'] = doc.id
             return data
