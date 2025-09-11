@@ -185,7 +185,7 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
         return user_dict
     
     # Executar como transação Firestore
-    return transaction_sync_user()
+    return transaction_sync_user(db.transaction())
 
 
 def check_admin_status(db: firestore.client, negocio_id: str) -> bool:
