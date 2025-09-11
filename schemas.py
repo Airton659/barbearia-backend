@@ -868,5 +868,32 @@ class UserProfileUpdateError(BaseModel):
     message: str = Field(..., description="Mensagem de erro")
     errors: Optional[Dict[str, List[str]]] = Field(None, description="Detalhes dos erros de validação")
 
+# Em schemas.py
+
+# =================================================================================
+# SCHEMAS DE TAREFAS ESSENCIAIS (PLANO DE AÇÃO)
+# =================================================================================
+
+class StatusTarefaEnum(str, Enum):
+    pendente = "pendente"
+    concluida = "concluida"
+    atrasada = "atrasada"
+
+class TarefaAgendadaBase(BaseModel):
+    descricao: str
+    dataHoraLimite: datetime
+
+class TarefaAgendadaCreate(TarefaAgendadaBase):
+    pass
+
+class TarefaAgendadaResponse(TarefaAgendadaBase):
+    id: str
+    pacienteId: str
+    negocioId: str
+    criadoPor: Optional[TecnicoProfileReduzido] = None
+    executadoPor: Optional[TecnicoProfileReduzido] = None
+    foiConcluida: bool
+    dataConclusao: Optional[datetime] = None
+
 ProfissionalResponse.model_rebuild()
 DiarioTecnicoResponse.model_rebuild()

@@ -1766,6 +1766,48 @@ def get_resultados_pesquisas(
     """(Admin) Lista todos os resultados das pesquisas de satisfação respondidas."""
     return crud.listar_resultados_pesquisas(db, negocio_id, modelo_pesquisa_id)
 
+
+# Em main.py
+
+# =================================================================================
+# ENDPOINTS DE TAREFAS ESSENCIAIS (PLANO DE AÇÃO)
+# =================================================================================
+
+@app.post("/pacientes/{paciente_id}/tarefas", response_model=schemas.TarefaAgendadaResponse, tags=["Tarefas Essenciais"])
+def criar_tarefa_essencial(
+    paciente_id: str,
+    tarefa_data: schemas.TarefaAgendadaCreate,
+    current_user: schemas.UsuarioProfile = Depends(get_admin_or_profissional_autorizado_paciente),
+    negocio_id: str = Depends(validate_negocio_id),
+    db: firestore.client = Depends(get_db)
+):
+    """(Admin ou Enfermeiro) Cria uma nova tarefa essencial para um paciente com prazo."""
+    nova_tarefa = crud.criar_tarefa(db, paciente_id, negocio_id, tarefa_data, current_user)
+    return nova_tarefa
+
+@app.get("/pacientes/{paciente_id}/tarefas", response_model=List[schemas.TarefaAgendadaResponse], tags=["Tarefas Essenciais"])
+def listar_tarefas_essenciais(
+    paciente_id: str,
+    status: Optional[schemas.StatusTarefaEnum] = Query(None, description="Filtre por status: 'pendente', 'concluida' ou 'atrasada'."),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    db: firestore.client = Depends(get_db)
+):
+    """(Autorizado) Lista as tarefas de um paciente, com filtros."""
+    return crud.listar_tarefas_por_paciente(db, paciente_id, status)
+
+@app.patch("/tarefas/{tarefa_id}/concluir", response_model=schemas.TarefaAgendadaResponse, tags=["Tarefas Essenciais"])
+def concluir_tarefa_essencial(
+    tarefa_id: str,
+    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Técnico) Marca uma tarefa como concluída."""
+    tarefa_concluida = crud.marcar_tarefa_como_concluida(db, tarefa_id, current_user)
+    if not tarefa_concluida:
+        raise HTTPException(status_code=404, detail="Tarefa não encontrada ou já concluída.")
+    
+    return tarefa_concluida
+
 # =================================================================================
 # ENDPOINTS DO FLUXO DO TÉCNICO (BASEADO NO PDF ESTRATÉGIA)
 # =================================================================================

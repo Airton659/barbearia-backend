@@ -3338,7 +3338,7 @@ def criar_registro_diario_estruturado(db: firestore.client, registro_data: schem
         logger.error(f"Erro inesperado ao criar registro diário estruturado: {e}")
         raise HTTPException(status_code=500, detail=f"Ocorreu um erro interno no servidor: {e}")
     
-    
+
 def listar_registros_diario_estruturado(
     db: firestore.client,
     paciente_id: str,
@@ -5147,6 +5147,132 @@ def processar_imagem_base64(base64_data: str, user_id: str) -> Optional[str]:
 # Em crud.py
 
 # =================================================================================
+# CRUD DE TAREFAS ESSENCIAIS (PLANO DE AÇÃO)
+# =================================================================================
+
+def _agendar_verificacao_tarefa_atrasada(db: firestore.client, tarefa: Dict):
+    """
+    Cria um documento em 'tarefas_a_verificar' para ser processado por um worker externo (Cloud Function).
+    """
+    try:
+        doc_ref = db.collection('tarefas_a_verificar').document(tarefa['id'])
+        doc_ref.set({
+            "tarefaId": tarefa['id'],
+            "pacienteId": tarefa['pacienteId'],
+            "negocioId": tarefa['negocioId'],
+            "criadoPorId": tarefa['criadoPorId'],
+            "dataHoraLimite": tarefa['dataHoraLimite'],
+            "status": "pendente" # O worker mudará para "processado" ou "notificado"
+        })
+        logger.info(f"Verificação de atraso agendada para tarefa {tarefa['id']}.")
+    except Exception as e:
+        logger.error(f"Falha ao agendar verificação de tarefa atrasada: {e}")
+
+
+def criar_tarefa(db: firestore.client, paciente_id: str, negocio_id: str, tarefa_data: schemas.TarefaAgendadaCreate, criador: schemas.UsuarioProfile) -> Dict:
+    """Cria uma nova tarefa essencial para um paciente."""
+    tarefa_dict = {
+        "pacienteId": paciente_id,
+        "negocioId": negocio_id,
+        "descricao": tarefa_data.descricao,
+        "dataHoraLimite": tarefa_data.dataHoraLimite,
+        "criadoPorId": criador.id,
+        "foiConcluida": False,
+        "dataConclusao": None,
+        "executadoPorId": None
+    }
+    
+    doc_ref = db.collection('tarefas_essenciais').document()
+    doc_ref.set(tarefa_dict)
+    
+    tarefa_dict['id'] = doc_ref.id
+    
+    # Agenda a verificação de atraso
+    _agendar_verificacao_tarefa_atrasada(db, tarefa_dict)
+    
+    return tarefa_dict
+
+def listar_tarefas_por_paciente(db: firestore.client, paciente_id: str, status: Optional[StatusTarefaEnum]) -> List[Dict]:
+    """Lista tarefas de um paciente, com filtro opcional por status."""
+    query = db.collection('tarefas_essenciais').where('pacienteId', '==', paciente_id).order_by('dataHoraLimite', direction=firestore.Query.ASCENDING)
+    
+    tarefas = []
+    now = datetime.utcnow()
+    
+    user_cache = {}
+
+    for doc in query.stream():
+        data = doc.to_dict()
+        data['id'] = doc.id
+        
+        # Lógica de filtro de status
+        is_concluida = data.get('foiConcluida', False)
+        is_atrasada = not is_concluida and data.get('dataHoraLimite') < now
+
+        if status:
+            if status == 'pendente' and (is_concluida or is_atrasada):
+                continue
+            if status == 'concluida' and not is_concluida:
+                continue
+            if status == 'atrasada' and not is_atrasada:
+                continue
+        
+        # Enriquecer com dados do criador e executor
+        for user_field, user_id in [("criadoPor", data.get("criadoPorId")), ("executadoPor", data.get("executadoPorId"))]:
+            if user_id:
+                if user_id not in user_cache:
+                    user_doc = db.collection('usuarios').document(user_id).get()
+                    if user_doc.exists:
+                        user_data = user_doc.to_dict()
+                        user_cache[user_id] = {
+                            "id": user_id,
+                            "nome": decrypt_data(user_data.get('nome','')),
+                            "email": user_data.get('email', '')
+                        }
+                if user_id in user_cache:
+                    data[user_field] = user_cache[user_id]
+
+        tarefas.append(data)
+        
+    return tarefas
+
+
+def marcar_tarefa_como_concluida(db: firestore.client, tarefa_id: str, tecnico: schemas.UsuarioProfile) -> Optional[Dict]:
+    """Marca uma tarefa como concluída e dispara a notificação."""
+    tarefa_ref = db.collection('tarefas_essenciais').document(tarefa_id)
+    tarefa_doc = tarefa_ref.get()
+
+    if not tarefa_doc.exists:
+        return None
+    
+    tarefa_data = tarefa_doc.to_dict()
+    if tarefa_data.get('foiConcluida'): # Já foi concluída
+        return tarefa_data
+
+    # Atualiza a tarefa
+    update_data = {
+        "foiConcluida": True,
+        "dataConclusao": datetime.utcnow(),
+        "executadoPorId": tecnico.id
+    }
+    tarefa_ref.update(update_data)
+    
+    # Atualiza o dicionário para a notificação
+    tarefa_data.update(update_data)
+    tarefa_data['id'] = tarefa_id
+
+    # Dispara a notificação de conclusão
+    _notificar_tarefa_concluida(db, tarefa_data)
+    
+    # Remove a verificação de atraso agendada
+    db.collection('tarefas_a_verificar').document(tarefa_id).delete()
+    
+    # Retorna o documento completo e atualizado
+    updated_doc = tarefa_ref.get().to_dict()
+    updated_doc['id'] = tarefa_id
+    return updated_doc
+
+# =================================================================================
 # NOVAS FUNÇÕES DE NOTIFICAÇÃO (SETEMBRO 2025)
 # =================================================================================
 
@@ -5267,3 +5393,59 @@ def _notificar_enfermeiro_novo_registro_diario(db: firestore.client, registro: D
 
     except Exception as e:
         logger.error(f"Erro ao notificar enfermeiro sobre novo registro diário: {e}")
+
+
+# Em crud.py, adicione esta função ao final
+
+def _notificar_tarefa_concluida(db: firestore.client, tarefa: Dict):
+    """Notifica o criador da tarefa (Enfermeiro) que ela foi concluída por um técnico."""
+    try:
+        criador_id = tarefa.get('criadoPorId')
+        tecnico_id = tarefa.get('executadoPorId')
+        paciente_id = tarefa.get('pacienteId')
+
+        if not all([criador_id, tecnico_id, paciente_id]):
+            logger.warning(f"Dados insuficientes na tarefa {tarefa.get('id')} para notificar conclusão.")
+            return
+
+        # Buscar dados do criador (destinatário)
+        criador_doc = db.collection('usuarios').document(criador_id).get()
+        if not criador_doc.exists:
+            logger.error(f"Criador da tarefa {criador_id} não encontrado.")
+            return
+        criador_data = criador_doc.to_dict()
+        tokens_fcm = criador_data.get('fcm_tokens', [])
+        
+        # Buscar nomes
+        tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
+        nome_tecnico = decrypt_data(tecnico_doc.to_dict().get('nome', '')) if tecnico_doc.exists else "O técnico"
+        
+        paciente_doc = db.collection('usuarios').document(paciente_id).get()
+        nome_paciente = decrypt_data(paciente_doc.to_dict().get('nome', '')) if paciente_doc.exists else "o paciente"
+
+        # Conteúdo
+        titulo = "Tarefa Concluída!"
+        corpo = f"{nome_tecnico} concluiu a tarefa '{tarefa.get('descricao', '')[:30]}...' para {nome_paciente}."
+        
+        data_payload = {
+            "tipo": "TAREFA_CONCLUIDA",
+            "tarefa_id": tarefa.get('id'),
+            "paciente_id": paciente_id,
+            "title": titulo, "body": corpo
+        }
+
+        # Persistir notificação
+        db.collection('usuarios').document(criador_id).collection('notificacoes').add({
+            "title": titulo, "body": corpo, "tipo": "TAREFA_CONCLUIDA",
+            "relacionado": { "tarefa_id": tarefa.get('id'), "paciente_id": paciente_id },
+            "lida": False, "data_criacao": firestore.SERVER_TIMESTAMP,
+            "dedupe_key": f"TAREFA_CONCLUIDA_{tarefa.get('id')}"
+        })
+
+        # Enviar Push
+        if tokens_fcm:
+            _send_data_push_to_tokens(db, criador_data.get('firebase_uid'), tokens_fcm, data_payload, "[Tarefa Concluída]")
+            logger.info(f"Notificação de tarefa concluída enviada para {criador_id}.")
+
+    except Exception as e:
+        logger.error(f"Erro ao notificar tarefa concluída: {e}")
