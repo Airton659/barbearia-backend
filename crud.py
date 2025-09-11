@@ -39,11 +39,14 @@ logger = logging.getLogger(__name__)
 def buscar_usuario_por_firebase_uid(db: firestore.client, firebase_uid: str) -> Optional[Dict]:
     """Busca um usuário na coleção 'usuarios' pelo seu firebase_uid e descriptografa os dados sensíveis."""
     try:
+        logger.info(f"🔍 BUSCAR_USUARIO DEBUG - Procurando firebase_uid: {firebase_uid}")
         query = db.collection('usuarios').where('firebase_uid', '==', firebase_uid).limit(1)
         docs = list(query.stream())
+        logger.info(f"🔍 BUSCAR_USUARIO DEBUG - Documentos encontrados: {len(docs)}")
         if docs:
             user_doc = docs[0].to_dict()
             user_doc['id'] = docs[0].id
+            logger.info(f"🔍 BUSCAR_USUARIO DEBUG - Usuário encontrado ID: {user_doc['id']}")
 
             # Descriptografa os campos
             if 'nome' in user_doc:
@@ -53,7 +56,9 @@ def buscar_usuario_por_firebase_uid(db: firestore.client, firebase_uid: str) -> 
             if 'endereco' in user_doc and user_doc['endereco']:
                 user_doc['endereco'] = {k: decrypt_data(v) for k, v in user_doc['endereco'].items()}
 
+            logger.info(f"✅ BUSCAR_USUARIO DEBUG - Retornando usuário: ID={user_doc['id']}, Nome={user_doc.get('nome', 'N/A')}")
             return user_doc
+        logger.info(f"❌ BUSCAR_USUARIO DEBUG - Nenhum usuário encontrado com firebase_uid: {firebase_uid}")
         return None
     except Exception as e:
         logger.error(f"Erro ao buscar/descriptografar usuário por firebase_uid {firebase_uid}: {e}")
@@ -174,6 +179,7 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
                     user_existente['nome'] = user_data.nome
             
             logger.info(f"✅ SYNC DEBUG - Retornando usuário existente ID: {user_existente['id']}")
+            logger.info(f"🔍 SYNC DEBUG - FINAL RETURN USER - ID: {user_existente['id']}, Firebase_UID: {user_existente.get('firebase_uid', 'N/A')}")
             return user_existente
 
         # CRIAR NOVO USUÁRIO
@@ -222,6 +228,7 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
         if 'endereco' in user_dict and user_dict['endereco']:
              user_dict['endereco'] = user_data.endereco.dict()
 
+        logger.info(f"🔍 SYNC DEBUG - NOVO USUARIO CRIADO - ID: {user_dict['id']}, Firebase_UID: {user_dict.get('firebase_uid', 'N/A')}")
         return user_dict
     
     # Executar como transação Firestore
