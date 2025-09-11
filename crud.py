@@ -5018,7 +5018,7 @@ def atualizar_perfil_usuario(db: firestore.client, user_id: str, negocio_id: str
 
 def processar_imagem_base64(base64_data: str, user_id: str) -> Optional[str]:
     """
-    Processa imagem Base64 e salva localmente (implementação para desenvolvimento).
+    Processa imagem Base64 e salva no Google Cloud Storage.
     
     Args:
         base64_data: Dados da imagem em Base64
@@ -5031,6 +5031,7 @@ def processar_imagem_base64(base64_data: str, user_id: str) -> Optional[str]:
         import base64
         import os
         from datetime import datetime
+        from google.cloud import storage
         
         # Validar formato Base64
         if not base64_data.startswith('data:image/'):
@@ -5054,22 +5055,45 @@ def processar_imagem_base64(base64_data: str, user_id: str) -> Optional[str]:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"profile_{user_id}_{timestamp}.{image_type}"
         
-        # Criar diretório local para salvar as imagens (se não existir)
-        upload_dir = "uploads/profiles"
-        os.makedirs(upload_dir, exist_ok=True)
+        # Configurar Google Cloud Storage
+        bucket_name = os.getenv('CLOUD_STORAGE_BUCKET_NAME', 'barbearia-app-fotoss')
         
-        # Salvar arquivo localmente
-        file_path = os.path.join(upload_dir, filename)
-        with open(file_path, 'wb') as f:
-            f.write(image_data)
-        
-        # Retornar URL para servir a imagem
-        # Em desenvolvimento, assumindo que há um servidor servindo /uploads/
-        base_url = "https://barbearia-backend-service-862082955632.southamerica-east1.run.app"
-        image_url = f"{base_url}/uploads/profiles/{filename}"
-        
-        logger.info(f"Imagem salva para usuário {user_id}: {file_path} -> {image_url}")
-        return image_url
+        try:
+            # Tentar usar Google Cloud Storage
+            client = storage.Client()
+            bucket = client.bucket(bucket_name)
+            blob = bucket.blob(f"profiles/{filename}")
+            
+            # Upload da imagem
+            blob.upload_from_string(image_data, content_type=f"image/{image_type}")
+            
+            # Tornar o arquivo público
+            blob.make_public()
+            
+            # URL pública do arquivo
+            image_url = blob.public_url
+            
+            logger.info(f"Imagem salva no Cloud Storage para usuário {user_id}: {image_url}")
+            return image_url
+            
+        except Exception as storage_error:
+            logger.warning(f"Falha no Cloud Storage, usando fallback local: {storage_error}")
+            
+            # Fallback: salvar localmente (para desenvolvimento)
+            upload_dir = "uploads/profiles"
+            os.makedirs(upload_dir, exist_ok=True)
+            
+            # Salvar arquivo localmente
+            file_path = os.path.join(upload_dir, filename)
+            with open(file_path, 'wb') as f:
+                f.write(image_data)
+            
+            # URL local
+            base_url = "https://barbearia-backend-service-862082955632.southamerica-east1.run.app"
+            image_url = f"{base_url}/uploads/profiles/{filename}"
+            
+            logger.info(f"Imagem salva localmente para usuário {user_id}: {file_path} -> {image_url}")
+            return image_url
         
     except Exception as e:
         logger.error(f"Erro ao processar imagem Base64 para usuário {user_id}: {e}")
