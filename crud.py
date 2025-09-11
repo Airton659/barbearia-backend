@@ -136,21 +136,36 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
         if user_docs:
             user_doc = user_docs[0].to_dict()
             user_doc['id'] = user_docs[0].id
-            # Descriptografar campos para uso na lógica
-            try:
-                if 'nome' in user_doc:
+            # Descriptografar campos para uso na lógica com tratamento individual de erros
+            user_existente = user_doc
+            
+            # Descriptografar nome
+            if 'nome' in user_doc:
+                try:
                     user_doc['nome'] = decrypt_data(user_doc['nome'])
-                if 'telefone' in user_doc and user_doc['telefone']:
+                    logger.info(f"✅ TRANSACAO DEBUG - Nome descriptografado com sucesso")
+                except Exception as e:
+                    logger.error(f"❌ TRANSACAO DEBUG - Erro ao descriptografar NOME: {e}")
+                    user_doc['nome'] = '[Erro na descriptografia do nome]'
+            
+            # Descriptografar telefone
+            if 'telefone' in user_doc and user_doc['telefone']:
+                try:
                     user_doc['telefone'] = decrypt_data(user_doc['telefone'])
-                if 'endereco' in user_doc and user_doc['endereco']:
+                    logger.info(f"✅ TRANSACAO DEBUG - Telefone descriptografado com sucesso")
+                except Exception as e:
+                    logger.error(f"❌ TRANSACAO DEBUG - Erro ao descriptografar TELEFONE: {e}")
+                    user_doc['telefone'] = None
+            
+            # Descriptografar endereço com tratamento de erro robusto
+            if 'endereco' in user_doc and user_doc['endereco']:
+                try:
                     user_doc['endereco'] = {k: decrypt_data(v) for k, v in user_doc['endereco'].items()}
-                user_existente = user_doc
-            except Exception as e:
-                logger.error(f"Erro ao descriptografar usuário existente: {e}")
-                import traceback
-                logger.error(f"Stack trace na transação: {traceback.format_exc()}")
-                # Em caso de erro de descriptografia, tratar como usuário não encontrado
-                user_existente = None
+                    logger.info(f"✅ TRANSACAO DEBUG - Endereço descriptografado com sucesso")
+                except Exception as e:
+                    logger.error(f"❌ TRANSACAO DEBUG - Erro ao descriptografar ENDERECO: {e}")
+                    logger.error(f"❌ TRANSACAO DEBUG - Dados do endereço corrompidos, definindo como None")
+                    user_doc['endereco'] = None
         
         logger.info(f"🔍 SYNC DEBUG - Usuário existente encontrado: {user_existente is not None}")
         if user_existente:
