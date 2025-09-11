@@ -3279,72 +3279,66 @@ def get_checklist_diario_plano_ativo(db: firestore.client, paciente_id: str, dia
 
 # Em crud.py, substitua a função inteira por esta:
 
+# Em crud.py, substitua esta função
+
 def criar_registro_diario_estruturado(db: firestore.client, registro_data: schemas.RegistroDiarioCreate, tecnico_id: str) -> Dict:
     """
-    Adiciona um novo registro estruturado ao diário de acompanhamento de um paciente, criptografando dados sensíveis.
-    AGORA SIMPLIFICADO: Aceita um payload de texto livre para todos os tipos e
-    respeita o timestamp enviado pelo cliente.
+    Adiciona um novo registro estruturado ao diário de acompanhamento de um paciente, criptografando dados sensíveis e notificando o enfermeiro.
     """
     try:
-        # A validação agora é feita diretamente pelo Pydantic no schema.
-        # O conteúdo sempre será do tipo AnotacaoConteudo.
         conteudo_ok = registro_data.conteudo
         conteudo_dict = conteudo_ok.model_dump()
         
-        # Criptografa o campo sensível 'descricao' dentro do conteúdo
-        if 'descricao' in conteudo_dict and conteudo_dict['descricao'] is not None:
-            if isinstance(conteudo_dict['descricao'], str) and conteudo_dict['descricao'].strip():
-                conteudo_dict['descricao'] = encrypt_data(conteudo_dict['descricao'])
+        if 'descricao' in conteudo_dict and conteudo_dict['descricao']:
+            conteudo_dict['descricao'] = encrypt_data(conteudo_dict['descricao'])
 
-        # Monta o dicionário para salvar no Firestore
         registro_dict_para_salvar = {
             "negocio_id": registro_data.negocio_id,
             "paciente_id": registro_data.paciente_id,
             "tipo": registro_data.tipo,
             "conteudo": conteudo_dict,
             "tecnico_id": tecnico_id,
-            # CORREÇÃO: Usa o timestamp enviado pelo app em vez de gerar um novo.
             "data_registro": registro_data.data_hora,
         }
 
-        # Salva o documento no banco de dados
         paciente_ref = db.collection('usuarios').document(registro_data.paciente_id)
         doc_ref = paciente_ref.collection('registros_diarios_estruturados').document()
         doc_ref.set(registro_dict_para_salvar)
 
-        # Monta o técnico (objeto reduzido) para a resposta da API
+        # Prepara a resposta da API
+        resposta_dict = registro_dict_para_salvar.copy()
+        resposta_dict['id'] = doc_ref.id
+        
         tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
         if tecnico_doc.exists:
             tdat = tecnico_doc.to_dict() or {}
-            tecnico_perfil = {
+            resposta_dict['tecnico'] = {
                 "id": tecnico_doc.id,
-                "nome": tdat.get('nome', 'Nome não disponível'),
-                "email": tdat.get('email', 'Email não disponível'),
+                "nome": decrypt_data(tdat.get('nome', '')) if tdat.get('nome') else 'Técnico',
+                "email": tdat.get('email', ''),
             }
         else:
-            tecnico_perfil = {"id": tecnico_id, "nome": "Técnico Desconhecido", "email": ""}
+            resposta_dict['tecnico'] = {"id": tecnico_id, "nome": "Técnico Desconhecido", "email": ""}
+        
+        if 'descricao' in conteudo_dict and conteudo_dict['descricao']:
+             resposta_dict['conteudo']['descricao'] = decrypt_data(conteudo_dict['descricao'])
+        
+        # --- INÍCIO DA ALTERAÇÃO ---
+        # 5. Notificar o enfermeiro responsável
+        try:
+            # Passamos o dicionário já com o ID para a função de notificação
+            _notificar_enfermeiro_novo_registro_diario(db, resposta_dict)
+        except Exception as e:
+            logger.error(f"Falha ao disparar notificação para novo registro diário {doc_ref.id}: {e}")
+        # --- FIM DA ALTERAÇÃO ---
 
-        resposta_dict = registro_dict_para_salvar.copy()
-        resposta_dict['id'] = doc_ref.id
-        resposta_dict['tecnico'] = tecnico_perfil
-        
-        # Descriptografa o campo sensível 'descricao' para a resposta da API
-        if 'conteudo' in resposta_dict and resposta_dict['conteudo'] is not None:
-            if 'descricao' in resposta_dict['conteudo'] and resposta_dict['conteudo']['descricao'] is not None:
-                if isinstance(resposta_dict['conteudo']['descricao'], str) and resposta_dict['conteudo']['descricao'].strip():
-                    try:
-                        resposta_dict['conteudo']['descricao'] = decrypt_data(resposta_dict['conteudo']['descricao'])
-                    except Exception as e:
-                        logger.error(f"Erro ao descriptografar conteúdo do registro diário estruturado: {e}")
-                        resposta_dict['conteudo']['descricao'] = "[Erro na descriptografia]"
-        
         return resposta_dict
 
     except Exception as e:
-        # Mantém um tratamento de erro genérico caso algo inesperado aconteça
         logger.error(f"Erro inesperado ao criar registro diário estruturado: {e}")
         raise HTTPException(status_code=500, detail=f"Ocorreu um erro interno no servidor: {e}")
-
+    
+    
 def listar_registros_diario_estruturado(
     db: firestore.client,
     paciente_id: str,
@@ -3945,6 +3939,8 @@ def atualizar_consentimento_lgpd(db: firestore.client, user_id: str, consent_dat
 # FUNÇÕES DE RELATÓRIO MÉDICO
 # =================================================================================
 
+# Em crud.py, substitua esta função
+
 def criar_relatorio_medico(db: firestore.client, paciente_id: str, relatorio_data: schemas.RelatorioMedicoCreate, autor: schemas.UsuarioProfile) -> Dict:
     """
     Cria um novo relatório médico para um paciente.
@@ -3963,7 +3959,7 @@ def criar_relatorio_medico(db: firestore.client, paciente_id: str, relatorio_dat
         "criado_por_id": autor.id,
         "medico_id": relatorio_data.medico_id,
         "consulta_id": consulta_id_recente,
-        "conteudo": relatorio_data.conteudo,  # Campo de texto livre
+        "conteudo": relatorio_data.conteudo,
         "status": "pendente",
         "fotos": [],
         "motivo_recusa": None,
@@ -3974,14 +3970,19 @@ def criar_relatorio_medico(db: firestore.client, paciente_id: str, relatorio_dat
     # 3. Salvar no Firestore
     doc_ref = db.collection('relatorios_medicos').document()
     doc_ref.set(relatorio_dict)
-
-    # 4. Retornar o objeto completo
     relatorio_dict['id'] = doc_ref.id
+    
+    # --- INÍCIO DA ALTERAÇÃO ---
+    # 4. Notificar o médico sobre o novo relatório
+    try:
+        _notificar_medico_novo_relatorio(db, relatorio_dict)
+    except Exception as e:
+        logger.error(f"Falha ao disparar notificação para novo relatório {doc_ref.id}: {e}")
+    # --- FIM DA ALTERAÇÃO ---
+
     logger.info(f"Relatório médico {doc_ref.id} criado para o paciente {paciente_id} pelo usuário {autor.id}.")
     
     return relatorio_dict
-
-# crud.py
 
 def listar_relatorios_por_paciente(db: firestore.client, paciente_id: str) -> List[Dict]:
     """
@@ -5142,3 +5143,127 @@ def processar_imagem_base64(base64_data: str, user_id: str) -> Optional[str]:
     except Exception as e:
         logger.error(f"Erro ao processar imagem Base64 para usuário {user_id}: {e}")
         return None
+
+# Em crud.py
+
+# =================================================================================
+# NOVAS FUNÇÕES DE NOTIFICAÇÃO (SETEMBRO 2025)
+# =================================================================================
+
+def _notificar_medico_novo_relatorio(db: firestore.client, relatorio: Dict):
+    """Notifica o médico vinculado sobre um novo relatório pendente de avaliação."""
+    try:
+        medico_id = relatorio.get('medico_id')
+        paciente_id = relatorio.get('paciente_id')
+        criado_por_id = relatorio.get('criado_por_id')
+
+        if not medico_id or not paciente_id or not criado_por_id:
+            logger.warning(f"Dados insuficientes no relatório {relatorio.get('id')} para notificar o médico.")
+            return
+
+        # Buscar dados do médico (destinatário)
+        medico_doc = db.collection('usuarios').document(medico_id).get()
+        if not medico_doc.exists:
+            logger.error(f"Médico {medico_id} não encontrado para notificação.")
+            return
+        medico_data = medico_doc.to_dict()
+        tokens_fcm = medico_data.get('fcm_tokens', [])
+
+        # Buscar nomes para a mensagem
+        paciente_doc = db.collection('usuarios').document(paciente_id).get()
+        nome_paciente = decrypt_data(paciente_doc.to_dict().get('nome', '')) if paciente_doc.exists else "Paciente"
+        
+        criador_doc = db.collection('usuarios').document(criado_por_id).get()
+        nome_criador = decrypt_data(criador_doc.to_dict().get('nome', '')) if criador_doc.exists else "A equipe"
+
+        # Conteúdo da notificação
+        titulo = "Novo Relatório para Avaliação"
+        corpo = f"{nome_criador} criou um novo relatório para o paciente {nome_paciente} que precisa da sua avaliação."
+        
+        data_payload = {
+            "tipo": "NOVO_RELATORIO_MEDICO",
+            "relatorio_id": relatorio.get('id'),
+            "paciente_id": paciente_id,
+            "title": titulo,
+            "body": corpo
+        }
+
+        # Persistir notificação no Firestore
+        db.collection('usuarios').document(medico_id).collection('notificacoes').add({
+            "title": titulo, "body": corpo, "tipo": "NOVO_RELATORIO_MEDICO",
+            "relacionado": { "relatorio_id": relatorio.get('id'), "paciente_id": paciente_id },
+            "lida": False, "data_criacao": firestore.SERVER_TIMESTAMP,
+            "dedupe_key": f"NOVO_RELATORIO_{relatorio.get('id')}"
+        })
+
+        # Enviar Push Notification
+        if tokens_fcm:
+            _send_data_push_to_tokens(db, medico_data.get('firebase_uid'), tokens_fcm, data_payload, "[Novo Relatório]")
+            logger.info(f"Notificação de novo relatório enviada para o médico {medico_id}.")
+
+    except Exception as e:
+        logger.error(f"Erro ao notificar médico sobre novo relatório: {e}")
+
+
+def _notificar_enfermeiro_novo_registro_diario(db: firestore.client, registro: Dict):
+    """Notifica o enfermeiro responsável sobre um novo registro diário feito por um técnico."""
+    try:
+        paciente_id = registro.get('paciente_id')
+        tecnico_id = registro.get('tecnico_id')
+
+        if not paciente_id or not tecnico_id:
+            logger.warning(f"Dados insuficientes no registro {registro.get('id')} para notificar o enfermeiro.")
+            return
+
+        # Buscar dados do paciente para encontrar o enfermeiro responsável
+        paciente_doc = db.collection('usuarios').document(paciente_id).get()
+        if not paciente_doc.exists:
+            logger.error(f"Paciente {paciente_id} não encontrado.")
+            return
+        paciente_data = paciente_doc.to_dict()
+        enfermeiro_id = paciente_data.get('enfermeiro_id')
+        nome_paciente = decrypt_data(paciente_data.get('nome', ''))
+
+        if not enfermeiro_id:
+            logger.info(f"Paciente {paciente_id} não possui enfermeiro vinculado. Nenhuma notificação enviada.")
+            return
+
+        # Buscar dados do enfermeiro (destinatário)
+        enfermeiro_doc = db.collection('usuarios').document(enfermeiro_id).get()
+        if not enfermeiro_doc.exists:
+            logger.error(f"Enfermeiro {enfermeiro_id} não encontrado.")
+            return
+        enfermeiro_data = enfermeiro_doc.to_dict()
+        tokens_fcm = enfermeiro_data.get('fcm_tokens', [])
+        
+        # Buscar nome do técnico
+        tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
+        nome_tecnico = decrypt_data(tecnico_doc.to_dict().get('nome', '')) if tecnico_doc.exists else "Um técnico"
+
+        # Conteúdo da notificação
+        titulo = "Novo Registro no Diário"
+        corpo = f"{nome_tecnico} adicionou um novo registro no diário do paciente {nome_paciente}."
+        
+        data_payload = {
+            "tipo": "NOVO_REGISTRO_DIARIO",
+            "registro_id": registro.get('id'),
+            "paciente_id": paciente_id,
+            "title": titulo,
+            "body": corpo
+        }
+
+        # Persistir notificação no Firestore
+        db.collection('usuarios').document(enfermeiro_id).collection('notificacoes').add({
+            "title": titulo, "body": corpo, "tipo": "NOVO_REGISTRO_DIARIO",
+            "relacionado": { "registro_id": registro.get('id'), "paciente_id": paciente_id },
+            "lida": False, "data_criacao": firestore.SERVER_TIMESTAMP,
+            "dedupe_key": f"NOVO_REGISTRO_{registro.get('id')}"
+        })
+
+        # Enviar Push Notification
+        if tokens_fcm:
+            _send_data_push_to_tokens(db, enfermeiro_data.get('firebase_uid'), tokens_fcm, data_payload, "[Novo Registro Diário]")
+            logger.info(f"Notificação de novo registro diário enviada para o enfermeiro {enfermeiro_id}.")
+
+    except Exception as e:
+        logger.error(f"Erro ao notificar enfermeiro sobre novo registro diário: {e}")
