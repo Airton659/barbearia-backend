@@ -422,6 +422,14 @@ def adicionar_medicacao(
     """(Autorizado) Adiciona uma nova medicação à ficha do paciente."""
     medicacao_data.paciente_id = paciente_id
     consulta_id = medicacao_data.consulta_id
+    
+    # Se consulta_id não foi enviado, usa a consulta mais recente
+    if not consulta_id:
+        consultas = crud.listar_consultas(db, paciente_id)
+        if not consultas:
+            raise HTTPException(status_code=400, detail="Paciente não possui consultas. Crie uma consulta primeiro.")
+        consulta_id = consultas[0]['id']
+    
     return crud.prescrever_medicacao(db, medicacao_data, consulta_id)
 
 @app.post("/pacientes/{paciente_id}/checklist-itens", response_model=schemas.ChecklistItemResponse, status_code=status.HTTP_201_CREATED, tags=["Ficha do Paciente"])
@@ -434,6 +442,14 @@ def adicionar_checklist_item(
     """(Autorizado) Adiciona um novo item ao checklist do paciente."""
     item_data.paciente_id = paciente_id
     consulta_id = item_data.consulta_id
+    
+    # Se consulta_id não foi enviado, usa a consulta mais recente
+    if not consulta_id:
+        consultas = crud.listar_consultas(db, paciente_id)
+        if not consultas:
+            raise HTTPException(status_code=400, detail="Paciente não possui consultas. Crie uma consulta primeiro.")
+        consulta_id = consultas[0]['id']
+    
     return crud.adicionar_item_checklist(db, item_data, consulta_id)
 
 @app.post("/pacientes/{paciente_id}/orientacoes", response_model=schemas.OrientacaoResponse, status_code=status.HTTP_201_CREATED, tags=["Ficha do Paciente"])
@@ -446,6 +462,14 @@ def adicionar_orientacao(
     """(Autorizado) Adiciona uma nova orientação à ficha do paciente."""
     orientacao_data.paciente_id = paciente_id
     consulta_id = orientacao_data.consulta_id
+    
+    # Se consulta_id não foi enviado, usa a consulta mais recente
+    if not consulta_id:
+        consultas = crud.listar_consultas(db, paciente_id)
+        if not consultas:
+            raise HTTPException(status_code=400, detail="Paciente não possui consultas. Crie uma consulta primeiro.")
+        consulta_id = consultas[0]['id']
+    
     return crud.criar_orientacao(db, orientacao_data, consulta_id)
 
 @app.get("/pacientes/{paciente_id}/ficha-completa", response_model=schemas.FichaCompletaResponse, tags=["Ficha do Paciente"])
