@@ -5192,7 +5192,9 @@ def criar_tarefa(db: firestore.client, paciente_id: str, negocio_id: str, tarefa
     
     return tarefa_dict
 
-def listar_tarefas_por_paciente(db: firestore.client, paciente_id: str, status: Optional[StatusTarefaEnum]) -> List[Dict]:
+# Em crud.py, substitua esta função
+
+def listar_tarefas_por_paciente(db: firestore.client, paciente_id: str, status: Optional[schemas.StatusTarefaEnum]) -> List[Dict]:
     """Lista tarefas de um paciente, com filtro opcional por status."""
     query = db.collection('tarefas_essenciais').where('pacienteId', '==', paciente_id).order_by('dataHoraLimite', direction=firestore.Query.ASCENDING)
     
