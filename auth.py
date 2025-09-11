@@ -316,6 +316,39 @@ def get_current_medico_user(
         )
     return current_user
 
+def get_admin_or_profissional_autorizado_paciente(
+    paciente_id: str = Path(..., description="ID do paciente cujos dados estão sendo modificados."),
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db = Depends(get_db)
+) -> schemas.UsuarioProfile:
+    """
+    Dependência de segurança restritiva para operações de escrita no plano de cuidado.
+    Permite acesso apenas a administradores e profissionais (enfermeiros).
+    BLOQUEIA O ACESSO DE TÉCNICOS para operações de escrita.
+    """
+    # Busca o documento completo do paciente para obter o negócio
+    paciente_doc_ref = db.collection('usuarios').document(paciente_id)
+    paciente_doc = paciente_doc_ref.get()
+    if not paciente_doc.exists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paciente não encontrado.")
+    
+    paciente_data = paciente_doc.to_dict()
+    
+    # Extrai o negocio_id do paciente
+    negocio_id_paciente = list(paciente_data.get('roles', {}).keys())[0] if paciente_data.get('roles') else None
+    if not negocio_id_paciente:
+         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Paciente não está associado a uma clínica.")
+
+    # Verifica se o usuário tem role de admin ou profissional no negócio do paciente
+    user_role = current_user.roles.get(negocio_id_paciente)
+    if user_role not in ["admin", "profissional"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado: apenas administradores e profissionais podem modificar o plano de cuidado."
+        )
+    
+    return current_user
+
 def get_relatorio_autorizado(
     relatorio_id: str = Path(..., description="ID do relatório a ser acessado."),
     current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),

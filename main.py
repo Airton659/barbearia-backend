@@ -16,7 +16,8 @@ from auth import (
     get_current_profissional_user, get_optional_current_user_firebase,
     validate_negocio_id, validate_path_negocio_id, get_paciente_autorizado,
     get_current_admin_or_profissional_user, get_current_tecnico_user,
-    get_paciente_autorizado_anamnese, get_current_medico_user, get_relatorio_autorizado # <<<--- ADICIONE AQUI
+    get_paciente_autorizado_anamnese, get_current_medico_user, get_relatorio_autorizado,
+    get_admin_or_profissional_autorizado_paciente
 )
 from firebase_admin import firestore
 from pydantic import BaseModel
@@ -385,7 +386,7 @@ def vincular_ou_desvincular_supervisor( # Nome alterado para clareza
 def adicionar_consulta(
     paciente_id: str,
     consulta_data: schemas.ConsultaCreate,
-    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    current_user: schemas.UsuarioProfile = Depends(get_admin_or_profissional_autorizado_paciente),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Adiciona uma nova consulta à ficha do paciente."""
@@ -415,7 +416,7 @@ def adicionar_exame(
 def adicionar_medicacao(
     paciente_id: str,
     medicacao_data: schemas.MedicacaoCreate,
-    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    current_user: schemas.UsuarioProfile = Depends(get_admin_or_profissional_autorizado_paciente),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Adiciona uma nova medicação à ficha do paciente."""
@@ -427,7 +428,7 @@ def adicionar_medicacao(
 def adicionar_checklist_item(
     paciente_id: str,
     item_data: schemas.ChecklistItemCreate,
-    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    current_user: schemas.UsuarioProfile = Depends(get_admin_or_profissional_autorizado_paciente),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Adiciona um novo item ao checklist do paciente."""
@@ -439,7 +440,7 @@ def adicionar_checklist_item(
 def adicionar_orientacao(
     paciente_id: str,
     orientacao_data: schemas.OrientacaoCreate,
-    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    current_user: schemas.UsuarioProfile = Depends(get_admin_or_profissional_autorizado_paciente),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Adiciona uma nova orientação à ficha do paciente."""
@@ -537,7 +538,7 @@ def update_consulta(
     paciente_id: str,
     consulta_id: str,
     update_data: schemas.ConsultaUpdate,
-    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    current_user: schemas.UsuarioProfile = Depends(get_admin_or_profissional_autorizado_paciente),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Atualiza uma consulta na ficha do paciente."""
@@ -550,7 +551,7 @@ def update_consulta(
 def delete_consulta(
     paciente_id: str,
     consulta_id: str,
-    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    current_user: schemas.UsuarioProfile = Depends(get_admin_or_profissional_autorizado_paciente),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Deleta uma consulta da ficha do paciente."""
@@ -594,7 +595,7 @@ def update_medicacao(
     paciente_id: str,
     medicacao_id: str,
     update_data: schemas.MedicacaoUpdate,
-    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    current_user: schemas.UsuarioProfile = Depends(get_admin_or_profissional_autorizado_paciente),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Atualiza uma medicação na ficha do paciente."""
@@ -607,7 +608,7 @@ def update_medicacao(
 def delete_medicacao(
     paciente_id: str,
     medicacao_id: str,
-    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    current_user: schemas.UsuarioProfile = Depends(get_admin_or_profissional_autorizado_paciente),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Deleta uma medicação da ficha do paciente."""
@@ -620,7 +621,7 @@ def update_checklist_item(
     paciente_id: str,
     item_id: str,
     update_data: schemas.ChecklistItemUpdate,
-    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    current_user: schemas.UsuarioProfile = Depends(get_admin_or_profissional_autorizado_paciente),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Atualiza um item do checklist na ficha do paciente."""
@@ -633,7 +634,7 @@ def update_checklist_item(
 def delete_checklist_item(
     paciente_id: str,
     item_id: str,
-    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    current_user: schemas.UsuarioProfile = Depends(get_admin_or_profissional_autorizado_paciente),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Deleta um item do checklist da ficha do paciente."""
@@ -646,7 +647,7 @@ def update_orientacao(
     paciente_id: str,
     orientacao_id: str,
     update_data: schemas.OrientacaoUpdate,
-    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    current_user: schemas.UsuarioProfile = Depends(get_admin_or_profissional_autorizado_paciente),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Atualiza uma orientação na ficha do paciente."""
@@ -659,7 +660,7 @@ def update_orientacao(
 def delete_orientacao(
     paciente_id: str,
     orientacao_id: str,
-    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    current_user: schemas.UsuarioProfile = Depends(get_admin_or_profissional_autorizado_paciente),
     db: firestore.client = Depends(get_db)
 ):
     """(Autorizado) Deleta uma orientação da ficha do paciente."""
@@ -682,6 +683,10 @@ def criar_registro_diario(
     if registro_data.negocio_id not in tecnico.roles or tecnico.roles.get(registro_data.negocio_id) != 'tecnico':
         raise HTTPException(status_code=403, detail="Acesso negado: você não é um técnico deste negócio.")
     
+    leitura_confirmada_status = crud.verificar_leitura_plano_do_dia(db, paciente_id, tecnico.id, date.today())
+    if not leitura_confirmada_status.get("leitura_confirmada"):
+        raise HTTPException(status_code=403, detail="Leitura do Plano Ativo pendente para hoje.")
+    
     registro_data.paciente_id = paciente_id
     return crud.criar_registro_diario(db, registro_data, tecnico)
 
@@ -703,6 +708,10 @@ def update_registro_diario(
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Atualiza um de seus registros de acompanhamento."""
+    leitura_confirmada_status = crud.verificar_leitura_plano_do_dia(db, paciente_id, tecnico.id, date.today())
+    if not leitura_confirmada_status.get("leitura_confirmada"):
+        raise HTTPException(status_code=403, detail="Leitura do Plano Ativo pendente para hoje.")
+    
     try:
         registro_atualizado = crud.update_registro_diario(db, paciente_id, registro_id, update_data, tecnico.id)
         if not registro_atualizado:
@@ -745,6 +754,10 @@ def criar_registro_diario_estruturado_endpoint(
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Adiciona um novo registro estruturado ao diário de acompanhamento."""
+    leitura_confirmada_status = crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, date.today())
+    if not leitura_confirmada_status.get("leitura_confirmada"):
+        raise HTTPException(status_code=403, detail="Leitura do Plano Ativo pendente para hoje.")
+    
     # O paciente_id já é esperado no corpo da requisição conforme o schema corrigido.
     if registro_data.paciente_id != paciente_id:
         raise HTTPException(status_code=400, detail="ID do paciente na URL e no corpo da requisição não correspondem.")
@@ -776,6 +789,10 @@ def atualizar_registro_diario_estruturado_endpoint(
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Atualiza um de seus registros diários estruturados."""
+    leitura_confirmada_status = crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, date.today())
+    if not leitura_confirmada_status.get("leitura_confirmada"):
+        raise HTTPException(status_code=403, detail="Leitura do Plano Ativo pendente para hoje.")
+    
     try:
         registro_atualizado = crud.atualizar_registro_diario_estruturado(db, paciente_id, registro_id, update_data, current_user.id)
         if not registro_atualizado:

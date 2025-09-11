@@ -2240,36 +2240,37 @@ def _dedup_checklist_items(itens: List[Dict]) -> List[Dict]:
 
 def get_ficha_completa_paciente(db: firestore.client, paciente_id: str, consulta_id: Optional[str] = None) -> Dict:
     """
-    Retorna um dicionário com os dados da ficha do paciente (sem exames),
+    Retorna um dicionário com os dados da ficha do paciente,
     filtrando para mostrar apenas o "Plano Ativo" (o mais recente).
     """
-    # 1. Encontra a última consulta do paciente
+    # 1. Encontra a última consulta do paciente.
     consultas = listar_consultas(db, paciente_id)
-    # Se um consulta_id específico for informado, usar direto
+    
+    # Se um consulta_id específico for informado, usa ele.
     if consulta_id:
         ultima_consulta_id = consulta_id
     else:
+        # Se não, OBRIGATORIAMENTE usa o ID da mais recente.
         if not consultas:
-            # Se não houver consultas, não há plano ativo.
+            # Se não há consultas, retorna tudo vazio.
             return {
-                "consultas": [],
-                "medicacoes": [],
-                "checklist": [],
-                "orientacoes": [],
+                "consultas": [], "medicacoes": [],
+                "checklist": [], "orientacoes": [],
             }
-        # 2. Obtém o ID da última consulta
+        # 2. Pega o ID da última consulta (a primeira da lista ordenada).
         ultima_consulta_id = consultas[0]['id']
 
+    # 3. Usa o ID da última consulta para buscar todos os itens relacionados.
     ficha = {
         "consultas": consultas,
         "medicacoes": listar_medicacoes(db, paciente_id, consulta_id=ultima_consulta_id),
         "checklist": listar_checklist(db, paciente_id, consulta_id=ultima_consulta_id),
         "orientacoes": listar_orientacoes(db, paciente_id, consulta_id=ultima_consulta_id),
     }
-    # Garantir checklist sem duplicatas (modelo + diário)
+    
+    # Garante que o checklist não tenha itens duplicados.
     ficha['checklist'] = _dedup_checklist_items(ficha.get('checklist', []))
     return ficha
-
 
 # =================================================================================
 # FUNÇÕES DE UPDATE/DELETE DA FICHA DO PACIENTE
