@@ -19,7 +19,7 @@ from auth import (
     get_paciente_autorizado_anamnese, get_current_medico_user, get_relatorio_autorizado,
     get_admin_or_profissional_autorizado_paciente
 )
-from firebase_admin import firestore
+from firebase_admin import firestore, messaging
 from pydantic import BaseModel
 from google.cloud import storage
 from PIL import Image
@@ -2403,9 +2403,62 @@ def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
                 tarefa_doc = tarefa_ref.get()
                 
                 if tarefa_doc.exists and not tarefa_doc.to_dict().get('foiConcluida', False):
-                    # Tarefa ainda não foi concluída - simular notificação
-                    logger.info(f"Tarefa {tarefa_id} está atrasada - processando notificação")
-                    stats["total_notificadas"] += 1
+                    # Tarefa ainda não foi concluída - enviar notificação
+                    try:
+                        tarefa_data = tarefa_doc.to_dict()
+                        criador_id = dados.get('criadoPorId')
+                        paciente_id = dados.get('pacienteId')
+                        
+                        if criador_id and paciente_id:
+                            # Buscar dados do criador
+                            criador_doc = db.collection('usuarios').document(criador_id).get()
+                            if criador_doc.exists:
+                                criador_data = criador_doc.to_dict()
+                                tokens_fcm = criador_data.get('fcm_tokens', [])
+                                
+                                # Conteúdo da notificação
+                                titulo = "Alerta: Tarefa Atrasada!"
+                                descricao = tarefa_data.get('descricao', 'Tarefa')
+                                corpo = f"A tarefa '{descricao[:30]}...' não foi concluída até o prazo final."
+                                
+                                # Persistir notificação no banco
+                                db.collection('usuarios').document(criador_id).collection('notificacoes').add({
+                                    "title": titulo,
+                                    "body": corpo,
+                                    "tipo": "TAREFA_ATRASADA",
+                                    "relacionado": {"tarefa_id": tarefa_id, "paciente_id": paciente_id},
+                                    "lida": False,
+                                    "data_criacao": firestore.SERVER_TIMESTAMP,
+                                    "dedupe_key": f"TAREFA_ATRASADA_{tarefa_id}"
+                                })
+                                
+                                # Enviar push notification (se há tokens FCM)
+                                if tokens_fcm:
+                                    data_payload = {
+                                        "tipo": "TAREFA_ATRASADA",
+                                        "tarefa_id": tarefa_id,
+                                        "paciente_id": paciente_id,
+                                        "title": titulo,
+                                        "body": corpo
+                                    }
+                                    # Simplificado: enviar apenas para o primeiro token
+                                    if tokens_fcm and len(tokens_fcm) > 0:
+                                        try:
+                                            message = messaging.Message(
+                                                data=data_payload,
+                                                token=tokens_fcm[0]
+                                            )
+                                            messaging.send(message)
+                                            logger.info(f"Push enviado para tarefa {tarefa_id}")
+                                        except Exception as push_e:
+                                            logger.warning(f"Erro ao enviar push: {push_e}")
+                                
+                                stats["total_notificadas"] += 1
+                                logger.info(f"Notificação enviada para tarefa {tarefa_id}")
+                            
+                    except Exception as notif_e:
+                        logger.error(f"Erro ao notificar tarefa {tarefa_id}: {notif_e}")
+                        # Não incrementar erro pois a tarefa principal foi processada
                 
                 # Marcar como processado
                 doc_verificacao.reference.update({"status": "processado"})
