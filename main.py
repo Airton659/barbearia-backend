@@ -2375,11 +2375,40 @@ def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
         now = datetime.now(timezone.utc)
         logger.info(f"Iniciando processamento de tarefas atrasadas - {now}")
         
-        # 1. Buscar tarefas a verificar que estão pendentes e vencidas
+        # 1. Buscar tarefas a verificar pendentes (sem filtro de data para evitar índice composto)
         verificacao_ref = db.collection('tarefas_a_verificar')
-        query = verificacao_ref.where('status', '==', 'pendente').where('dataHoraLimite', '<=', now)
+        query = verificacao_ref.where('status', '==', 'pendente')
         
-        tarefas_para_verificar = list(query.stream())
+        todas_pendentes = list(query.stream())
+        logger.info(f"Encontradas {len(todas_pendentes)} tarefas pendentes")
+        
+        # 2. Filtrar manualmente por data vencida (com debug de timezone)
+        tarefas_para_verificar = []
+        for doc in todas_pendentes:
+            data = doc.to_dict()
+            data_limite = data.get('dataHoraLimite')
+            
+            if data_limite:
+                # Debug timezone
+                logger.info(f"Comparando: now={now} vs data_limite={data_limite} (tarefa {data.get('tarefaId')})")
+                
+                # Converter ambos para UTC se necessário
+                if hasattr(data_limite, 'replace'):
+                    # Se data_limite tem timezone, garantir que seja UTC
+                    if data_limite.tzinfo is None:
+                        data_limite = data_limite.replace(tzinfo=timezone.utc)
+                    else:
+                        data_limite = data_limite.astimezone(timezone.utc)
+                
+                # Comparar
+                if data_limite <= now:
+                    logger.info(f"Tarefa {data.get('tarefaId')} está vencida")
+                    tarefas_para_verificar.append(doc)
+                else:
+                    logger.info(f"Tarefa {data.get('tarefaId')} ainda não venceu")
+            else:
+                logger.warning(f"Tarefa {data.get('tarefaId')} sem dataHoraLimite")
+        
         stats["total_verificadas"] = len(tarefas_para_verificar)
         
         logger.info(f"Encontradas {len(tarefas_para_verificar)} tarefas para verificar")
