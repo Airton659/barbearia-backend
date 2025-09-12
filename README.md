@@ -1,6 +1,6 @@
 # 🏥📱 API de Gestão Clínica - Backend (v3.0)
 
-**Atualizado em:** 2025-01-10
+**Atualizado em:** 2025-09-12
 
 ⚠️ **IMPORTANTE: RESTAURAÇÃO PARA ARQUITETURA ORIGINAL**
 
@@ -415,9 +415,83 @@ POST   /notificacoes/marcar-como-lida              # Marcar específica como lid
 POST   /notificacoes/agendar                       # Agendar notificação
 ```
 
+### Sistema de Tarefas Atrasadas (Cloud Scheduler)
+```http
+POST   /tasks/process-overdue-v2                   # Processar tarefas atrasadas (Cloud Scheduler)
+GET    /tasks/debug-verificacao                    # Debug: verificar coleção de tarefas
+POST   /tasks/process-overdue-debug                # Endpoint de debug simples
+```
+
 ---
 
-## **🛠️ 11. UTILITÁRIOS**
+## **⏰ 11. SISTEMA DE TAREFAS ESSENCIAIS**
+
+### Tarefas Essenciais (Plano de Ação)
+```http
+POST   /pacientes/{id}/tarefas                     # Criar tarefa essencial
+GET    /pacientes/{id}/tarefas                     # Listar tarefas por status
+PATCH  /pacientes/{id}/tarefas/{id}/concluir       # Marcar tarefa como concluída
+DELETE /pacientes/{id}/tarefas/{id}                # Deletar tarefa
+```
+
+### Sistema de Notificações Automáticas
+O sistema implementa **notificações automáticas** para tarefas não concluídas no prazo:
+
+#### **🔄 Fluxo Automático:**
+1. **Enfermeiro** cria tarefa com prazo para **Técnico**
+2. **Sistema** agenda verificação automática na coleção `tarefas_a_verificar`
+3. **Cloud Scheduler** executa job a cada 10 minutos (`/tasks/process-overdue-v2`)
+4. **Sistema** detecta tarefas vencidas e não concluídas
+5. **Sistema** envia notificação push + in-app para o **Enfermeiro**
+
+#### **⚙️ Configuração Cloud Scheduler:**
+```yaml
+Nome: Tarefas_atrasadas
+Frequência: */10 * * * *  # A cada 10 minutos
+Método: POST
+URL: https://barbearia-backend-service-862082955632.southamerica-east1.run.app/tasks/process-overdue-v2
+```
+
+#### **📊 Estrutura de Dados:**
+```javascript
+// Coleção: tarefas_essenciais
+{
+  id: "task_id",
+  pacienteId: "patient_id", 
+  descricao: "Administrar medicação X",
+  dataHoraLimite: "2025-09-12T14:30:00Z",
+  foiConcluida: false,
+  criadoPorId: "enfermeiro_id",
+  executadoPorId: null,  // técnico responsável
+  dataConclusao: null
+}
+
+// Coleção: tarefas_a_verificar (automático)
+{
+  tarefaId: "task_id",
+  pacienteId: "patient_id",
+  criadoPorId: "enfermeiro_id", 
+  dataHoraLimite: "2025-09-12T14:30:00Z",
+  status: "pendente"  // "processado" após notificação
+}
+```
+
+#### **🔍 Endpoints de Debug:**
+```http
+GET    /tasks/debug-verificacao                    # Verificar coleção tarefas_a_verificar
+POST   /tasks/process-overdue-debug                # Endpoint de teste simples
+```
+
+#### **✅ Correções Implementadas:**
+- ✅ **Problema de índice Firestore**: Query composta substituída por filtro manual
+- ✅ **Problema de timezone**: Conversão correta UTC para comparação de datas
+- ✅ **Notificações funcionais**: Push + in-app salvos no Firestore
+- ✅ **Logging detalhado**: Debug completo do processo de verificação
+- ✅ **Tratamento robusto de erros**: Falhas não interrompem processamento
+
+---
+
+## **🛠️ 12. UTILITÁRIOS**
 
 ### Upload de Arquivos
 ```http
@@ -443,7 +517,7 @@ GET    /pacientes/{id}/confirmar-leitura/status    # Status das confirmações
 
 ---
 
-## **📁 12. ARQUIVOS ESTÁTICOS**
+## **📁 13. ARQUIVOS ESTÁTICOS**
 
 ### Servir Arquivos
 ```http
