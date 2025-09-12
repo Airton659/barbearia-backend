@@ -5493,9 +5493,17 @@ def _notificar_tarefa_atrasada(db: firestore.client, tarefa_a_verificar: Dict):
         criador_data = criador_doc.to_dict()
         tokens_fcm = criador_data.get('fcm_tokens', [])
         
-        # Buscar nome do paciente
-        paciente_doc = db.collection('usuarios').document(paciente_id).get()
-        nome_paciente = decrypt_data(paciente_doc.to_dict().get('nome', '')) if paciente_doc.exists else "o paciente"
+        # Buscar nome do paciente com tratamento de erro
+        try:
+            paciente_doc = db.collection('usuarios').document(paciente_id).get()
+            if paciente_doc.exists:
+                nome_raw = paciente_doc.to_dict().get('nome', '')
+                nome_paciente = decrypt_data(nome_raw) if nome_raw else "o paciente"
+            else:
+                nome_paciente = "o paciente"
+        except Exception as e:
+            logger.warning(f"Erro ao buscar nome do paciente {paciente_id}: {e}")
+            nome_paciente = "o paciente"
 
         # Conteúdo
         titulo = "Alerta: Tarefa Atrasada!"

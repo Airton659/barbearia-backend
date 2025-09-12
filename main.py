@@ -2296,5 +2296,33 @@ def process_overdue_tasks(db: firestore.client = Depends(get_db)):
     (PÚBLICO - CHAMADO PELO CLOUD SCHEDULER) Processa tarefas atrasadas
     e envia as notificações necessárias.
     """
-    resultado = crud.processar_tarefas_atrasadas(db)
-    return resultado
+    try:
+        resultado = crud.processar_tarefas_atrasadas(db)
+        return resultado
+    except Exception as e:
+        import traceback
+        logger.error(f"Erro no endpoint process_overdue_tasks: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
+
+
+@app.post("/tasks/process-overdue-debug", tags=["Jobs Agendados"])
+def process_overdue_tasks_debug():
+    """
+    Endpoint de debug para testar sem dependências do Firestore
+    """
+    try:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        return {
+            "status": "success",
+            "timestamp": now.isoformat(),
+            "message": "Endpoint funcional"
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "status": "error", 
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
