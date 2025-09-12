@@ -2326,3 +2326,70 @@ def process_overdue_tasks_debug():
             "error": str(e),
             "traceback": traceback.format_exc()
         }
+
+
+@app.post("/tasks/process-overdue-v2", response_model=schemas.ProcessarTarefasResponse, tags=["Jobs Agendados"])
+def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
+    """
+    (VERSÃO ALTERNATIVA - PÚBLICO) Processa tarefas atrasadas com lógica simplificada
+    """
+    from datetime import datetime, timezone
+    
+    stats = {"total_verificadas": 0, "total_notificadas": 0, "erros": 0}
+    
+    try:
+        # Data atual com timezone UTC
+        now = datetime.now(timezone.utc)
+        logger.info(f"Iniciando processamento de tarefas atrasadas - {now}")
+        
+        # 1. Buscar tarefas a verificar que estão pendentes e vencidas
+        verificacao_ref = db.collection('tarefas_a_verificar')
+        query = verificacao_ref.where('status', '==', 'pendente').where('dataHoraLimite', '<=', now)
+        
+        tarefas_para_verificar = list(query.stream())
+        stats["total_verificadas"] = len(tarefas_para_verificar)
+        
+        logger.info(f"Encontradas {len(tarefas_para_verificar)} tarefas para verificar")
+        
+        if not tarefas_para_verificar:
+            logger.info("Nenhuma tarefa atrasada encontrada")
+            return stats
+
+        # 2. Processar cada tarefa
+        for doc_verificacao in tarefas_para_verificar:
+            try:
+                dados = doc_verificacao.to_dict()
+                tarefa_id = dados.get('tarefaId')
+                
+                if not tarefa_id:
+                    logger.warning(f"Documento sem tarefaId: {doc_verificacao.id}")
+                    continue
+                
+                # Verificar se tarefa original ainda não foi concluída
+                tarefa_ref = db.collection('tarefas_essenciais').document(tarefa_id)
+                tarefa_doc = tarefa_ref.get()
+                
+                if tarefa_doc.exists and not tarefa_doc.to_dict().get('foiConcluida', False):
+                    # Tarefa ainda não foi concluída - simular notificação
+                    logger.info(f"Tarefa {tarefa_id} está atrasada - processando notificação")
+                    stats["total_notificadas"] += 1
+                
+                # Marcar como processado
+                doc_verificacao.reference.update({"status": "processado"})
+                
+            except Exception as e:
+                stats["erros"] += 1
+                logger.error(f"Erro ao processar tarefa individual: {e}")
+                # Marcar como erro
+                try:
+                    doc_verificacao.reference.update({"status": "erro", "mensagem_erro": str(e)})
+                except:
+                    pass
+
+        logger.info(f"Processamento concluído: {stats}")
+        return stats
+        
+    except Exception as e:
+        logger.error(f"Erro geral no processamento: {e}")
+        stats["erros"] += 1
+        return stats
