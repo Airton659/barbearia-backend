@@ -2287,3 +2287,14 @@ def update_my_consent(
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
         
     return usuario_atualizado
+
+# Em main.py, adicione este endpoint
+
+@app.post("/tasks/process-overdue", response_model=schemas.ProcessarTarefasResponse, tags=["Jobs Agendados"])
+def process_overdue_tasks(db: firestore.client = Depends(get_db)):
+    """
+    (PÚBLICO - CHAMADO PELO CLOUD SCHEDULER) Processa tarefas atrasadas
+    e envia as notificações necessárias.
+    """
+    resultado = crud.processar_tarefas_atrasadas(db)
+    return resultado

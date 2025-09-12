@@ -5463,3 +5463,111 @@ def _notificar_tarefa_concluida(db: firestore.client, tarefa: Dict):
 
     except Exception as e:
         logger.error(f"Erro ao notificar tarefa concluída: {e}")
+
+
+
+# Em crud.py, adicione esta função de notificação
+
+def _notificar_tarefa_atrasada(db: firestore.client, tarefa_a_verificar: Dict):
+    """Notifica o criador sobre uma tarefa que não foi concluída no prazo."""
+    try:
+        criador_id = tarefa_a_verificar.get('criadoPorId')
+        paciente_id = tarefa_a_verificar.get('pacienteId')
+        tarefa_id = tarefa_a_verificar.get('tarefaId')
+
+        if not all([criador_id, paciente_id, tarefa_id]):
+            logger.warning("Dados insuficientes no registro de verificação para notificar atraso.")
+            return
+
+        # Buscar a descrição da tarefa original
+        tarefa_doc = db.collection('tarefas_essenciais').document(tarefa_id).get()
+        if not tarefa_doc.exists:
+            logger.error(f"Tarefa original {tarefa_id} não encontrada para notificação de atraso.")
+            return
+        
+        descricao_tarefa = tarefa_doc.to_dict().get('descricao', 'Nome da tarefa não encontrado')
+        
+        # Buscar dados do criador (destinatário)
+        criador_doc = db.collection('usuarios').document(criador_id).get()
+        if not criador_doc.exists:
+            return
+        criador_data = criador_doc.to_dict()
+        tokens_fcm = criador_data.get('fcm_tokens', [])
+        
+        # Buscar nome do paciente
+        paciente_doc = db.collection('usuarios').document(paciente_id).get()
+        nome_paciente = decrypt_data(paciente_doc.to_dict().get('nome', '')) if paciente_doc.exists else "o paciente"
+
+        # Conteúdo
+        titulo = "Alerta: Tarefa Atrasada!"
+        corpo = f"A tarefa '{descricao_tarefa[:30]}...' para o paciente {nome_paciente} não foi concluída até o prazo final."
+        
+        data_payload = {
+            "tipo": "TAREFA_ATRASADA",
+            "tarefa_id": tarefa_id,
+            "paciente_id": paciente_id,
+            "title": titulo, "body": corpo
+        }
+
+        # Persistir notificação
+        db.collection('usuarios').document(criador_id).collection('notificacoes').add({
+            "title": titulo, "body": corpo, "tipo": "TAREFA_ATRASADA",
+            "relacionado": { "tarefa_id": tarefa_id, "paciente_id": paciente_id },
+            "lida": False, "data_criacao": firestore.SERVER_TIMESTAMP,
+            "dedupe_key": f"TAREFA_ATRASADA_{tarefa_id}"
+        })
+
+        # Enviar Push
+        if tokens_fcm:
+            _send_data_push_to_tokens(db, criador_data.get('firebase_uid'), tokens_fcm, data_payload, "[Tarefa Atrasada]")
+            logger.info(f"Notificação de tarefa atrasada ({tarefa_id}) enviada para {criador_id}.")
+
+    except Exception as e:
+        logger.error(f"Erro ao notificar tarefa atrasada: {e}")
+
+# Em crud.py, adicione esta função de processamento
+
+def processar_tarefas_atrasadas(db: firestore.client) -> Dict:
+    """
+    Busca e processa tarefas cuja data limite já passou e que ainda não foram concluídas.
+    Esta função é projetada para ser chamada por um job agendado (Cloud Scheduler).
+    """
+    stats = {"total_verificadas": 0, "total_notificadas": 0, "erros": 0}
+    now = datetime.utcnow().replace(tzinfo=timezone.utc)
+    
+    # 1. Busca registros de verificação que estão pendentes e cujo prazo já venceu
+    verificacao_ref = db.collection('tarefas_a_verificar')
+    query = verificacao_ref.where('status', '==', 'pendente').where('dataHoraLimite', '<=', now)
+    
+    tarefas_para_verificar = list(query.stream())
+    stats["total_verificadas"] = len(tarefas_para_verificar)
+    
+    if not tarefas_para_verificar:
+        logger.info("Nenhuma tarefa atrasada para processar.")
+        return stats
+
+    for doc_verificacao in tarefas_para_verificar:
+        try:
+            dados_verificacao = doc_verificacao.to_dict()
+            tarefa_id = dados_verificacao.get('tarefaId')
+
+            # 2. Verifica o status atual da tarefa original
+            tarefa_ref = db.collection('tarefas_essenciais').document(tarefa_id)
+            tarefa_doc = tarefa_ref.get()
+
+            if tarefa_doc.exists and not tarefa_doc.to_dict().get('foiConcluida'):
+                # 3. Se não foi concluída, dispara a notificação
+                _notificar_tarefa_atrasada(db, dados_verificacao)
+                stats["total_notificadas"] += 1
+            
+            # 4. Marca o registro como processado para não notificar novamente
+            doc_verificacao.reference.update({"status": "processado"})
+
+        except Exception as e:
+            stats["erros"] += 1
+            logger.error(f"Erro ao processar verificação da tarefa {doc_verificacao.id}: {e}")
+            # Marca como erro para possível re-tentativa manual
+            doc_verificacao.reference.update({"status": "erro", "mensagem_erro": str(e)})
+
+    logger.info(f"Processamento de tarefas atrasadas concluído: {stats}")
+    return stats

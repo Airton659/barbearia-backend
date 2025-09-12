@@ -895,5 +895,10 @@ class TarefaAgendadaResponse(TarefaAgendadaBase):
     foiConcluida: bool
     dataConclusao: Optional[datetime] = None
 
+class ProcessarTarefasResponse(BaseModel):
+    total_verificadas: int
+    total_notificadas: int
+    erros: int
+
 ProfissionalResponse.model_rebuild()
 DiarioTecnicoResponse.model_rebuild()
