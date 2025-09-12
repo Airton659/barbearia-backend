@@ -1,7 +1,7 @@
 # barbearia-backend/crud.py
 
 import schemas
-from datetime import datetime, date, time, timedelta
+from datetime import datetime, date, time, timedelta, timezone
 from typing import Optional, List, Dict, Union
 from crypto_utils import encrypt_data, decrypt_data
 
@@ -5203,7 +5203,6 @@ def listar_tarefas_por_paciente(db: firestore.client, paciente_id: str, status: 
     tarefas = []
     # --- INÍCIO DA CORREÇÃO ---
     # Adiciona o fuso horário UTC à data atual para garantir uma comparação justa
-    from datetime import timezone
     now = datetime.now(timezone.utc)
     # --- FIM DA CORREÇÃO ---
     
@@ -5538,7 +5537,6 @@ def processar_tarefas_atrasadas(db: firestore.client) -> Dict:
     
     # --- INÍCIO DA CORREÇÃO ---
     # Garante que a data/hora atual tenha o fuso horário UTC para comparação
-    from datetime import timezone
     now = datetime.now(timezone.utc)
     # --- FIM DA CORREÇÃO ---
     
