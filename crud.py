@@ -5527,6 +5527,8 @@ def _notificar_tarefa_atrasada(db: firestore.client, tarefa_a_verificar: Dict):
 
 # Em crud.py, substitua esta função
 
+# Em crud.py, substitua esta função
+
 def processar_tarefas_atrasadas(db: firestore.client) -> Dict:
     """
     Busca e processa tarefas cuja data limite já passou e que ainda não foram concluídas.
