@@ -2296,14 +2296,47 @@ def process_overdue_tasks(db: firestore.client = Depends(get_db)):
     (PÚBLICO - CHAMADO PELO CLOUD SCHEDULER) Processa tarefas atrasadas
     e envia as notificações necessárias.
     """
+    from datetime import datetime, timezone
+    
+    stats = {"total_verificadas": 0, "total_notificadas": 0, "erros": 0}
+    
     try:
-        resultado = crud.processar_tarefas_atrasadas(db)
-        return resultado
+        now = datetime.now(timezone.utc)
+        logger.info(f"[SCHEDULER] Iniciando processamento - {now}")
+        
+        verificacao_ref = db.collection('tarefas_a_verificar')
+        query = verificacao_ref.where('status', '==', 'pendente').where('dataHoraLimite', '<=', now)
+        
+        tarefas_para_verificar = list(query.stream())
+        stats["total_verificadas"] = len(tarefas_para_verificar)
+        
+        logger.info(f"[SCHEDULER] Encontradas {len(tarefas_para_verificar)} tarefas")
+        
+        for doc_verificacao in tarefas_para_verificar:
+            try:
+                dados = doc_verificacao.to_dict()
+                tarefa_id = dados.get('tarefaId')
+                
+                if tarefa_id:
+                    tarefa_ref = db.collection('tarefas_essenciais').document(tarefa_id)
+                    tarefa_doc = tarefa_ref.get()
+                    
+                    if tarefa_doc.exists and not tarefa_doc.to_dict().get('foiConcluida', False):
+                        stats["total_notificadas"] += 1
+                
+                doc_verificacao.reference.update({"status": "processado"})
+                
+            except Exception as e:
+                stats["erros"] += 1
+                logger.error(f"[SCHEDULER] Erro individual: {e}")
+
+        logger.info(f"[SCHEDULER] Concluído: {stats}")
+        return stats
+        
     except Exception as e:
-        import traceback
-        logger.error(f"Erro no endpoint process_overdue_tasks: {e}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
+        logger.error(f"[SCHEDULER] Erro geral: {e}")
+        stats["erros"] += 1
+        return stats
 
 
 @app.post("/tasks/process-overdue-debug", tags=["Jobs Agendados"])
@@ -2393,3 +2426,45 @@ def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
         logger.error(f"Erro geral no processamento: {e}")
         stats["erros"] += 1
         return stats
+
+
+@app.get("/tasks/debug-verificacao", tags=["Jobs Agendados"])
+def debug_verificacao(db: firestore.client = Depends(get_db)):
+    """Debug: Mostra o que há na coleção tarefas_a_verificar"""
+    from datetime import datetime, timezone
+    
+    try:
+        now = datetime.now(timezone.utc)
+        
+        # Buscar TODOS os documentos (sem filtro)
+        verificacao_ref = db.collection('tarefas_a_verificar')
+        todos_docs = list(verificacao_ref.stream())
+        
+        # Buscar apenas pendentes
+        pendentes = list(verificacao_ref.where('status', '==', 'pendente').stream())
+        
+        # Buscar pendentes vencidos
+        vencidos = list(verificacao_ref.where('status', '==', 'pendente').where('dataHoraLimite', '<=', now).stream())
+        
+        resultado = {
+            "timestamp_atual": now.isoformat(),
+            "total_documentos": len(todos_docs),
+            "total_pendentes": len(pendentes), 
+            "total_vencidos": len(vencidos),
+            "documentos": []
+        }
+        
+        for doc in todos_docs[:10]:  # Primeiros 10 para debug
+            data = doc.to_dict()
+            resultado["documentos"].append({
+                "id": doc.id,
+                "tarefaId": data.get('tarefaId'),
+                "status": data.get('status'),
+                "dataHoraLimite": data.get('dataHoraLimite').isoformat() if data.get('dataHoraLimite') else None,
+                "vencido": data.get('dataHoraLimite') <= now if data.get('dataHoraLimite') else False
+            })
+            
+        return resultado
+        
+    except Exception as e:
+        return {"erro": str(e)}
