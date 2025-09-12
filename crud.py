@@ -5525,7 +5525,7 @@ def _notificar_tarefa_atrasada(db: firestore.client, tarefa_a_verificar: Dict):
     except Exception as e:
         logger.error(f"Erro ao notificar tarefa atrasada: {e}")
 
-# Em crud.py, adicione esta função de processamento
+# Em crud.py, substitua esta função
 
 def processar_tarefas_atrasadas(db: firestore.client) -> Dict:
     """
@@ -5533,7 +5533,12 @@ def processar_tarefas_atrasadas(db: firestore.client) -> Dict:
     Esta função é projetada para ser chamada por um job agendado (Cloud Scheduler).
     """
     stats = {"total_verificadas": 0, "total_notificadas": 0, "erros": 0}
-    now = datetime.utcnow().replace(tzinfo=timezone.utc)
+    
+    # --- INÍCIO DA CORREÇÃO ---
+    # Garante que a data/hora atual tenha o fuso horário UTC para comparação
+    from datetime import timezone
+    now = datetime.now(timezone.utc)
+    # --- FIM DA CORREÇÃO ---
     
     # 1. Busca registros de verificação que estão pendentes e cujo prazo já venceu
     verificacao_ref = db.collection('tarefas_a_verificar')
