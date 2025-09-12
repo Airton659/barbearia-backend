@@ -5194,12 +5194,18 @@ def criar_tarefa(db: firestore.client, paciente_id: str, negocio_id: str, tarefa
 
 # Em crud.py, substitua esta função
 
+# Em crud.py, substitua esta função
+
 def listar_tarefas_por_paciente(db: firestore.client, paciente_id: str, status: Optional[schemas.StatusTarefaEnum]) -> List[Dict]:
     """Lista tarefas de um paciente, com filtro opcional por status."""
     query = db.collection('tarefas_essenciais').where('pacienteId', '==', paciente_id).order_by('dataHoraLimite', direction=firestore.Query.ASCENDING)
     
     tarefas = []
-    now = datetime.utcnow()
+    # --- INÍCIO DA CORREÇÃO ---
+    # Adiciona o fuso horário UTC à data atual para garantir uma comparação justa
+    from datetime import timezone
+    now = datetime.now(timezone.utc)
+    # --- FIM DA CORREÇÃO ---
     
     user_cache = {}
 
@@ -5209,7 +5215,13 @@ def listar_tarefas_por_paciente(db: firestore.client, paciente_id: str, status: 
         
         # Lógica de filtro de status
         is_concluida = data.get('foiConcluida', False)
-        is_atrasada = not is_concluida and data.get('dataHoraLimite') < now
+        
+        # Garante que a data do Firestore é offset-aware antes de comparar
+        data_limite = data.get('dataHoraLimite')
+        if data_limite and data_limite.tzinfo is None:
+            data_limite = data_limite.replace(tzinfo=timezone.utc)
+
+        is_atrasada = not is_concluida and data_limite < now
 
         if status:
             if status == 'pendente' and (is_concluida or is_atrasada):
