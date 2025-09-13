@@ -992,6 +992,8 @@ def criar_profissional(db: firestore.client, profissional_data: schemas.Profissi
     prof_dict['id'] = doc_ref.id
     return prof_dict
 
+# crud.py
+
 def listar_profissionais_por_negocio(db: firestore.client, negocio_id: str) -> List[Dict]:
     """Lista todos os profissionais ativos de um negócio específico."""
     profissionais = []
@@ -1002,13 +1004,21 @@ def listar_profissionais_por_negocio(db: firestore.client, negocio_id: str) -> L
             prof_data = doc.to_dict()
             prof_data['id'] = doc.id
             
-            # --- INÍCIO DA CORREÇÃO ---
             # Busca o usuário correspondente para obter o e-mail
             usuario_doc = buscar_usuario_por_firebase_uid(db, prof_data.get('usuario_uid'))
             if usuario_doc:
-                prof_data['email'] = usuario_doc.get('email', '') # Adiciona o e-mail ao dicionário
+                prof_data['email'] = usuario_doc.get('email', '')
             else:
-                prof_data['email'] = '' # Garante que o campo sempre exista
+                prof_data['email'] = ''
+
+            # --- INÍCIO DA CORREÇÃO ---
+            # Descriptografa o nome do profissional antes de adicionar à lista
+            if 'nome' in prof_data and prof_data['nome']:
+                try:
+                    prof_data['nome'] = decrypt_data(prof_data['nome'])
+                except Exception as e:
+                    logger.error(f"Erro ao descriptografar nome do profissional {doc.id}: {e}")
+                    prof_data['nome'] = "[Erro na descriptografia]"
             # --- FIM DA CORREÇÃO ---
 
             profissionais.append(prof_data)
@@ -1016,7 +1026,8 @@ def listar_profissionais_por_negocio(db: firestore.client, negocio_id: str) -> L
     except Exception as e:
         logger.error(f"Erro ao listar profissionais para o negocio_id {negocio_id}: {e}")
         return []
-
+    
+    
 def buscar_profissional_por_id(db: firestore.client, profissional_id: str) -> Optional[Dict]:
     """Busca um profissional pelo seu ID de documento."""
     try:
