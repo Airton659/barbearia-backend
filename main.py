@@ -1491,6 +1491,8 @@ def listar_profissionais(
     """Lista todos os profissionais ativos de um negócio específico."""
     return crud.listar_profissionais_por_negocio(db, negocio_id)
 
+# Em main.py
+
 @app.get("/profissionais/{profissional_id}", response_model=schemas.ProfissionalResponse, tags=["Profissionais"])
 def get_profissional_details(
     profissional_id: str,
@@ -1500,7 +1502,26 @@ def get_profissional_details(
     profissional = crud.buscar_profissional_por_id(db, profissional_id)
     if not profissional:
         raise HTTPException(status_code=404, detail="Profissional não encontrado.")
-    
+
+    # --- INÍCIO DA CORREÇÃO ---
+    # Busca os dados do usuário para enriquecer a resposta com e-mail, nome completo, etc.
+    firebase_uid = profissional.get('usuario_uid')
+    if firebase_uid:
+        usuario_doc = crud.buscar_usuario_por_firebase_uid(db, firebase_uid)
+        if usuario_doc:
+            # Garante que os campos obrigatórios e corretos estão na resposta
+            profissional['email'] = usuario_doc.get('email', '')
+            profissional['nome'] = usuario_doc.get('nome', profissional.get('nome')) # Usa o nome completo do usuário
+            profissional['profile_image_url'] = usuario_doc.get('profile_image_url')
+        else:
+            # Fallback para evitar o erro, mesmo que o usuário não seja encontrado
+            profissional['email'] = ''
+            profissional['profile_image_url'] = None
+    else:
+        profissional['email'] = ''
+        profissional['profile_image_url'] = None
+    # --- FIM DA CORREÇÃO ---
+
     servicos = crud.listar_servicos_por_profissional(db, profissional_id)
     profissional['servicos'] = servicos
     
