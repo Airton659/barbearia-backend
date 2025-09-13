@@ -992,42 +992,53 @@ def criar_profissional(db: firestore.client, profissional_data: schemas.Profissi
     prof_dict['id'] = doc_ref.id
     return prof_dict
 
-# crud.py
+# Em crud.py
 
 def listar_profissionais_por_negocio(db: firestore.client, negocio_id: str) -> List[Dict]:
-    """Lista todos os profissionais ativos de um negócio específico."""
+    """Lista todos os profissionais ativos de um negócio específico, enriquecendo com dados do usuário."""
     profissionais = []
     try:
         query = db.collection('profissionais').where('negocio_id', '==', negocio_id).where('ativo', '==', True)
         
         for doc in query.stream():
             prof_data = doc.to_dict()
-            prof_data['id'] = doc.id
-            
-            # Busca o usuário correspondente para obter o e-mail
-            usuario_doc = buscar_usuario_por_firebase_uid(db, prof_data.get('usuario_uid'))
-            if usuario_doc:
-                prof_data['email'] = usuario_doc.get('email', '')
-            else:
-                prof_data['email'] = ''
+            prof_data['id'] = doc.id  # Este é o ID do perfil profissional
+
+            firebase_uid = prof_data.get('usuario_uid')
+            if not firebase_uid:
+                continue
 
             # --- INÍCIO DA CORREÇÃO ---
-            # Descriptografa o nome do profissional antes de adicionar à lista
-            if 'nome' in prof_data and prof_data['nome']:
-                try:
-                    prof_data['nome'] = decrypt_data(prof_data['nome'])
-                except Exception as e:
-                    logger.error(f"Erro ao descriptografar nome do profissional {doc.id}: {e}")
-                    prof_data['nome'] = "[Erro na descriptografia]"
+            # Busca o documento do usuário para obter os dados completos
+            usuario_doc = buscar_usuario_por_firebase_uid(db, firebase_uid)
+            
+            if usuario_doc:
+                # 1. Usa o nome completo e descriptografado do usuário
+                prof_data['nome'] = usuario_doc.get('nome', prof_data.get('nome'))
+                
+                # 2. Adiciona a URL da imagem de perfil
+                prof_data['profile_image_url'] = usuario_doc.get('profile_image_url')
+                
+                # 3. Adiciona o firebase_uid explicitamente para clareza
+                prof_data['firebase_uid'] = firebase_uid
+                
+                # Adiciona o e-mail
+                prof_data['email'] = usuario_doc.get('email', '')
+            else:
+                # Fallback caso o documento do usuário não seja encontrado
+                prof_data['email'] = ''
+                prof_data['profile_image_url'] = None
+                prof_data['firebase_uid'] = firebase_uid
             # --- FIM DA CORREÇÃO ---
 
             profissionais.append(prof_data)
+            
         return profissionais
     except Exception as e:
         logger.error(f"Erro ao listar profissionais para o negocio_id {negocio_id}: {e}")
         return []
-    
-    
+        
+
 def buscar_profissional_por_id(db: firestore.client, profissional_id: str) -> Optional[Dict]:
     """Busca um profissional pelo seu ID de documento."""
     try:
