@@ -996,6 +996,8 @@ def criar_profissional(db: firestore.client, profissional_data: schemas.Profissi
 
 # Em crud.py
 
+# Em crud.py
+
 def listar_profissionais_por_negocio(db: firestore.client, negocio_id: str) -> List[Dict]:
     """Lista todos os profissionais ativos de um negócio específico, enriquecendo com dados do usuário."""
     profissionais = []
@@ -1007,24 +1009,27 @@ def listar_profissionais_por_negocio(db: firestore.client, negocio_id: str) -> L
             prof_data['id'] = doc.id
 
             firebase_uid = prof_data.get('usuario_uid')
-            if not firebase_uid:
-                continue
-
-            usuario_doc = crud.buscar_usuario_por_firebase_uid(db, firebase_uid)
             
-            if usuario_doc:
-                prof_data['nome'] = usuario_doc.get('nome', prof_data.get('nome'))
-                prof_data['firebase_uid'] = firebase_uid
-                prof_data['email'] = usuario_doc.get('email', '')
-                
-                # --- INÍCIO DA CORREÇÃO ---
-                # Prioriza a imagem do perfil do usuário, mas usa a do profissional como fallback
-                prof_data['profile_image_url'] = usuario_doc.get('profile_image_url') or prof_data.get('fotos', {}).get('thumbnail')
-                # --- FIM DA CORREÇÃO ---
+            # --- INÍCIO DA CORREÇÃO ---
+            # Busca os dados do usuário, mas não pula o profissional se não encontrar
+            if firebase_uid:
+                usuario_doc = crud.buscar_usuario_por_firebase_uid(db, firebase_uid)
+                if usuario_doc:
+                    prof_data['nome'] = usuario_doc.get('nome', prof_data.get('nome'))
+                    prof_data['profile_image_url'] = usuario_doc.get('profile_image_url') or prof_data.get('fotos', {}).get('thumbnail')
+                    prof_data['email'] = usuario_doc.get('email', '')
+                else:
+                    # Fallback se o usuário não for encontrado
+                    prof_data['profile_image_url'] = prof_data.get('fotos', {}).get('thumbnail')
+                    prof_data['email'] = ''
             else:
+                # Fallback se não houver firebase_uid
+                prof_data['profile_image_url'] = prof_data.get('fotos', {}).get('thumbnail')
                 prof_data['email'] = ''
-                prof_data['profile_image_url'] = prof_data.get('fotos', {}).get('thumbnail') # Fallback
-                prof_data['firebase_uid'] = firebase_uid
+            
+            # Garante que o firebase_uid sempre esteja na resposta
+            prof_data['firebase_uid'] = firebase_uid
+            # --- FIM DA CORREÇÃO ---
 
             profissionais.append(prof_data)
             
