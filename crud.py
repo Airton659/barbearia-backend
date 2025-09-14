@@ -1298,7 +1298,9 @@ def criar_agendamento(db: firestore.client, agendamento_data: schemas.Agendament
     if not profissional or not servico_doc.exists:
         raise ValueError("Profissional ou serviço não encontrado.")
 
-    # Enriquecer profissional com dados do usuário (nome descriptografado)
+    servico = servico_doc.to_dict()
+
+    # Enriquecer profissional com dados do usuário (nome descriptografado) ANTES de construir agendamento_dict
     firebase_uid = profissional.get('usuario_uid')
     if firebase_uid:
         usuario_doc = buscar_usuario_por_firebase_uid(db, firebase_uid)
@@ -1307,8 +1309,6 @@ def criar_agendamento(db: firestore.client, agendamento_data: schemas.Agendament
             logger.info(f"🔧 AGENDAMENTO - Nome do profissional enriquecido: {usuario_doc.get('nome', 'N/A')}")
         else:
             logger.warning(f"🔧 AGENDAMENTO - Usuário não encontrado para firebase_uid: {firebase_uid}")
-
-    servico = servico_doc.to_dict()
 
     agendamento_dict = {
         "negocio_id": agendamento_data.negocio_id,
@@ -1521,20 +1521,28 @@ def listar_agendamentos_por_cliente(db: firestore.client, negocio_id: str, clien
         ag_data = doc.to_dict()
         ag_data['id'] = doc.id
         
-        # Descriptografa nomes se presentes
+        # Descriptografa nomes se estiverem criptografados (detecta pelo padrão gAAAAA)
         if 'cliente_nome' in ag_data and ag_data['cliente_nome']:
-            try:
-                ag_data['cliente_nome'] = decrypt_data(ag_data['cliente_nome'])
-            except Exception as e:
-                logger.error(f"Erro ao descriptografar cliente_nome no agendamento {doc.id}: {e}")
-                ag_data['cliente_nome'] = "[Erro na descriptografia]"
-        
+            cliente_nome = ag_data['cliente_nome']
+            if isinstance(cliente_nome, str) and cliente_nome.startswith('gAAAAA'):
+                try:
+                    ag_data['cliente_nome'] = decrypt_data(cliente_nome)
+                    logger.info(f"🔓 Cliente nome descriptografado no agendamento {doc.id}")
+                except Exception as e:
+                    logger.error(f"Erro ao descriptografar cliente_nome no agendamento {doc.id}: {e}")
+                    ag_data['cliente_nome'] = "[Erro na descriptografia]"
+            # Se não começa com gAAAAA, mantém o valor original (não criptografado)
+
         if 'profissional_nome' in ag_data and ag_data['profissional_nome']:
-            try:
-                ag_data['profissional_nome'] = decrypt_data(ag_data['profissional_nome'])
-            except Exception as e:
-                logger.error(f"Erro ao descriptografar profissional_nome no agendamento {doc.id}: {e}")
-                ag_data['profissional_nome'] = "[Erro na descriptografia]"
+            profissional_nome = ag_data['profissional_nome']
+            if isinstance(profissional_nome, str) and profissional_nome.startswith('gAAAAA'):
+                try:
+                    ag_data['profissional_nome'] = decrypt_data(profissional_nome)
+                    logger.info(f"🔓 Profissional nome descriptografado no agendamento {doc.id}")
+                except Exception as e:
+                    logger.error(f"Erro ao descriptografar profissional_nome no agendamento {doc.id}: {e}")
+                    ag_data['profissional_nome'] = "[Erro na descriptografia]"
+            # Se não começa com gAAAAA, mantém o valor original (não criptografado)
         
         agendamentos.append(ag_data)
     
@@ -1549,20 +1557,28 @@ def listar_agendamentos_por_profissional(db: firestore.client, negocio_id: str, 
         ag_data = doc.to_dict()
         ag_data['id'] = doc.id
         
-        # Descriptografa nomes se presentes
+        # Descriptografa nomes se estiverem criptografados (detecta pelo padrão gAAAAA)
         if 'cliente_nome' in ag_data and ag_data['cliente_nome']:
-            try:
-                ag_data['cliente_nome'] = decrypt_data(ag_data['cliente_nome'])
-            except Exception as e:
-                logger.error(f"Erro ao descriptografar cliente_nome no agendamento {doc.id}: {e}")
-                ag_data['cliente_nome'] = "[Erro na descriptografia]"
-        
+            cliente_nome = ag_data['cliente_nome']
+            if isinstance(cliente_nome, str) and cliente_nome.startswith('gAAAAA'):
+                try:
+                    ag_data['cliente_nome'] = decrypt_data(cliente_nome)
+                    logger.info(f"🔓 Cliente nome descriptografado no agendamento {doc.id}")
+                except Exception as e:
+                    logger.error(f"Erro ao descriptografar cliente_nome no agendamento {doc.id}: {e}")
+                    ag_data['cliente_nome'] = "[Erro na descriptografia]"
+            # Se não começa com gAAAAA, mantém o valor original (não criptografado)
+
         if 'profissional_nome' in ag_data and ag_data['profissional_nome']:
-            try:
-                ag_data['profissional_nome'] = decrypt_data(ag_data['profissional_nome'])
-            except Exception as e:
-                logger.error(f"Erro ao descriptografar profissional_nome no agendamento {doc.id}: {e}")
-                ag_data['profissional_nome'] = "[Erro na descriptografia]"
+            profissional_nome = ag_data['profissional_nome']
+            if isinstance(profissional_nome, str) and profissional_nome.startswith('gAAAAA'):
+                try:
+                    ag_data['profissional_nome'] = decrypt_data(profissional_nome)
+                    logger.info(f"🔓 Profissional nome descriptografado no agendamento {doc.id}")
+                except Exception as e:
+                    logger.error(f"Erro ao descriptografar profissional_nome no agendamento {doc.id}: {e}")
+                    ag_data['profissional_nome'] = "[Erro na descriptografia]"
+            # Se não começa com gAAAAA, mantém o valor original (não criptografado)
         
         agendamentos.append(ag_data)
         
