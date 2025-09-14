@@ -1467,6 +1467,41 @@ def cancelar_agendamento_pelo_profissional(db: firestore.client, agendamento_id:
     return agendamento
 
 
+def confirmar_agendamento_pelo_profissional(db: firestore.client, agendamento_id: str, profissional_id: str) -> Optional[Dict]:
+    """
+    Permite a um profissional confirmar um agendamento, atualizando o status
+    de 'pendente' para 'confirmado' e notificando o cliente.
+    """
+    agendamento_ref = db.collection('agendamentos').document(agendamento_id)
+    agendamento_doc = agendamento_ref.get()
+
+    if not agendamento_doc.exists:
+        logger.warning(f"Tentativa de confirmar agendamento inexistente: {agendamento_id}")
+        return None
+
+    agendamento = agendamento_doc.to_dict()
+    agendamento['id'] = agendamento_doc.id
+
+    if agendamento.get('profissional_id') != profissional_id:
+        logger.warning(f"Profissional {profissional_id} tentou confirmar agendamento {agendamento_id} sem permissão.")
+        return None  # Profissional não autorizado
+
+    # Verifica se o agendamento está pendente
+    if agendamento.get('status') != 'pendente':
+        logger.warning(f"Tentativa de confirmar agendamento {agendamento_id} com status '{agendamento.get('status')}'. Apenas agendamentos pendentes podem ser confirmados.")
+        return None
+
+    # Atualiza o status
+    agendamento_ref.update({"status": "confirmado"})
+    agendamento["status"] = "confirmado"
+    logger.info(f"Agendamento {agendamento_id} confirmado pelo profissional {profissional_id}.")
+
+    # Dispara a notificação para o cliente
+    _notificar_cliente_confirmacao(db, agendamento, agendamento_id)
+
+    return agendamento
+
+
 def listar_agendamentos_por_cliente(db: firestore.client, negocio_id: str, cliente_id: str) -> List[Dict]:
     """Lista os agendamentos de um cliente em um negócio específico."""
     agendamentos = []
@@ -1886,6 +1921,66 @@ def _notificar_cliente_cancelamento(db: firestore.client, agendamento: Dict, age
 
     except Exception as e:
         logger.error(f"Falha crítica na função _notificar_cliente_cancelamento para agendamento {agendamento_id}: {e}")
+
+
+def _notificar_cliente_confirmacao(db: firestore.client, agendamento: Dict, agendamento_id: str):
+    """Envia notificação para o cliente sobre a confirmação do agendamento."""
+    try:
+        cliente_id = agendamento.get('cliente_id')
+        if not cliente_id:
+            logger.warning(f"Agendamento {agendamento_id} sem cliente_id. Não é possível notificar.")
+            return
+
+        cliente_doc_ref = db.collection('usuarios').document(cliente_id)
+        cliente_doc = cliente_doc_ref.get()
+
+        if not cliente_doc.exists:
+            logger.error(f"Documento do cliente {cliente_id} não encontrado para notificação de confirmação.")
+            return
+
+        cliente_data = cliente_doc.to_dict()
+        cliente_data['id'] = cliente_doc.id
+
+        data_formatada = agendamento['data_hora'].strftime('%d/%m/%Y às %H:%M')
+        mensagem_body = f"Seu agendamento com {agendamento['profissional_nome']} para {data_formatada} foi confirmado."
+
+        # 1. Persistir a notificação no Firestore
+        notificacao_id = f"AGENDAMENTO_CONFIRMADO:{agendamento_id}"
+        notificacao_doc_ref = cliente_doc_ref.collection('notificacoes').document(notificacao_id)
+
+        notificacao_doc_ref.set({
+            "title": "Agendamento Confirmado",
+            "body": mensagem_body,
+            "tipo": "AGENDAMENTO_CONFIRMADO",
+            "relacionado": { "agendamento_id": agendamento_id },
+            "lida": False,
+            "data_criacao": firestore.SERVER_TIMESTAMP,
+            "dedupe_key": notificacao_id
+        })
+        logger.info(f"Notificação de confirmação (prof.) PERSISTIDA para o cliente {cliente_id}.")
+
+        # 2. Enviar a notificação via FCM
+        fcm_tokens = cliente_data.get('fcm_tokens')
+        if fcm_tokens:
+            data_payload = {
+                "tipo": "AGENDAMENTO_CONFIRMADO",
+                "agendamento_id": agendamento_id,
+                "click_action": f"/agendamentos/{agendamento_id}"
+            }
+
+            message = messaging.MulticastMessage(
+                notification=messaging.Notification(title="Agendamento Confirmado", body=mensagem_body),
+                data=data_payload,
+                tokens=fcm_tokens
+            )
+
+            response = messaging.send_multicast(message)
+            logger.info(f"Notificação FCM de confirmação enviada para {len(fcm_tokens)} token(s) do cliente {cliente_id}. Sucessos: {response.success_count}")
+        else:
+            logger.info(f"Cliente {cliente_id} não possui tokens FCM para notificar.")
+
+    except Exception as e:
+        logger.error(f"Falha crítica na função _notificar_cliente_confirmacao para agendamento {agendamento_id}: {e}")
 
 
 # =================================================================================

@@ -1638,6 +1638,24 @@ def cancelar_agendamento_pelo_profissional_endpoint(
         
     return agendamento_cancelado
 
+@app.patch("/me/agendamentos/{agendamento_id}/confirmar", response_model=schemas.AgendamentoResponse, tags=["Profissional - Autogestão"])
+def confirmar_agendamento_pelo_profissional_endpoint(
+    agendamento_id: str,
+    negocio_id: str = Header(..., description="ID do Negócio no qual o profissional está atuando."),
+    profissional_user: schemas.UsuarioProfile = Depends(get_current_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """(Profissional) Confirma um agendamento pendente."""
+    perfil_profissional = crud.buscar_profissional_por_uid(db, negocio_id, profissional_user.firebase_uid)
+    if not perfil_profissional:
+        raise HTTPException(status_code=404, detail="Perfil profissional não encontrado.")
+
+    agendamento_confirmado = crud.confirmar_agendamento_pelo_profissional(db, agendamento_id, perfil_profissional['id'])
+    if not agendamento_confirmado:
+        raise HTTPException(status_code=404, detail="Agendamento não encontrado, não pertence a este profissional, ou não está pendente.")
+
+    return agendamento_confirmado
+
 # =================================================================================
 # ENDPOINT DE UPLOAD DE FOTOS
 # =================================================================================
