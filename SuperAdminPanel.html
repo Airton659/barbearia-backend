@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel Super Admin</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f9; color: #333; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .container { background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 100%; max-width: 600px; }
+        h1, h2 { color: #1a1a1a; border-bottom: 2px solid #eee; padding-bottom: 10px; margin-top: 0; }
+        .hidden { display: none; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; }
+        input, select, button { width: 100%; padding: 12px; margin-bottom: 20px; border-radius: 5px; border: 1px solid #ccc; box-sizing: border-box; font-size: 16px; }
+        button { background-color: #007bff; color: white; border: none; cursor: pointer; transition: background-color 0.3s; }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #aaa; cursor: not-allowed; }
+        .logout-btn { background-color: #dc3545; position: absolute; top: 20px; right: 20px; width: auto; padding: 10px 15px; }
+        .logout-btn:hover { background-color: #c82333; }
+        .status { padding: 15px; margin-top: 20px; border-radius: 5px; text-align: center; }
+        .status.success { background-color: #d4edda; color: #155724; }
+        .status.error { background-color: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div id="login-section">
+        <h1>Login Super Admin</h1>
+        <form id="login-form">
+            <label for="email">Email:</label>
+            <input type="email" id="email" required value="whitetree.ia@gmail.com">
+            
+            <label for="password">Senha:</label>
+            <input type="password" id="password" required value="">
+            
+            <button type="submit">Entrar</button>
+        </form>
+    </div>
+
+    <div id="admin-panel" class="hidden">
+        <button id="logout-button" class="logout-btn">Sair</button>
+        <h1>Painel Super Admin</h1>
+        <p>Logado como: <strong id="user-email"></strong></p>
+
+        <div id="management-section">
+            <h2>Promover Usuário a Admin de Negócio</h2>
+            
+            <label for="business-select">1. Selecione o Negócio:</label>
+            <select id="business-select" disabled>
+                <option>Carregando negócios...</option>
+            </select>
+
+            <label for="user-select">2. Selecione o Usuário para promover:</label>
+            <select id="user-select" disabled>
+                <option>Selecione um negócio primeiro...</option>
+            </select>
+
+            <button id="promote-button" disabled>Promover para Admin</button>
+        </div>
+        
+        <div id="status-message" class="status hidden"></div>
+    </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+
+<script>
+    // --- PASSO 1: COLE A CONFIGURAÇÃO DO SEU FIREBASE AQUI ---
+    const firebaseConfig = {
+        apiKey: "SUA_API_KEY",
+        authDomain: "SEU_AUTH_DOMAIN",
+        projectId: "SEU_PROJECT_ID", // ex: "teste-notificacao-barbearia"
+        storageBucket: "SEU_STORAGE_BUCKET",
+        messagingSenderId: "SEU_MESSAGING_SENDER_ID",
+        appId: "SUA_APP_ID"
+    };
+
+    // Inicializa o Firebase
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+
+    const API_BASE_URL = "https://barbearia-backend-service-862082955632.southamerica-east1.run.app";
+
+    // Elementos do DOM
+    const loginSection = document.getElementById('login-section');
+    const adminPanel = document.getElementById('admin-panel');
+    const loginForm = document.getElementById('login-form');
+    const userEmailEl = document.getElementById('user-email');
+    const businessSelect = document.getElementById('business-select');
+    const userSelect = document.getElementById('user-select');
+    const promoteButton = document.getElementById('promote-button');
+    const statusMessage = document.getElementById('status-message');
+    const logoutButton = document.getElementById('logout-button');
+
+    let idToken = null;
+
+    // Função para mostrar mensagens de status
+    function showStatus(message, isError = false) {
+        statusMessage.textContent = message;
+        statusMessage.className = `status ${isError ? 'error' : 'success'}`;
+        statusMessage.classList.remove('hidden');
+        setTimeout(() => statusMessage.classList.add('hidden'), 5000);
+    }
+
+    // Função genérica para chamadas da API
+    async function apiFetch(endpoint, options = {}) {
+        const headers = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`,
+            ...options.headers,
+        };
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers });
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.detail || `Erro ${response.status}`);
+        }
+        // Se a resposta não tiver corpo (ex: 204 No Content), retorna um objeto vazio
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.indexOf("application/json") !== -1) {
+            return response.json();
+        }
+        return {};
+    }
+
+    // Carrega os negócios
+    async function loadBusinesses() {
+        try {
+            const businesses = await apiFetch('/admin/negocios');
+            businessSelect.innerHTML = '<option value="">Selecione um negócio</option>';
+            businesses.forEach(business => {
+                const option = document.createElement('option');
+                option.value = business.id;
+                option.textContent = business.nome;
+                businessSelect.appendChild(option);
+            });
+            businessSelect.disabled = false;
+        } catch (error) {
+            showStatus(`Erro ao carregar negócios: ${error.message}`, true);
+        }
+    }
+
+    // Carrega usuários de um negócio específico
+    async function loadUsers(businessId) {
+        userSelect.innerHTML = '<option>Carregando usuários...</option>';
+        userSelect.disabled = true;
+        promoteButton.disabled = true;
+
+        if (!businessId) {
+            userSelect.innerHTML = '<option>Selecione um negócio primeiro...</option>';
+            return;
+        }
+
+        try {
+            const users = await apiFetch(`/negocios/${businessId}/usuarios?status=all`);
+            
+            // Filtra para mostrar apenas clientes e técnicos (que podem ser promovidos)
+            const promotableUsers = users.filter(user => user.roles[businessId] !== 'admin');
+            
+            userSelect.innerHTML = '<option value="">Selecione um usuário</option>';
+            promotableUsers.forEach(user => {
+                const option = document.createElement('option');
+                option.value = user.id;
+                option.textContent = `${user.nome} (${user.email}) - Papel Atual: ${user.roles[businessId]}`;
+                userSelect.appendChild(option);
+            });
+            userSelect.disabled = false;
+        } catch (error) {
+            showStatus(`Erro ao carregar usuários: ${error.message}`, true);
+        }
+    }
+
+    // Promove o usuário
+    async function promoteUser() {
+        const businessId = businessSelect.value;
+        const userId = userSelect.value;
+        const selectedUserText = userSelect.options[userSelect.selectedIndex].text;
+
+        if (!businessId || !userId) {
+            showStatus("Por favor, selecione um negócio e um usuário.", true);
+            return;
+        }
+
+        if (!confirm(`Tem certeza que deseja promover o usuário "${selectedUserText}" a Admin do negócio "${businessSelect.options[businessSelect.selectedIndex].text}"?`)) {
+            return;
+        }
+        
+        promoteButton.disabled = true;
+        promoteButton.textContent = "Promovendo...";
+
+        try {
+            // A requisição PATCH agora precisa do cabeçalho negocio-id também
+            await apiFetch(`/negocios/${businessId}/usuarios/${userId}/role`, {
+                method: 'PATCH',
+                headers: { 'negocio-id': businessId },
+                body: JSON.stringify({ role: 'admin' })
+            });
+            showStatus("Usuário promovido a Admin com sucesso!");
+            // Recarrega os usuários para atualizar a lista
+            loadUsers(businessId);
+        } catch (error) {
+            showStatus(`Erro ao promover usuário: ${error.message}`, true);
+        } finally {
+            promoteButton.disabled = false;
+            promoteButton.textContent = "Promover para Admin";
+        }
+    }
+    
+    // Event Listeners
+    loginForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+        try {
+            const userCredential = await auth.signInWithEmailAndPassword(email, password);
+            idToken = await userCredential.user.getIdToken();
+            
+            userEmailEl.textContent = userCredential.user.email;
+            loginSection.classList.add('hidden');
+            adminPanel.classList.remove('hidden');
+            loadBusinesses();
+        } catch (error) {
+            alert(`Erro no login: ${error.message}`);
+        }
+    });
+
+    logoutButton.addEventListener('click', () => {
+        auth.signOut();
+        idToken = null;
+        loginSection.classList.remove('hidden');
+        adminPanel.classList.add('hidden');
+    });
+
+    businessSelect.addEventListener('change', () => {
+        loadUsers(businessSelect.value);
+    });
+    
+    userSelect.addEventListener('change', () => {
+        promoteButton.disabled = !userSelect.value;
+    });
+
+    promoteButton.addEventListener('click', promoteUser);
+
+</script>
+</body>
+</html>

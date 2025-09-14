@@ -3,6 +3,7 @@
 from fastapi import FastAPI, Depends, HTTPException, status, Header, Path, Query, UploadFile, File
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional, Union, Dict
 import os
 import schemas
@@ -38,6 +39,16 @@ app = FastAPI(
     description="Backend para múltiplos negócios de agendamento, usando Firebase e Firestore.",
     version="2.2.0" # Versão atualizada com fluxo do técnico
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Permite todas as origens (ideal para desenvolvimento)
+    allow_credentials=True,
+    allow_methods=["*"],  # Permite todos os métodos (GET, POST, etc.)
+    allow_headers=["*"],  # Permite todos os cabeçalhos
+)
+# --- FIM DO BLOCO ---
+
 
 # Adicionar um logger para ajudar no debug
 logging.basicConfig(level=logging.INFO)
