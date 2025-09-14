@@ -1302,22 +1302,30 @@ def criar_agendamento(db: firestore.client, agendamento_data: schemas.Agendament
 
     # Enriquecer profissional com dados do usuário (nome descriptografado) ANTES de construir agendamento_dict
     firebase_uid = profissional.get('usuario_uid')
+    nome_profissional_real = profissional.get('nome', 'Profissional')
     if firebase_uid:
         usuario_doc = buscar_usuario_por_firebase_uid(db, firebase_uid)
         if usuario_doc:
-            profissional['nome'] = usuario_doc.get('nome', profissional.get('nome'))
-            logger.info(f"🔧 AGENDAMENTO - Nome do profissional enriquecido: {usuario_doc.get('nome', 'N/A')}")
+            nome_profissional_real = usuario_doc.get('nome', nome_profissional_real)
+            logger.info(f"🔧 AGENDAMENTO - Nome do profissional enriquecido: {nome_profissional_real}")
         else:
             logger.warning(f"🔧 AGENDAMENTO - Usuário não encontrado para firebase_uid: {firebase_uid}")
+
+    # Enriquecer cliente com dados reais do usuário
+    nome_cliente_real = cliente.nome
+    cliente_doc = buscar_usuario_por_firebase_uid(db, cliente.firebase_uid)
+    if cliente_doc:
+        nome_cliente_real = cliente_doc.get('nome', cliente.nome)
+        logger.info(f"🔧 AGENDAMENTO - Nome do cliente enriquecido: {nome_cliente_real}")
 
     agendamento_dict = {
         "negocio_id": agendamento_data.negocio_id,
         "data_hora": agendamento_data.data_hora,
         "status": "pendente",
         "cliente_id": cliente.id,
-        "cliente_nome": cliente.nome,
+        "cliente_nome": nome_cliente_real,
         "profissional_id": profissional['id'],
-        "profissional_nome": profissional['nome'],
+        "profissional_nome": nome_profissional_real,
         "profissional_foto_thumbnail": profissional.get('fotos', {}).get('thumbnail'),
         "servico_id": agendamento_data.servico_id,
         "servico_nome": servico['nome'],
@@ -1811,20 +1819,28 @@ def listar_notificacoes(db: firestore.client, usuario_id: str) -> List[Dict]:
         if 'corpo' in notificacao_data and 'body' not in notificacao_data:
             notificacao_data['body'] = notificacao_data['corpo']
             
-        # Garantir campos obrigatórios estão presentes
-        if 'title' not in notificacao_data:
+        # Garantir campos obrigatórios estão presentes e não são null
+        if 'title' not in notificacao_data or notificacao_data['title'] is None:
             notificacao_data['title'] = notificacao_data.get('titulo', 'Notificação')
-            
-        if 'body' not in notificacao_data:
+
+        if 'body' not in notificacao_data or notificacao_data['body'] is None:
             notificacao_data['body'] = notificacao_data.get('corpo', 'Conteúdo da notificação')
-        
-        # Garantir campo 'lida' existe
-        if 'lida' not in notificacao_data:
+
+        # Garantir campo 'lida' existe e não é null
+        if 'lida' not in notificacao_data or notificacao_data['lida'] is None:
             notificacao_data['lida'] = False
-            
-        # Garantir campo 'data_criacao' existe
-        if 'data_criacao' not in notificacao_data:
+
+        # Garantir campo 'data_criacao' existe e não é null
+        if 'data_criacao' not in notificacao_data or notificacao_data['data_criacao'] is None:
             notificacao_data['data_criacao'] = firestore.SERVER_TIMESTAMP
+
+        # Garantir que campos string não sejam null
+        if notificacao_data['title'] is None:
+            notificacao_data['title'] = 'Notificação'
+        if notificacao_data['body'] is None:
+            notificacao_data['body'] = 'Conteúdo da notificação'
+        if 'tipo' in notificacao_data and notificacao_data['tipo'] is None:
+            notificacao_data['tipo'] = 'GERAL'
         
         notificacoes.append(notificacao_data)
     return notificacoes
