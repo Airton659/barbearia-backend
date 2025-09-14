@@ -902,4 +902,29 @@ class ProcessarTarefasResponse(BaseModel):
     erros: int
 
 ProfissionalResponse.model_rebuild()
-DiarioTecnicoResponse.model_rebuild()
+
+# =================================================================================
+# SCHEMAS PARA SOLICITAÇÃO DE EXCLUSÃO DE CONTA E DADOS
+# =================================================================================
+
+class SolicitacaoExclusaoContaCreate(BaseModel):
+    """Schema para solicitação de exclusão de conta e dados pessoais"""
+    motivo: Optional[str] = Field(None, max_length=500, description="Motivo da solicitação de exclusão (opcional)")
+    confirma_exclusao: bool = Field(..., description="Confirmação de que deseja excluir a conta e todos os dados")
+
+class SolicitacaoExclusaoContaResponse(BaseModel):
+    """Schema de resposta para solicitação de exclusão"""
+    success: bool = Field(..., description="Status da operação")
+    message: str = Field(..., description="Mensagem informativa")
+    protocolo: str = Field(..., description="Número de protocolo da solicitação")
+    prazo_exclusao: str = Field(..., description="Prazo para efetivação da exclusão")
+    contato_suporte: str = Field(..., description="Contato para dúvidas")
+
+class StatusSolicitacaoExclusaoResponse(BaseModel):
+    """Schema de resposta para consulta de status de solicitação"""
+    protocolo: str = Field(..., description="Número do protocolo")
+    status: str = Field(..., description="Status atual da solicitação")
+    data_solicitacao: datetime = Field(..., description="Data da solicitação")
+    prazo_exclusao: datetime = Field(..., description="Prazo para efetivação")
+    motivo: Optional[str] = Field(None, description="Motivo informado")
+    dias_restantes: int = Field(..., description="Dias restantes para efetivação")

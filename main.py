@@ -1479,6 +1479,128 @@ def update_user_profile(
             detail="Erro interno do servidor"
         )
 
+@app.post("/me/solicitar-exclusao-conta", response_model=schemas.SolicitacaoExclusaoContaResponse, tags=["Usuários"])
+def solicitar_exclusao_conta(
+    solicitacao: schemas.SolicitacaoExclusaoContaCreate,
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db: firestore.client = Depends(get_db)
+):
+    """
+    Solicita a exclusão da conta do usuário e todos os seus dados pessoais.
+
+    Esta funcionalidade atende aos requisitos da LGPD (Lei Geral de Proteção de Dados).
+    O usuário receberá um protocolo e prazo para efetivação da exclusão.
+
+    - **motivo**: Motivo da solicitação (opcional)
+    - **confirma_exclusao**: Confirmação obrigatória de que deseja excluir todos os dados
+    """
+    try:
+        # Validar confirmação obrigatória
+        if not solicitacao.confirma_exclusao:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="É necessário confirmar que deseja excluir a conta e todos os dados"
+            )
+
+        # Gerar protocolo único
+        import uuid
+        from datetime import datetime, timedelta
+
+        protocolo = f"DEL-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:8].upper()}"
+        data_solicitacao = datetime.now()
+
+        # Prazo de 30 dias para efetivação (conforme LGPD)
+        prazo_exclusao = data_solicitacao + timedelta(days=30)
+
+        # Salvar solicitação no banco
+        solicitacao_data = {
+            "usuario_id": current_user.id,
+            "firebase_uid": current_user.firebase_uid,
+            "email": current_user.email,
+            "nome": current_user.nome,
+            "protocolo": protocolo,
+            "motivo": solicitacao.motivo or "Não informado",
+            "data_solicitacao": data_solicitacao,
+            "prazo_exclusao": prazo_exclusao,
+            "status": "pendente",
+            "processada": False
+        }
+
+        # Salvar na coleção de solicitações de exclusão
+        db.collection("solicitacoes_exclusao").document(protocolo).set(solicitacao_data)
+
+        logger.info(f"Solicitação de exclusão criada para usuário {current_user.id} - Protocolo: {protocolo}")
+
+        return schemas.SolicitacaoExclusaoContaResponse(
+            success=True,
+            message="Solicitação de exclusão registrada com sucesso. Você receberá informações sobre o andamento do processo.",
+            protocolo=protocolo,
+            prazo_exclusao=f"Até {prazo_exclusao.strftime('%d/%m/%Y')} (30 dias úteis)",
+            contato_suporte="Para dúvidas, entre em contato através do suporte do aplicativo"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao processar solicitação de exclusão para usuário {current_user.id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro interno do servidor ao processar solicitação"
+        )
+
+@app.get("/me/status-exclusao-conta", response_model=schemas.StatusSolicitacaoExclusaoResponse, tags=["Usuários"])
+def consultar_status_exclusao_conta(
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db: firestore.client = Depends(get_db)
+):
+    """
+    Consulta o status da solicitação de exclusão de conta do usuário.
+
+    Retorna informações sobre a solicitação ativa, se houver.
+    """
+    try:
+        # Buscar solicitação ativa do usuário
+        solicitacoes = db.collection("solicitacoes_exclusao").where(
+            "usuario_id", "==", current_user.id
+        ).where(
+            "status", "==", "pendente"
+        ).limit(1).get()
+
+        if not solicitacoes:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Nenhuma solicitação de exclusão ativa encontrada"
+            )
+
+        solicitacao = solicitacoes[0].to_dict()
+
+        # Calcular dias restantes
+        from datetime import datetime
+        prazo_exclusao = solicitacao["prazo_exclusao"]
+        if isinstance(prazo_exclusao, str):
+            # Se for string, converter para datetime
+            prazo_exclusao = datetime.fromisoformat(prazo_exclusao.replace('Z', '+00:00'))
+
+        dias_restantes = max(0, (prazo_exclusao - datetime.now()).days)
+
+        return schemas.StatusSolicitacaoExclusaoResponse(
+            protocolo=solicitacao["protocolo"],
+            status=solicitacao["status"],
+            data_solicitacao=solicitacao["data_solicitacao"],
+            prazo_exclusao=solicitacao["prazo_exclusao"],
+            motivo=solicitacao.get("motivo"),
+            dias_restantes=dias_restantes
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao consultar status de exclusão para usuário {current_user.id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro interno do servidor"
+        )
+
 @app.get("/negocios/{negocio_id}/admin-status", tags=["Admin - Gestão do Negócio"])
 def get_admin_status(
     negocio_id: str,
