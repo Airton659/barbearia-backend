@@ -1010,7 +1010,8 @@ def listar_profissionais_por_negocio(db: firestore.client, negocio_id: str) -> L
             prof_data['id'] = doc.id
 
             firebase_uid = prof_data.get('usuario_uid')
-            
+            logger.info(f"🔍 DEBUG PROFISSIONAL - ID: {prof_data.get('id')}, usuario_uid: {firebase_uid}")
+
             # --- INÍCIO DA CORREÇÃO ---
             # Busca os dados do usuário, mas não pula o profissional se não encontrar
             if firebase_uid:
