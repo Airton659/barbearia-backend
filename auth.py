@@ -70,13 +70,20 @@ def validate_negocio_id(
     return negocio_id
 
 
+# Em auth.py
+
 def validate_path_negocio_id(
     negocio_id: str = Path(..., description="ID do negócio a ser validado."),
     current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase)
 ):
     """
-    Valida se o usuário tem permissão para acessar o negócio especificado via path.
+    Valida o acesso ao negócio. O Super Admin tem acesso a todos.
     """
+    # Se for super_admin, permite o acesso
+    if current_user.roles.get("platform") == "super_admin":
+        return negocio_id
+
+    # Senão, verifica a permissão específica do negócio
     if negocio_id not in current_user.roles:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -86,17 +93,17 @@ def validate_path_negocio_id(
 
 
 def get_current_admin_user(
-    # A MUDANÇA ESTÁ AQUI: FastAPI irá injetar o 'negocio_id' da URL (Path) diretamente.
     negocio_id: str, 
     current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase)
 ) -> schemas.UsuarioProfile:
     """
-    Verifica se o usuário atual é o administrador do negócio especificado na URL.
-    Esta função é a dependência de segurança para endpoints de gerenciamento de negócio.
+    Verifica se o usuário é o Super Admin OU o admin do negócio.
     """
-    # A verificação de `negocio_id` nulo não é mais necessária, pois um path param é sempre obrigatório.
-    
-    # Verifica se o usuário tem a role 'admin' para o negocio_id específico
+    # Se for super_admin, permite o acesso
+    if current_user.roles.get("platform") == "super_admin":
+        return current_user
+
+    # Senão, verifica se é admin do negócio
     if current_user.roles.get(negocio_id) != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -105,15 +112,18 @@ def get_current_admin_user(
     return current_user
 
 
-# --- NOVO BLOCO DE CÓDIGO AQUI ---
 def get_current_admin_or_profissional_user(
     negocio_id: str,
     current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase)
 ) -> schemas.UsuarioProfile:
     """
-    Verifica se o usuário atual é um administrador ('admin') ou um profissional ('profissional')
-    do negócio especificado na URL. Usado para ações clínicas como cadastrar paciente.
+    Verifica se o usuário é o Super Admin, OU um admin, OU um profissional do negócio.
     """
+    # Se for super_admin, permite o acesso
+    if current_user.roles.get("platform") == "super_admin":
+        return current_user
+
+    # Senão, verifica as outras permissões
     user_role = current_user.roles.get(negocio_id)
     if user_role not in ["admin", "profissional"]:
         raise HTTPException(

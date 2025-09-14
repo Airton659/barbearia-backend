@@ -31,7 +31,7 @@
             <input type="email" id="email" required value="whitetree.ia@gmail.com">
             
             <label for="password">Senha:</label>
-            <input type="password" id="password" required value="">
+            <input type="password" id="password" required value="123456">
             
             <button type="submit">Entrar</button>
         </form>
@@ -67,14 +67,14 @@
 
 <script>
     // --- PASSO 1: COLE A CONFIGURAÇÃO DO SEU FIREBASE AQUI ---
-    const firebaseConfig = {
-        apiKey: "SUA_API_KEY",
-        authDomain: "SEU_AUTH_DOMAIN",
-        projectId: "SEU_PROJECT_ID", // ex: "teste-notificacao-barbearia"
-        storageBucket: "SEU_STORAGE_BUCKET",
-        messagingSenderId: "SEU_MESSAGING_SENDER_ID",
-        appId: "SUA_APP_ID"
-    };
+const firebaseConfig = {
+  apiKey: "AIzaSyC073ifaNVWcVwFi4e3agdl-yX7aaKsMwk",
+  authDomain: "teste-notificacao-barbearia.firebaseapp.com",
+  projectId: "teste-notificacao-barbearia",
+  storageBucket: "teste-notificacao-barbearia.firebasestorage.app",
+  messagingSenderId: "862082955632",
+  appId: "1:862082955632:web:d8b913dd51f79aba9cb7b5"
+};
 
     // Inicializa o Firebase
     firebase.initializeApp(firebaseConfig);
@@ -95,7 +95,6 @@
 
     let idToken = null;
 
-    // Função para mostrar mensagens de status
     function showStatus(message, isError = false) {
         statusMessage.textContent = message;
         statusMessage.className = `status ${isError ? 'error' : 'success'}`;
@@ -103,7 +102,6 @@
         setTimeout(() => statusMessage.classList.add('hidden'), 5000);
     }
 
-    // Função genérica para chamadas da API
     async function apiFetch(endpoint, options = {}) {
         const headers = {
             'Content-Type': 'application/json',
@@ -115,7 +113,6 @@
             const errorData = await response.json();
             throw new Error(errorData.detail || `Erro ${response.status}`);
         }
-        // Se a resposta não tiver corpo (ex: 204 No Content), retorna um objeto vazio
         const contentType = response.headers.get("content-type");
         if (contentType && contentType.indexOf("application/json") !== -1) {
             return response.json();
@@ -123,7 +120,6 @@
         return {};
     }
 
-    // Carrega os negócios
     async function loadBusinesses() {
         try {
             const businesses = await apiFetch('/admin/negocios');
@@ -131,7 +127,7 @@
             businesses.forEach(business => {
                 const option = document.createElement('option');
                 option.value = business.id;
-                option.textContent = business.nome;
+                option.textContent = `${business.nome} (ID: ${business.id})`;
                 businessSelect.appendChild(option);
             });
             businessSelect.disabled = false;
@@ -140,7 +136,6 @@
         }
     }
 
-    // Carrega usuários de um negócio específico
     async function loadUsers(businessId) {
         userSelect.innerHTML = '<option>Carregando usuários...</option>';
         userSelect.disabled = true;
@@ -152,16 +147,19 @@
         }
 
         try {
-            const users = await apiFetch(`/negocios/${businessId}/usuarios?status=all`);
+            // --- CORREÇÃO AQUI ---
+            // A chamada agora passa o negocio-id no header, como a API espera.
+            const users = await apiFetch(`/negocios/${businessId}/usuarios?status=all`, {
+                 headers: { 'negocio-id': businessId }
+            });
             
-            // Filtra para mostrar apenas clientes e técnicos (que podem ser promovidos)
             const promotableUsers = users.filter(user => user.roles[businessId] !== 'admin');
             
             userSelect.innerHTML = '<option value="">Selecione um usuário</option>';
             promotableUsers.forEach(user => {
                 const option = document.createElement('option');
                 option.value = user.id;
-                option.textContent = `${user.nome} (${user.email}) - Papel Atual: ${user.roles[businessId]}`;
+                option.textContent = `${user.nome} (${user.email}) - Papel: ${user.roles[businessId]}`;
                 userSelect.appendChild(option);
             });
             userSelect.disabled = false;
@@ -170,7 +168,6 @@
         }
     }
 
-    // Promove o usuário
     async function promoteUser() {
         const businessId = businessSelect.value;
         const userId = userSelect.value;
@@ -181,7 +178,7 @@
             return;
         }
 
-        if (!confirm(`Tem certeza que deseja promover o usuário "${selectedUserText}" a Admin do negócio "${businessSelect.options[businessSelect.selectedIndex].text}"?`)) {
+        if (!confirm(`Tem certeza que deseja promover o usuário "${selectedUserText}" a Admin do negócio?`)) {
             return;
         }
         
@@ -189,14 +186,12 @@
         promoteButton.textContent = "Promovendo...";
 
         try {
-            // A requisição PATCH agora precisa do cabeçalho negocio-id também
             await apiFetch(`/negocios/${businessId}/usuarios/${userId}/role`, {
                 method: 'PATCH',
                 headers: { 'negocio-id': businessId },
                 body: JSON.stringify({ role: 'admin' })
             });
             showStatus("Usuário promovido a Admin com sucesso!");
-            // Recarrega os usuários para atualizar a lista
             loadUsers(businessId);
         } catch (error) {
             showStatus(`Erro ao promover usuário: ${error.message}`, true);
@@ -206,7 +201,6 @@
         }
     }
     
-    // Event Listeners
     loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const email = document.getElementById('email').value;
