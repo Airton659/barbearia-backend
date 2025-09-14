@@ -1013,7 +1013,7 @@ def listar_profissionais_por_negocio(db: firestore.client, negocio_id: str) -> L
             # --- INÍCIO DA CORREÇÃO ---
             # Busca os dados do usuário, mas não pula o profissional se não encontrar
             if firebase_uid:
-                usuario_doc = crud.buscar_usuario_por_firebase_uid(db, firebase_uid)
+                usuario_doc = buscar_usuario_por_firebase_uid(db, firebase_uid)
                 if usuario_doc:
                     prof_data['nome'] = usuario_doc.get('nome', prof_data.get('nome'))
                     prof_data['profile_image_url'] = usuario_doc.get('profile_image_url') or prof_data.get('fotos', {}).get('thumbnail')
