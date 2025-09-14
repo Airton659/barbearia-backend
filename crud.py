@@ -1298,6 +1298,16 @@ def criar_agendamento(db: firestore.client, agendamento_data: schemas.Agendament
     if not profissional or not servico_doc.exists:
         raise ValueError("Profissional ou serviço não encontrado.")
 
+    # Enriquecer profissional com dados do usuário (nome descriptografado)
+    firebase_uid = profissional.get('usuario_uid')
+    if firebase_uid:
+        usuario_doc = buscar_usuario_por_firebase_uid(db, firebase_uid)
+        if usuario_doc:
+            profissional['nome'] = usuario_doc.get('nome', profissional.get('nome'))
+            logger.info(f"🔧 AGENDAMENTO - Nome do profissional enriquecido: {usuario_doc.get('nome', 'N/A')}")
+        else:
+            logger.warning(f"🔧 AGENDAMENTO - Usuário não encontrado para firebase_uid: {firebase_uid}")
+
     servico = servico_doc.to_dict()
 
     agendamento_dict = {
@@ -1564,6 +1574,15 @@ def listar_agendamentos_por_profissional(db: firestore.client, negocio_id: str, 
 
 def criar_postagem(db: firestore.client, postagem_data: schemas.PostagemCreate, profissional: Dict) -> Dict:
     """Cria uma nova postagem, desnormalizando os dados do profissional."""
+
+    # Enriquecer profissional com dados do usuário (nome descriptografado)
+    firebase_uid = profissional.get('usuario_uid')
+    if firebase_uid:
+        usuario_doc = buscar_usuario_por_firebase_uid(db, firebase_uid)
+        if usuario_doc:
+            profissional['nome'] = usuario_doc.get('nome', profissional.get('nome'))
+            logger.info(f"🔧 POSTAGEM - Nome do profissional enriquecido: {usuario_doc.get('nome', 'N/A')}")
+
     post_dict = postagem_data.dict()
     post_dict['data_postagem'] = datetime.utcnow()
     post_dict['profissional_nome'] = profissional.get('nome')
