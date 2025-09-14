@@ -165,6 +165,7 @@ class ProfissionalCreate(ProfissionalBase):
 class ProfissionalResponse(ProfissionalBase):
     id: str = Field(..., description="ID do documento do profissional.")
     email: EmailStr = Field(..., description="E-mail do profissional.")
+    profile_image_url: Optional[str] = Field(None, description="URL da imagem de perfil do profissional")
     servicos: List['ServicoResponse'] = []
     postagens: List['PostagemResponse'] = []
     avaliacoes: List['AvaliacaoResponse'] = []
