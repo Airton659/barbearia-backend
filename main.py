@@ -1515,15 +1515,25 @@ def get_profissional_details(
         if usuario_doc:
             profissional['email'] = usuario_doc.get('email', '')
             profissional['nome'] = usuario_doc.get('nome', profissional.get('nome'))
-            profissional['profile_image_url'] = usuario_doc.get('profile_image_url') or profissional.get('fotos', {}).get('thumbnail')
+            # Tenta buscar a imagem do usuário em diferentes campos possíveis
+            user_image = (usuario_doc.get('profile_image_url') or
+                         usuario_doc.get('profile_image') or
+                         profissional.get('fotos', {}).get('thumbnail'))
+            profissional['profile_image_url'] = user_image
         else:
             # Fallback se o usuário não for encontrado: garante que os campos existam
             profissional['email'] = ''
-            profissional['profile_image_url'] = profissional.get('fotos', {}).get('thumbnail')
+            prof_fallback_image = (profissional.get('fotos', {}).get('thumbnail') or
+                                 profissional.get('fotos', {}).get('perfil') or
+                                 profissional.get('fotos', {}).get('original'))
+            profissional['profile_image_url'] = prof_fallback_image
     else:
         # Fallback se não houver firebase_uid
         profissional['email'] = ''
-        profissional['profile_image_url'] = profissional.get('fotos', {}).get('thumbnail')
+        prof_fallback_image = (profissional.get('fotos', {}).get('thumbnail') or
+                             profissional.get('fotos', {}).get('perfil') or
+                             profissional.get('fotos', {}).get('original'))
+        profissional['profile_image_url'] = prof_fallback_image
     # --- FIM DA CORREÇÃO ---
     
     servicos = crud.listar_servicos_por_profissional(db, profissional_id)

@@ -48,6 +48,7 @@ def buscar_usuario_por_firebase_uid(db: firestore.client, firebase_uid: str) -> 
             user_doc['id'] = docs[0].id
             logger.info(f"🔍 BUSCAR_USUARIO DEBUG - Usuário encontrado ID: {user_doc['id']}")
             logger.info(f"🔍 BUSCAR_USUARIO DEBUG - Dados brutos: nome_len={len(user_doc.get('nome', ''))}, telefone={user_doc.get('telefone', 'None')}, email={user_doc.get('email', 'None')}")
+            logger.info(f"🔍 BUSCAR_USUARIO DEBUG - Campos de imagem: profile_image_url={user_doc.get('profile_image_url', 'None')}, profile_image={user_doc.get('profile_image', 'None')}")
 
             # Descriptografa os campos com tratamento individual de erros
             if 'nome' in user_doc:
@@ -1016,16 +1017,29 @@ def listar_profissionais_por_negocio(db: firestore.client, negocio_id: str) -> L
                 usuario_doc = buscar_usuario_por_firebase_uid(db, firebase_uid)
                 if usuario_doc:
                     prof_data['nome'] = usuario_doc.get('nome', prof_data.get('nome'))
-                    prof_data['profile_image_url'] = usuario_doc.get('profile_image_url') or prof_data.get('fotos', {}).get('thumbnail')
+                    # Tenta buscar a imagem do usuário em diferentes campos possíveis
+                    user_image = (usuario_doc.get('profile_image_url') or
+                                 usuario_doc.get('profile_image') or
+                                 prof_data.get('fotos', {}).get('thumbnail'))
+                    prof_data['profile_image_url'] = user_image
+                    logger.info(f"🖼️ PROFISSIONAL DEBUG - Profissional {prof_data.get('id')}: user_image_url={usuario_doc.get('profile_image_url')}, user_image={usuario_doc.get('profile_image')}, prof_fotos_thumbnail={prof_data.get('fotos', {}).get('thumbnail')}, final_image={user_image}")
                     prof_data['email'] = usuario_doc.get('email', '')
                 else:
                     # Fallback se o usuário não for encontrado
-                    prof_data['profile_image_url'] = prof_data.get('fotos', {}).get('thumbnail')
+                    prof_fallback_image = (prof_data.get('fotos', {}).get('thumbnail') or
+                                         prof_data.get('fotos', {}).get('perfil') or
+                                         prof_data.get('fotos', {}).get('original'))
+                    prof_data['profile_image_url'] = prof_fallback_image
                     prof_data['email'] = ''
+                    logger.info(f"🖼️ PROFISSIONAL DEBUG - Profissional {prof_data.get('id')} (sem usuário): prof_fotos={prof_data.get('fotos', {})}, final_image={prof_fallback_image}")
             else:
                 # Fallback se não houver firebase_uid
-                prof_data['profile_image_url'] = prof_data.get('fotos', {}).get('thumbnail')
+                prof_fallback_image = (prof_data.get('fotos', {}).get('thumbnail') or
+                                     prof_data.get('fotos', {}).get('perfil') or
+                                     prof_data.get('fotos', {}).get('original'))
+                prof_data['profile_image_url'] = prof_fallback_image
                 prof_data['email'] = ''
+                logger.info(f"🖼️ PROFISSIONAL DEBUG - Profissional {prof_data.get('id')} (sem firebase_uid): prof_fotos={prof_data.get('fotos', {})}, final_image={prof_fallback_image}")
             
             # Garante que o firebase_uid sempre esteja na resposta
             prof_data['firebase_uid'] = firebase_uid
