@@ -1269,7 +1269,13 @@ def agendar_notificacao_endpoint(
         raise HTTPException(status_code=404, detail="Paciente não encontrado.")
 
     paciente_data = paciente_doc.to_dict()
-    if paciente_data.get('enfermeiro_id') != current_user.id:
+
+    # Permitir acesso se for o enfermeiro vinculado OU se for admin do negócio
+    is_linked_professional = paciente_data.get('enfermeiro_id') == current_user.id
+    is_admin = current_user.roles.get(negocio_id) == 'admin'
+    is_super_admin = current_user.roles.get("platform") == "super_admin"
+
+    if not (is_linked_professional or is_admin or is_super_admin):
         raise HTTPException(status_code=403, detail="Acesso negado: você não está vinculado a este paciente.")
     if negocio_id not in paciente_data.get('roles', {}):
         raise HTTPException(status_code=400, detail="Paciente não pertence a este negócio.")
