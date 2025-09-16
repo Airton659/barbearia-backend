@@ -900,10 +900,6 @@ class ProcessarTarefasResponse(BaseModel):
     total_verificadas: int
     total_notificadas: int
     erros: int
-    # Campos para lembretes de exames
-    total_exames_verificados: Optional[int] = 0
-    total_lembretes_enviados: Optional[int] = 0
-    erros_lembretes: Optional[Union[int, str]] = 0
 
 
 ProfissionalResponse.model_rebuild()

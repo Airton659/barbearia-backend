@@ -2825,18 +2825,6 @@ def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
             logger.error(f"Erro no processamento de notificações agendadas: {e}")
             stats["erros_notificacoes"] = str(e)
 
-        # NOVO: Processar lembretes de exames
-        try:
-            logger.info("Iniciando processamento de lembretes de exames")
-            lembretes_stats = crud.processar_lembretes_exames(db)
-            # Adiciona as estatísticas de lembretes ao stats principal
-            stats["total_exames_verificados"] = lembretes_stats.get("total_exames_verificados", 0)
-            stats["total_lembretes_enviados"] = lembretes_stats.get("total_lembretes_enviados", 0)
-            stats["erros_lembretes"] = lembretes_stats.get("erros", 0)
-        except Exception as e:
-            logger.error(f"Erro no processamento de lembretes de exames: {e}")
-            stats["erros_lembretes"] = str(e)
-
         logger.info(f"Processamento concluído: {stats}")
         return stats
 
