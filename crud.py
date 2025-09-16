@@ -5787,3 +5787,118 @@ def processar_tarefas_atrasadas(db: firestore.client) -> Dict:
 
     logger.info(f"Processamento de tarefas atrasadas concluído: {stats}")
     return stats
+
+
+def processar_lembretes_exames(db: firestore.client) -> Dict:
+    """
+    Busca exames marcados para amanhã e envia lembretes para os pacientes.
+    Esta função é projetada para ser chamada por um job agendado (Cloud Scheduler).
+    """
+    stats = {"total_exames_verificados": 0, "total_lembretes_enviados": 0, "erros": 0}
+
+    # Data de amanhã com timezone UTC
+    amanha = datetime.now(timezone.utc) + timedelta(days=1)
+    data_amanha_inicio = amanha.replace(hour=0, minute=0, second=0, microsecond=0)
+    data_amanha_fim = amanha.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+    logger.info(f"Processando lembretes para exames entre {data_amanha_inicio} e {data_amanha_fim}")
+
+    try:
+        # Busca todos os usuários para verificar seus exames
+        usuarios_ref = db.collection('usuarios')
+
+        for usuario_doc in usuarios_ref.stream():
+            usuario_id = usuario_doc.id
+
+            # Busca exames do usuário marcados para amanhã
+            exames_ref = usuario_doc.reference.collection('exames')
+            query = exames_ref.where('data_exame', '>=', data_amanha_inicio).where('data_exame', '<=', data_amanha_fim)
+
+            exames_amanha = list(query.stream())
+            stats["total_exames_verificados"] += len(exames_amanha)
+
+            if exames_amanha:
+                try:
+                    # Busca dados do paciente
+                    usuario_data = usuario_doc.to_dict()
+                    nome_paciente = usuario_data.get('nome', 'Paciente')
+                    tokens_fcm = usuario_data.get('fcm_tokens', [])
+
+                    for exame_doc in exames_amanha:
+                        try:
+                            exame_data = exame_doc.to_dict()
+                            nome_exame = exame_data.get('nome_exame', 'Exame')
+                            horario_exame = exame_data.get('horario_exame', '')
+
+                            # Prepara mensagem do lembrete
+                            horario_texto = f" às {horario_exame}" if horario_exame else ""
+                            mensagem_title = "Lembrete de Exame"
+                            mensagem_body = f"Olá {nome_paciente}! Você tem o exame '{nome_exame}' marcado para amanhã{horario_texto}."
+
+                            # ID único para evitar notificações duplicadas
+                            notificacao_id = f"LEMBRETE_EXAME:{exame_doc.id}:{data_amanha_inicio.strftime('%Y%m%d')}"
+
+                            # 1. Persistir a notificação no Firestore
+                            try:
+                                notificacao_doc_ref = usuario_doc.reference.collection('notificacoes').document(notificacao_id)
+
+                                # Verifica se já existe para evitar duplicatas
+                                if not notificacao_doc_ref.get().exists:
+                                    notificacao_doc_ref.set({
+                                        "title": mensagem_title,
+                                        "body": mensagem_body,
+                                        "tipo": "LEMBRETE_EXAME",
+                                        "relacionado": {
+                                            "exame_id": exame_doc.id,
+                                            "data_exame": exame_data.get('data_exame')
+                                        },
+                                        "lida": False,
+                                        "data_criacao": firestore.SERVER_TIMESTAMP,
+                                        "dedupe_key": notificacao_id
+                                    })
+                                    logger.info(f"Notificação de lembrete de exame PERSISTIDA para o paciente {usuario_id}.")
+                                else:
+                                    logger.info(f"Notificação de lembrete já existe para o exame {exame_doc.id}")
+                                    continue
+
+                            except Exception as e:
+                                logger.error(f"Erro ao PERSISTIR notificação de lembrete de exame: {e}")
+                                stats["erros"] += 1
+                                continue
+
+                            # 2. Enviar a notificação via FCM, se houver tokens
+                            if tokens_fcm:
+                                data_payload = {
+                                    "title": mensagem_title,
+                                    "body": mensagem_body,
+                                    "tipo": "LEMBRETE_EXAME"
+                                }
+                                try:
+                                    _send_data_push_to_tokens(
+                                        db=db,
+                                        firebase_uid_destinatario=usuario_data.get('firebase_uid'),
+                                        tokens=tokens_fcm,
+                                        data_payload=data_payload
+                                    )
+                                    stats["total_lembretes_enviados"] += 1
+                                    logger.info(f"Lembrete de exame enviado via FCM para paciente {usuario_id}")
+                                except Exception as e:
+                                    logger.error(f"Erro ao enviar FCM para lembrete de exame: {e}")
+                                    stats["erros"] += 1
+                            else:
+                                logger.warning(f"Paciente {usuario_id} não possui tokens FCM para receber lembrete")
+
+                        except Exception as e:
+                            logger.error(f"Erro ao processar exame {exame_doc.id}: {e}")
+                            stats["erros"] += 1
+
+                except Exception as e:
+                    logger.error(f"Erro ao processar exames do usuário {usuario_id}: {e}")
+                    stats["erros"] += 1
+
+    except Exception as e:
+        logger.error(f"Erro geral ao processar lembretes de exames: {e}")
+        stats["erros"] += 1
+
+    logger.info(f"Processamento de lembretes de exames concluído: {stats}")
+    return stats

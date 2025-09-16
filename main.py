@@ -2834,6 +2834,24 @@ def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
         return stats
 
 
+@app.post("/processar-lembretes-exames", response_model=schemas.ProcessarExamesResponse, tags=["Sistema"])
+def processar_lembretes_exames_endpoint(db: firestore.client = Depends(get_db)):
+    """
+    (PÚBLICO - CHAMADO PELO CLOUD SCHEDULER) Processa exames marcados para amanhã
+    e envia lembretes para os pacientes.
+    """
+    try:
+        stats = crud.processar_lembretes_exames(db)
+        return stats
+    except Exception as e:
+        logger.error(f"Erro ao processar lembretes de exames: {e}")
+        return {
+            "total_exames_verificados": 0,
+            "total_lembretes_enviados": 0,
+            "erros": 1
+        }
+
+
 @app.get("/tasks/debug-verificacao", tags=["Jobs Agendados"])
 def debug_verificacao(db: firestore.client = Depends(get_db)):
     """Debug: Mostra o que há na coleção tarefas_a_verificar"""

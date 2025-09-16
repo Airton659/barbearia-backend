@@ -901,6 +901,11 @@ class ProcessarTarefasResponse(BaseModel):
     total_notificadas: int
     erros: int
 
+class ProcessarExamesResponse(BaseModel):
+    total_exames_verificados: int
+    total_lembretes_enviados: int
+    erros: int
+
 ProfissionalResponse.model_rebuild()
 
 # =================================================================================
