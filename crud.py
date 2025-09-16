@@ -69,10 +69,20 @@ def buscar_usuario_por_firebase_uid(db: firestore.client, firebase_uid: str) -> 
             
             if 'endereco' in user_doc and user_doc['endereco']:
                 try:
-                    user_doc['endereco'] = {k: decrypt_data(v) for k, v in user_doc['endereco'].items()}
+                    endereco_descriptografado = {}
+                    for k, v in user_doc['endereco'].items():
+                        if v and isinstance(v, str) and v.strip():
+                            try:
+                                endereco_descriptografado[k] = decrypt_data(v)
+                            except Exception as field_error:
+                                logger.warning(f"⚠️ BUSCAR_USUARIO DEBUG - Erro ao descriptografar campo '{k}' do endereço: {field_error}")
+                                endereco_descriptografado[k] = None
+                        else:
+                            endereco_descriptografado[k] = v  # Manter valor original se não for string válida
+                    user_doc['endereco'] = endereco_descriptografado
                     logger.info(f"✅ BUSCAR_USUARIO DEBUG - Endereço descriptografado com sucesso")
                 except Exception as e:
-                    logger.error(f"❌ BUSCAR_USUARIO DEBUG - Erro ao descriptografar ENDERECO: {e}")
+                    logger.error(f"❌ BUSCAR_USUARIO DEBUG - Erro geral ao processar endereço: {e}")
                     user_doc['endereco'] = None
 
             logger.info(f"✅ BUSCAR_USUARIO DEBUG - Retornando usuário: ID={user_doc['id']}, Nome={user_doc.get('nome', 'N/A')}")
@@ -161,10 +171,20 @@ def criar_ou_atualizar_usuario(db: firestore.client, user_data: schemas.UsuarioS
             # Descriptografar endereço com tratamento de erro robusto
             if 'endereco' in user_doc and user_doc['endereco']:
                 try:
-                    user_doc['endereco'] = {k: decrypt_data(v) for k, v in user_doc['endereco'].items()}
+                    endereco_descriptografado = {}
+                    for k, v in user_doc['endereco'].items():
+                        if v and isinstance(v, str) and v.strip():
+                            try:
+                                endereco_descriptografado[k] = decrypt_data(v)
+                            except Exception as field_error:
+                                logger.warning(f"⚠️ TRANSACAO DEBUG - Erro ao descriptografar campo '{k}' do endereço: {field_error}")
+                                endereco_descriptografado[k] = None
+                        else:
+                            endereco_descriptografado[k] = v  # Manter valor original se não for string válida
+                    user_doc['endereco'] = endereco_descriptografado
                     logger.info(f"✅ TRANSACAO DEBUG - Endereço descriptografado com sucesso")
                 except Exception as e:
-                    logger.error(f"❌ TRANSACAO DEBUG - Erro ao descriptografar ENDERECO: {e}")
+                    logger.error(f"❌ TRANSACAO DEBUG - Erro geral ao processar endereço: {e}")
                     logger.error(f"❌ TRANSACAO DEBUG - Dados do endereço corrompidos, definindo como None")
                     user_doc['endereco'] = None
         

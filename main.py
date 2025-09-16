@@ -2557,6 +2557,125 @@ def process_overdue_tasks_debug():
         }
 
 
+def processar_notificacoes_agendadas(db: firestore.client, now: datetime) -> dict:
+    """
+    Processa notificações agendadas que estão prontas para serem enviadas.
+    """
+    stats = {
+        "notificacoes_verificadas": 0,
+        "notificacoes_enviadas": 0,
+        "notificacoes_erro": 0
+    }
+
+    try:
+        # Buscar notificações agendadas que devem ser enviadas agora
+        notificacoes_ref = db.collection('notificacoes_agendadas')
+        query = notificacoes_ref.where('status', '==', 'agendada').where('data_agendamento', '<=', now)
+
+        notificacoes_pendentes = list(query.stream())
+        stats["notificacoes_verificadas"] = len(notificacoes_pendentes)
+
+        logger.info(f"Encontradas {len(notificacoes_pendentes)} notificações para processar")
+
+        for doc_notificacao in notificacoes_pendentes:
+            try:
+                notif_data = doc_notificacao.to_dict()
+                paciente_id = notif_data.get('paciente_id')
+                titulo = notif_data.get('titulo')
+                mensagem = notif_data.get('mensagem')
+
+                if not paciente_id:
+                    logger.warning(f"Notificação {doc_notificacao.id} sem paciente_id")
+                    continue
+
+                # Buscar dados do paciente
+                paciente_doc = db.collection('usuarios').document(paciente_id).get()
+                if not paciente_doc.exists:
+                    logger.warning(f"Paciente {paciente_id} não encontrado")
+                    doc_notificacao.reference.update({"status": "erro", "erro": "Paciente não encontrado"})
+                    stats["notificacoes_erro"] += 1
+                    continue
+
+                paciente_data = paciente_doc.to_dict()
+                tokens_fcm = paciente_data.get('fcm_tokens', [])
+
+                # Persistir notificação no banco do paciente
+                db.collection('usuarios').document(paciente_id).collection('notificacoes').add({
+                    "title": titulo,
+                    "body": mensagem,
+                    "tipo": "LEMBRETE_AGENDADO",
+                    "relacionado": {"notificacao_agendada_id": doc_notificacao.id},
+                    "lida": False,
+                    "data_criacao": firestore.SERVER_TIMESTAMP,
+                    "dedupe_key": f"AGENDADA_{doc_notificacao.id}"
+                })
+
+                # Enviar push notification se houver tokens FCM
+                if tokens_fcm:
+                    try:
+                        from firebase_admin import messaging
+
+                        message = messaging.MulticastMessage(
+                            notification=messaging.Notification(
+                                title=titulo,
+                                body=mensagem
+                            ),
+                            data={
+                                "tipo": "LEMBRETE_AGENDADO",
+                                "notificacao_agendada_id": doc_notificacao.id
+                            },
+                            tokens=tokens_fcm
+                        )
+
+                        response = messaging.send_multicast(message)
+                        logger.info(f"Push enviado para {len(tokens_fcm)} tokens, {response.success_count} sucessos")
+
+                        # Remover tokens inválidos
+                        if response.failure_count > 0:
+                            valid_tokens = []
+                            for idx, resp in enumerate(response.responses):
+                                if resp.success:
+                                    valid_tokens.append(tokens_fcm[idx])
+                                else:
+                                    logger.warning(f"Token FCM inválido removido: {resp.exception}")
+
+                            if len(valid_tokens) != len(tokens_fcm):
+                                db.collection('usuarios').document(paciente_id).update({
+                                    "fcm_tokens": valid_tokens
+                                })
+
+                    except Exception as e:
+                        logger.error(f"Erro ao enviar push notification: {e}")
+
+                # Marcar notificação como enviada
+                doc_notificacao.reference.update({
+                    "status": "enviada",
+                    "data_envio": firestore.SERVER_TIMESTAMP
+                })
+
+                stats["notificacoes_enviadas"] += 1
+                logger.info(f"Notificação {doc_notificacao.id} enviada com sucesso")
+
+            except Exception as e:
+                logger.error(f"Erro ao processar notificação {doc_notificacao.id}: {e}")
+                stats["notificacoes_erro"] += 1
+                try:
+                    doc_notificacao.reference.update({
+                        "status": "erro",
+                        "erro": str(e),
+                        "data_erro": firestore.SERVER_TIMESTAMP
+                    })
+                except:
+                    pass
+
+        return stats
+
+    except Exception as e:
+        logger.error(f"Erro geral no processamento de notificações: {e}")
+        stats["notificacoes_erro"] += 1
+        return stats
+
+
 @app.post("/tasks/process-overdue-v2", response_model=schemas.ProcessarTarefasResponse, tags=["Jobs Agendados"])
 def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
     """
@@ -2697,9 +2816,18 @@ def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
                 except:
                     pass
 
+        # NOVO: Processar notificações agendadas
+        try:
+            logger.info("Iniciando processamento de notificações agendadas")
+            notificacoes_stats = processar_notificacoes_agendadas(db, now)
+            stats.update(notificacoes_stats)
+        except Exception as e:
+            logger.error(f"Erro no processamento de notificações agendadas: {e}")
+            stats["erros_notificacoes"] = str(e)
+
         logger.info(f"Processamento concluído: {stats}")
         return stats
-        
+
     except Exception as e:
         logger.error(f"Erro geral no processamento: {e}")
         stats["erros"] += 1
