@@ -5797,6 +5797,9 @@ def processar_tarefas_atrasadas(db: firestore.client) -> Dict:
 
 
 
+# NOVAS NOTIFICAÇÕES INSTANTÂNEAS (SETEMBRO 2025)
+# ================================================================================
+
 def _notificar_paciente_exame_criado(db: firestore.client, paciente_id: str, exame_data: Dict):
     """Notifica o paciente sobre um novo exame criado para ele."""
     try:
@@ -5809,22 +5812,9 @@ def _notificar_paciente_exame_criado(db: firestore.client, paciente_id: str, exa
 
         paciente_data = paciente_doc.to_dict()
         nome_exame = exame_data.get('nome_exame', 'exame')
-        data_exame = exame_data.get('data_exame', '')
 
-        # Formatar data se disponível
-        data_formatada = ""
-        if data_exame:
-            try:
-                if isinstance(data_exame, str):
-                    from datetime import datetime
-                    data_obj = datetime.fromisoformat(data_exame.replace('Z', '+00:00'))
-                    data_formatada = f" para {data_obj.strftime('%d/%m/%Y')}"
-                elif hasattr(data_exame, 'strftime'):
-                    data_formatada = f" para {data_exame.strftime('%d/%m/%Y')}"
-            except:
-                pass
-
-        mensagem_body = f"Foi agendado o exame '{nome_exame}'{data_formatada}."
+        # Melhorar a mensagem do exame
+        mensagem_body = f"Foi agendado o exame '{nome_exame}' para você."
 
         # 1. Persistir notificação no Firestore
         exame_id = exame_data.get('id', 'novo_exame')
@@ -5886,9 +5876,9 @@ def _notificar_paciente_suporte_adicionado(db: firestore.client, paciente_id: st
             return
 
         paciente_data = paciente_doc.to_dict()
-        titulo_suporte = suporte_data.get('titulo', 'sessão de suporte')
 
-        mensagem_body = f"Foi agendada uma nova sessão: '{titulo_suporte}'."
+        # Mensagem genérica para evitar problemas com criptografia
+        mensagem_body = "Um novo suporte psicológico foi postado para você."
 
         # 1. Persistir notificação no Firestore
         suporte_id = suporte_data.get('id', 'novo_suporte')
