@@ -5927,3 +5927,252 @@ def _notificar_paciente_suporte_adicionado(db: firestore.client, paciente_id: st
 
     except Exception as e:
         logger.error(f"Erro ao notificar suporte adicionado para paciente {paciente_id}: {e}")
+
+
+def processar_lembretes_exames(db: firestore.client) -> Dict:
+    """
+    Busca exames marcados para amanhã e envia lembretes para os pacientes.
+    Esta função é projetada para ser chamada por um job agendado (Cloud Scheduler).
+    """
+    stats = {"total_exames_verificados": 0, "total_lembretes_enviados": 0, "erros": 0}
+
+    # Data de amanhã com timezone UTC
+    amanha = datetime.now(timezone.utc) + timedelta(days=1)
+    data_amanha_inicio = amanha.replace(hour=0, minute=0, second=0, microsecond=0)
+    data_amanha_fim = amanha.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+    logger.info(f"Processando lembretes para exames entre {data_amanha_inicio} e {data_amanha_fim}")
+
+    try:
+        # Busca todos os usuários para verificar seus exames
+        usuarios_ref = db.collection('usuarios')
+
+        for usuario_doc in usuarios_ref.stream():
+            usuario_id = usuario_doc.id
+
+            # Busca exames do usuário marcados para amanhã
+            exames_ref = usuario_doc.reference.collection('exames')
+            query = exames_ref.where('data_exame', '>=', data_amanha_inicio).where('data_exame', '<=', data_amanha_fim)
+
+            exames_amanha = list(query.stream())
+            stats["total_exames_verificados"] += len(exames_amanha)
+
+            if exames_amanha:
+                try:
+                    # Busca dados do paciente
+                    usuario_data = usuario_doc.to_dict()
+                    nome_paciente = usuario_data.get('nome', 'Paciente')
+                    tokens_fcm = usuario_data.get('fcm_tokens', [])
+
+                    for exame_doc in exames_amanha:
+                        try:
+                            exame_data = exame_doc.to_dict()
+                            nome_exame = exame_data.get('nome_exame', 'Exame')
+                            horario_exame = exame_data.get('horario_exame', '')
+
+                            # Prepara mensagem do lembrete
+                            horario_texto = f" às {horario_exame}" if horario_exame else ""
+                            mensagem_title = "Lembrete de Exame"
+                            mensagem_body = f"Olá {nome_paciente}! Você tem o exame '{nome_exame}' marcado para amanhã{horario_texto}."
+
+                            # ID único para evitar notificações duplicadas
+                            notificacao_id = f"LEMBRETE_EXAME:{exame_doc.id}:{data_amanha_inicio.strftime('%Y%m%d')}"
+
+                            # 1. Persistir a notificação no Firestore
+                            try:
+                                notificacao_doc_ref = usuario_doc.reference.collection('notificacoes').document(notificacao_id)
+
+                                # Verifica se já existe para evitar duplicatas
+                                if not notificacao_doc_ref.get().exists:
+                                    notificacao_doc_ref.set({
+                                        "title": mensagem_title,
+                                        "body": mensagem_body,
+                                        "tipo": "LEMBRETE_EXAME",
+                                        "relacionado": {
+                                            "exame_id": exame_doc.id,
+                                            "paciente_id": usuario_id,
+                                            "data_exame": exame_data.get('data_exame')
+                                        },
+                                        "lida": False,
+                                        "data_criacao": firestore.SERVER_TIMESTAMP,
+                                        "dedupe_key": notificacao_id
+                                    })
+                                    logger.info(f"Notificação de lembrete de exame PERSISTIDA para o paciente {usuario_id}.")
+                                else:
+                                    logger.info(f"Notificação de lembrete já existe para o exame {exame_doc.id}")
+                                    continue
+
+                            except Exception as e:
+                                logger.error(f"Erro ao PERSISTIR notificação de lembrete de exame: {e}")
+                                stats["erros"] += 1
+                                continue
+
+                            # 2. Enviar a notificação via FCM, se houver tokens
+                            if tokens_fcm:
+                                data_payload = {
+                                    "tipo": "LEMBRETE_EXAME",
+                                    "exame_id": exame_doc.id,
+                                    "paciente_id": usuario_id,
+                                    "title": mensagem_title,
+                                    "body": mensagem_body
+                                }
+                                try:
+                                    from firebase_admin import messaging
+
+                                    message = messaging.MulticastMessage(
+                                        notification=messaging.Notification(
+                                            title=mensagem_title,
+                                            body=mensagem_body
+                                        ),
+                                        data=data_payload,
+                                        tokens=tokens_fcm
+                                    )
+
+                                    response = messaging.send_multicast(message)
+                                    stats["total_lembretes_enviados"] += 1
+                                    logger.info(f"Lembrete de exame enviado via FCM para paciente {usuario_id}: {response.success_count}/{len(tokens_fcm)} tokens")
+                                except Exception as e:
+                                    logger.error(f"Erro ao enviar FCM para lembrete de exame: {e}")
+                                    stats["erros"] += 1
+                            else:
+                                logger.warning(f"Paciente {usuario_id} não possui tokens FCM para receber lembrete")
+
+                        except Exception as e:
+                            logger.error(f"Erro ao processar exame {exame_doc.id}: {e}")
+                            stats["erros"] += 1
+
+                except Exception as e:
+                    logger.error(f"Erro ao processar exames do usuário {usuario_id}: {e}")
+                    stats["erros"] += 1
+
+    except Exception as e:
+        logger.error(f"Erro geral ao processar lembretes de exames: {e}")
+        stats["erros"] += 1
+
+    logger.info(f"Processamento de lembretes de exames concluído: {stats}")
+    return stats
+
+
+def verificar_disponibilidade_profissionais(db: firestore.client) -> Dict:
+    """
+    Verifica se há profissionais disponíveis e envia alertas quando necessário.
+    Esta função é projetada para ser chamada por um job agendado.
+    """
+    stats = {"alertas_enviados": 0, "tecnicos_verificados": 0, "enfermeiros_verificados": 0, "medicos_verificados": 0, "erros": 0}
+
+    try:
+        # Busca todos os negócios ativos
+        negocios_ref = db.collection('negocios')
+
+        for negocio_doc in negocios_ref.stream():
+            negocio_id = negocio_doc.id
+            negocio_data = negocio_doc.to_dict()
+
+            try:
+                # Verifica técnicos disponíveis
+                tecnicos_query = db.collection('profissionais').where('negocio_id', '==', negocio_id).where('role', '==', 'tecnico').where('ativo', '==', True)
+                tecnicos_ativos = list(tecnicos_query.stream())
+                stats["tecnicos_verificados"] += len(tecnicos_ativos)
+
+                if len(tecnicos_ativos) == 0:
+                    _enviar_alerta_ausencia(db, negocio_id, "ALERTA_SEM_TECNICO", "Nenhum técnico disponível no momento.")
+                    stats["alertas_enviados"] += 1
+
+                # Verifica enfermeiros disponíveis
+                enfermeiros_query = db.collection('profissionais').where('negocio_id', '==', negocio_id).where('role', '==', 'enfermeiro').where('ativo', '==', True)
+                enfermeiros_ativos = list(enfermeiros_query.stream())
+                stats["enfermeiros_verificados"] += len(enfermeiros_ativos)
+
+                if len(enfermeiros_ativos) == 0:
+                    _enviar_alerta_ausencia(db, negocio_id, "ALERTA_SEM_ENFERMEIRO", "Nenhum enfermeiro disponível no momento.")
+                    stats["alertas_enviados"] += 1
+
+                # Verifica médicos disponíveis
+                medicos_query = db.collection('profissionais').where('negocio_id', '==', negocio_id).where('role', '==', 'medico').where('ativo', '==', True)
+                medicos_ativos = list(medicos_query.stream())
+                stats["medicos_verificados"] += len(medicos_ativos)
+
+                if len(medicos_ativos) == 0:
+                    _enviar_alerta_ausencia(db, negocio_id, "ALERTA_SEM_MEDICO", "Nenhum médico disponível no momento.")
+                    stats["alertas_enviados"] += 1
+
+            except Exception as e:
+                logger.error(f"Erro ao verificar profissionais do negócio {negocio_id}: {e}")
+                stats["erros"] += 1
+
+    except Exception as e:
+        logger.error(f"Erro geral ao verificar disponibilidade de profissionais: {e}")
+        stats["erros"] += 1
+
+    logger.info(f"Verificação de disponibilidade concluída: {stats}")
+    return stats
+
+
+def _enviar_alerta_ausencia(db: firestore.client, negocio_id: str, tipo_alerta: str, mensagem: str):
+    """Envia alerta de ausência para admins do negócio."""
+    try:
+        # Busca admins do negócio
+        usuarios_ref = db.collection('usuarios')
+
+        for usuario_doc in usuarios_ref.stream():
+            usuario_data = usuario_doc.to_dict()
+            roles = usuario_data.get('roles', {})
+
+            # Verifica se é admin deste negócio
+            if negocio_id in roles and roles[negocio_id] == 'admin':
+                admin_id = usuario_doc.id
+                tokens_fcm = usuario_data.get('fcm_tokens', [])
+
+                # ID único para evitar spam
+                notificacao_id = f"{tipo_alerta}:{negocio_id}:{datetime.now(timezone.utc).strftime('%Y%m%d%H')}"
+
+                # 1. Persistir notificação no Firestore
+                try:
+                    notificacao_doc_ref = usuario_doc.reference.collection('notificacoes').document(notificacao_id)
+
+                    # Verifica se já existe (evita spam horário)
+                    if not notificacao_doc_ref.get().exists:
+                        notificacao_doc_ref.set({
+                            "title": "Alerta de Ausência",
+                            "body": mensagem,
+                            "tipo": tipo_alerta,
+                            "relacionado": {"negocio_id": negocio_id},
+                            "lida": False,
+                            "data_criacao": firestore.SERVER_TIMESTAMP,
+                            "dedupe_key": notificacao_id
+                        })
+                        logger.info(f"Alerta de ausência {tipo_alerta} PERSISTIDO para admin {admin_id}")
+
+                        # 2. Enviar FCM push notification
+                        if tokens_fcm:
+                            try:
+                                from firebase_admin import messaging
+
+                                data_payload = {
+                                    "tipo": tipo_alerta,
+                                    "negocio_id": negocio_id,
+                                    "title": "Alerta de Ausência",
+                                    "body": mensagem
+                                }
+
+                                message = messaging.MulticastMessage(
+                                    notification=messaging.Notification(
+                                        title="Alerta de Ausência",
+                                        body=mensagem
+                                    ),
+                                    data=data_payload,
+                                    tokens=tokens_fcm
+                                )
+
+                                response = messaging.send_multicast(message)
+                                logger.info(f"Alerta de ausência enviado via FCM para admin {admin_id}: {response.success_count}/{len(tokens_fcm)} tokens")
+                            except Exception as e:
+                                logger.error(f"Erro ao enviar FCM para alerta de ausência: {e}")
+                    else:
+                        logger.info(f"Alerta {tipo_alerta} já enviado hoje para admin {admin_id}")
+
+                except Exception as e:
+                    logger.error(f"Erro ao persistir alerta de ausência: {e}")
+
+    except Exception as e:
+        logger.error(f"Erro ao enviar alerta de ausência {tipo_alerta}: {e}")
