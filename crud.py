@@ -2062,10 +2062,26 @@ def _notificar_cliente_confirmacao(db: firestore.client, agendamento: Dict, agen
 def vincular_paciente_enfermeiro(db: firestore.client, negocio_id: str, paciente_id: str, enfermeiro_id: Optional[str], autor_uid: str) -> Optional[Dict]:
     """Vincula ou desvincula um paciente de um enfermeiro."""
     paciente_ref = db.collection('usuarios').document(paciente_id)
-    
+
+    # Obter enfermeiro atual antes da atualização
+    paciente_doc_atual = paciente_ref.get()
+    enfermeiro_atual_id = paciente_doc_atual.to_dict().get('enfermeiro_id') if paciente_doc_atual.exists else None
+
     # LÓGICA DE DESVINCULAÇÃO
     if enfermeiro_id is None:
         paciente_ref.update({'enfermeiro_id': firestore.DELETE_FIELD})
+
+        # CORREÇÃO: Remover paciente da lista do enfermeiro anterior
+        if enfermeiro_atual_id:
+            try:
+                enfermeiro_ref = db.collection('usuarios').document(enfermeiro_atual_id)
+                enfermeiro_ref.update({
+                    'pacientes_ids': firestore.ArrayRemove([paciente_id])
+                })
+                logger.info(f"Paciente {paciente_id} removido da lista do enfermeiro {enfermeiro_atual_id}")
+            except Exception as e:
+                logger.error(f"Erro ao remover paciente {paciente_id} do enfermeiro {enfermeiro_atual_id}: {e}")
+
         acao_log = "DESVINCULO_PACIENTE_ENFERMEIRO"
         detalhes_log = {"paciente_id": paciente_id}
         logger.info(f"Paciente {paciente_id} desvinculado do enfermeiro.")
@@ -2076,13 +2092,35 @@ def vincular_paciente_enfermeiro(db: firestore.client, negocio_id: str, paciente
         if not perfil_enfermeiro: return None
         usuario_enfermeiro = buscar_usuario_por_firebase_uid(db, perfil_enfermeiro['usuario_uid'])
         if not usuario_enfermeiro: return None
-        
+
         usuario_enfermeiro_id_para_salvar = usuario_enfermeiro['id']
         paciente_ref.update({'enfermeiro_id': usuario_enfermeiro_id_para_salvar})
+
+        # CORREÇÃO: Remover paciente do enfermeiro anterior (se existir)
+        if enfermeiro_atual_id and enfermeiro_atual_id != usuario_enfermeiro_id_para_salvar:
+            try:
+                enfermeiro_anterior_ref = db.collection('usuarios').document(enfermeiro_atual_id)
+                enfermeiro_anterior_ref.update({
+                    'pacientes_ids': firestore.ArrayRemove([paciente_id])
+                })
+                logger.info(f"Paciente {paciente_id} removido da lista do enfermeiro anterior {enfermeiro_atual_id}")
+            except Exception as e:
+                logger.error(f"Erro ao remover paciente {paciente_id} do enfermeiro anterior {enfermeiro_atual_id}: {e}")
+
+        # CORREÇÃO: Adicionar paciente à lista do novo enfermeiro
+        try:
+            enfermeiro_ref = db.collection('usuarios').document(usuario_enfermeiro_id_para_salvar)
+            enfermeiro_ref.update({
+                'pacientes_ids': firestore.ArrayUnion([paciente_id])
+            })
+            logger.info(f"Paciente {paciente_id} adicionado à lista do enfermeiro {usuario_enfermeiro_id_para_salvar}")
+        except Exception as e:
+            logger.error(f"Erro ao adicionar paciente {paciente_id} ao enfermeiro {usuario_enfermeiro_id_para_salvar}: {e}")
+
         acao_log = "VINCULO_PACIENTE_ENFERMEIRO"
         detalhes_log = {"paciente_id": paciente_id, "enfermeiro_id": usuario_enfermeiro_id_para_salvar}
         logger.info(f"Paciente {paciente_id} vinculado ao enfermeiro {usuario_enfermeiro_id_para_salvar}.")
-        
+
         # Notificar enfermeiro sobre associação
         try:
             _notificar_profissional_associacao(db, usuario_enfermeiro_id_para_salvar, paciente_id, "enfermeiro")
@@ -2158,11 +2196,27 @@ def desvincular_paciente_enfermeiro(db: firestore.client, negocio_id: str, pacie
 def vincular_paciente_medico(db: firestore.client, negocio_id: str, paciente_id: str, medico_id: Optional[str], autor_uid: str) -> Optional[Dict]:
     """Vincula ou desvincula um paciente de um médico."""
     paciente_ref = db.collection('usuarios').document(paciente_id)
-    
+
+    # Obter médico atual antes da atualização
+    paciente_doc_atual = paciente_ref.get()
+    medico_atual_id = paciente_doc_atual.to_dict().get('medico_vinculado_id') if paciente_doc_atual.exists else None
+
     # LÓGICA DE DESVINCULAÇÃO
     if medico_id is None:
         # --- CORREÇÃO APLICADA AQUI ---
         paciente_ref.update({'medico_vinculado_id': firestore.DELETE_FIELD})
+
+        # CORREÇÃO: Remover paciente da lista do médico anterior
+        if medico_atual_id:
+            try:
+                medico_ref = db.collection('usuarios').document(medico_atual_id)
+                medico_ref.update({
+                    'pacientes_ids': firestore.ArrayRemove([paciente_id])
+                })
+                logger.info(f"Paciente {paciente_id} removido da lista do médico {medico_atual_id}")
+            except Exception as e:
+                logger.error(f"Erro ao remover paciente {paciente_id} do médico {medico_atual_id}: {e}")
+
         acao_log = "DESVINCULO_PACIENTE_MEDICO"
         detalhes_log = {"paciente_id": paciente_id}
         logger.info(f"Paciente {paciente_id} desvinculado do médico.")
@@ -2172,15 +2226,37 @@ def vincular_paciente_medico(db: firestore.client, negocio_id: str, paciente_id:
         medico_doc = db.collection('usuarios').document(medico_id).get()
         if not medico_doc.exists:
             raise ValueError(f"Médico com ID {medico_id} não encontrado.")
-        
+
         medico_data = medico_doc.to_dict()
         roles = medico_data.get('roles', {})
-        
+
         if roles.get(negocio_id) != 'medico':
             raise ValueError(f"Usuário {medico_id} não possui a role 'medico' no negócio {negocio_id}.")
-        
+
         # --- CORREÇÃO APLICADA AQUI ---
         paciente_ref.update({'medico_vinculado_id': medico_id})
+
+        # CORREÇÃO: Remover paciente do médico anterior (se existir)
+        if medico_atual_id and medico_atual_id != medico_id:
+            try:
+                medico_anterior_ref = db.collection('usuarios').document(medico_atual_id)
+                medico_anterior_ref.update({
+                    'pacientes_ids': firestore.ArrayRemove([paciente_id])
+                })
+                logger.info(f"Paciente {paciente_id} removido da lista do médico anterior {medico_atual_id}")
+            except Exception as e:
+                logger.error(f"Erro ao remover paciente {paciente_id} do médico anterior {medico_atual_id}: {e}")
+
+        # CORREÇÃO: Adicionar paciente à lista do novo médico
+        try:
+            medico_ref = db.collection('usuarios').document(medico_id)
+            medico_ref.update({
+                'pacientes_ids': firestore.ArrayUnion([paciente_id])
+            })
+            logger.info(f"Paciente {paciente_id} adicionado à lista do médico {medico_id}")
+        except Exception as e:
+            logger.error(f"Erro ao adicionar paciente {paciente_id} ao médico {medico_id}: {e}")
+
         acao_log = "VINCULO_PACIENTE_MEDICO"
         detalhes_log = {"paciente_id": paciente_id, "medico_id": medico_id}
         logger.info(f"Paciente {paciente_id} vinculado ao médico {medico_id}.")
@@ -2219,12 +2295,39 @@ def vincular_tecnicos_paciente(db: firestore.client, paciente_id: str, tecnicos_
                 raise ValueError(f"Técnico com ID '{tecnico_id}' não encontrado.")
             # Opcional: validar se o papel do usuário é realmente 'tecnico'
         
+        # Atualizar o documento do paciente com a lista de técnicos
         paciente_ref.update({
             'tecnicos_ids': tecnicos_ids
         })
-        
+
+        # CORREÇÃO: Atualizar bidirecionalmente - adicionar paciente às listas dos técnicos
+        tecnicos_removidos = [t_id for t_id in tecnicos_atuais if t_id not in tecnicos_ids]
+        tecnicos_adicionados = [t_id for t_id in tecnicos_ids if t_id not in tecnicos_atuais]
+
+        # Remover paciente dos técnicos que foram desvinculados
+        for tecnico_id in tecnicos_removidos:
+            try:
+                tecnico_ref = db.collection('usuarios').document(tecnico_id)
+                tecnico_ref.update({
+                    'pacientes_ids': firestore.ArrayRemove([paciente_id])
+                })
+                logger.info(f"Paciente {paciente_id} removido da lista do técnico {tecnico_id}")
+            except Exception as e:
+                logger.error(f"Erro ao remover paciente {paciente_id} do técnico {tecnico_id}: {e}")
+
+        # Adicionar paciente aos técnicos que foram vinculados
+        for tecnico_id in tecnicos_adicionados:
+            try:
+                tecnico_ref = db.collection('usuarios').document(tecnico_id)
+                tecnico_ref.update({
+                    'pacientes_ids': firestore.ArrayUnion([paciente_id])
+                })
+                logger.info(f"Paciente {paciente_id} adicionado à lista do técnico {tecnico_id}")
+            except Exception as e:
+                logger.error(f"Erro ao adicionar paciente {paciente_id} ao técnico {tecnico_id}: {e}")
+
         # Identificar novos técnicos (que não estavam na lista anterior)
-        novos_tecnicos = [t_id for t_id in tecnicos_ids if t_id not in tecnicos_atuais]
+        novos_tecnicos = tecnicos_adicionados
         
         # Notificar apenas os novos técnicos
         for novo_tecnico_id in novos_tecnicos:
