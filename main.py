@@ -2983,6 +2983,8 @@ def debug_verificacao(db: firestore.client = Depends(get_db)):
 @app.post("/tasks/debug-technician-notifications", tags=["Jobs Agendados"])
 def debug_technician_notifications(db: firestore.client = Depends(get_db)):
     """(PÚBLICO - DEBUG) Testa notificações para técnicos especificamente"""
+    from datetime import datetime, timezone
+
     debug_info = {
         "timestamp": datetime.now().isoformat(),
         "tarefas_verificacao_encontradas": 0,
@@ -2993,7 +2995,6 @@ def debug_technician_notifications(db: firestore.client = Depends(get_db)):
     }
 
     try:
-        from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
 
         # 1. Buscar tarefas de verificação pendentes
