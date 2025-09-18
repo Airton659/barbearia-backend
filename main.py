@@ -2978,3 +2978,70 @@ def debug_verificacao(db: firestore.client = Depends(get_db)):
         
     except Exception as e:
         return {"erro": str(e)}
+
+@app.post("/tasks/debug-technician-notifications", tags=["Jobs Agendados"])
+def debug_technician_notifications(db: firestore.client = Depends(get_db)):
+    """(PÚBLICO - DEBUG) Testa notificações para técnicos especificamente"""
+    debug_info = {
+        "timestamp": datetime.now().isoformat(),
+        "tarefas_verificacao_encontradas": 0,
+        "tarefas_atrasadas": 0,
+        "pacientes_com_tecnicos": 0,
+        "tecnicos_notificados": 0,
+        "detalhes": []
+    }
+
+    try:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+
+        # 1. Buscar tarefas de verificação pendentes
+        verificacao_ref = db.collection("tarefas_a_verificar")
+        pendentes = list(verificacao_ref.where("status", "==", "pendente").stream())
+        debug_info["tarefas_verificacao_encontradas"] = len(pendentes)
+
+        for doc in pendentes:
+            dados = doc.to_dict()
+            tarefa_id = dados.get("tarefaId")
+            paciente_id = dados.get("pacienteId")
+            data_limite = dados.get("dataHoraLimite")
+
+            # Verificar se está vencida
+            vencida = False
+            if data_limite:
+                if hasattr(data_limite, "replace"):
+                    if data_limite.tzinfo is None:
+                        data_limite = data_limite.replace(tzinfo=timezone.utc)
+                    else:
+                        data_limite = data_limite.astimezone(timezone.utc)
+                vencida = data_limite <= now
+
+            if vencida:
+                # 2. Verificar se tarefa está realmente não concluída
+                tarefa_doc = db.collection("tarefas_essenciais").document(tarefa_id).get()
+                if tarefa_doc.exists and not tarefa_doc.to_dict().get("foiConcluida", False):
+                    debug_info["tarefas_atrasadas"] += 1
+
+                    # 3. Buscar técnicos do paciente
+                    paciente_doc = db.collection("usuarios").document(paciente_id).get()
+                    if paciente_doc.exists:
+                        paciente_data = paciente_doc.to_dict()
+                        tecnicos_ids = paciente_data.get("tecnicos_ids", [])
+
+                        if tecnicos_ids:
+                            debug_info["pacientes_com_tecnicos"] += 1
+                            debug_info["detalhes"].append({
+                                "tarefa_id": tarefa_id,
+                                "paciente_id": paciente_id,
+                                "tecnicos_ids": tecnicos_ids,
+                                "quantidade_tecnicos": len(tecnicos_ids),
+                                "tarefa_descricao": tarefa_doc.to_dict().get("descricao", "N/A"),
+                                "data_limite": data_limite.isoformat() if data_limite else None,
+                                "vencida": vencida
+                            })
+                            debug_info["tecnicos_notificados"] += len(tecnicos_ids)
+
+        return debug_info
+
+    except Exception as e:
+        return {"erro": str(e), "debug_info": debug_info}
