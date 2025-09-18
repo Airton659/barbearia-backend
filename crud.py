@@ -6200,124 +6200,15 @@ def processar_lembretes_exames(db: firestore.client) -> Dict:
 
 def verificar_disponibilidade_profissionais(db: firestore.client) -> Dict:
     """
-    Verifica se há profissionais disponíveis e envia alertas quando necessário.
-    Esta função é projetada para ser chamada por um job agendado.
+    FUNÇÃO REMOVIDA: Verifica se há profissionais disponíveis e envia alertas quando necessário.
+    Esta função foi desabilitada conforme solicitação do usuário.
     """
-    stats = {"alertas_enviados": 0, "tecnicos_verificados": 0, "enfermeiros_verificados": 0, "medicos_verificados": 0, "erros": 0}
-
-    try:
-        # Busca todos os negócios ativos
-        negocios_ref = db.collection('negocios')
-
-        for negocio_doc in negocios_ref.stream():
-            negocio_id = negocio_doc.id
-            negocio_data = negocio_doc.to_dict()
-
-            try:
-                # Verifica técnicos disponíveis
-                tecnicos_query = db.collection('profissionais').where('negocio_id', '==', negocio_id).where('role', '==', 'tecnico').where('ativo', '==', True)
-                tecnicos_ativos = list(tecnicos_query.stream())
-                stats["tecnicos_verificados"] += len(tecnicos_ativos)
-
-                if len(tecnicos_ativos) == 0:
-                    _enviar_alerta_ausencia(db, negocio_id, "ALERTA_SEM_TECNICO", "Nenhum técnico disponível no momento.")
-                    stats["alertas_enviados"] += 1
-
-                # Verifica enfermeiros disponíveis
-                enfermeiros_query = db.collection('profissionais').where('negocio_id', '==', negocio_id).where('role', '==', 'enfermeiro').where('ativo', '==', True)
-                enfermeiros_ativos = list(enfermeiros_query.stream())
-                stats["enfermeiros_verificados"] += len(enfermeiros_ativos)
-
-                if len(enfermeiros_ativos) == 0:
-                    _enviar_alerta_ausencia(db, negocio_id, "ALERTA_SEM_ENFERMEIRO", "Nenhum enfermeiro disponível no momento.")
-                    stats["alertas_enviados"] += 1
-
-                # Verifica médicos disponíveis
-                medicos_query = db.collection('profissionais').where('negocio_id', '==', negocio_id).where('role', '==', 'medico').where('ativo', '==', True)
-                medicos_ativos = list(medicos_query.stream())
-                stats["medicos_verificados"] += len(medicos_ativos)
-
-                if len(medicos_ativos) == 0:
-                    _enviar_alerta_ausencia(db, negocio_id, "ALERTA_SEM_MEDICO", "Nenhum médico disponível no momento.")
-                    stats["alertas_enviados"] += 1
-
-            except Exception as e:
-                logger.error(f"Erro ao verificar profissionais do negócio {negocio_id}: {e}")
-                stats["erros"] += 1
-
-    except Exception as e:
-        logger.error(f"Erro geral ao verificar disponibilidade de profissionais: {e}")
-        stats["erros"] += 1
-
-    logger.info(f"Verificação de disponibilidade concluída: {stats}")
-    return stats
+    # FUNÇÃO DESABILITADA - retorna stats vazios
+    return {"alertas_enviados": 0, "tecnicos_verificados": 0, "enfermeiros_verificados": 0, "medicos_verificados": 0, "erros": 0}
 
 
 def _enviar_alerta_ausencia(db: firestore.client, negocio_id: str, tipo_alerta: str, mensagem: str):
-    """Envia alerta de ausência para admins do negócio."""
-    try:
-        # Busca admins do negócio
-        usuarios_ref = db.collection('usuarios')
-
-        for usuario_doc in usuarios_ref.stream():
-            usuario_data = usuario_doc.to_dict()
-            roles = usuario_data.get('roles', {})
-
-            # Verifica se é admin deste negócio
-            if negocio_id in roles and roles[negocio_id] == 'admin':
-                admin_id = usuario_doc.id
-                tokens_fcm = usuario_data.get('fcm_tokens', [])
-
-                # ID único para evitar spam
-                notificacao_id = f"{tipo_alerta}:{negocio_id}:{datetime.now(timezone.utc).strftime('%Y%m%d%H')}"
-
-                # 1. Persistir notificação no Firestore
-                try:
-                    notificacao_doc_ref = usuario_doc.reference.collection('notificacoes').document(notificacao_id)
-
-                    # Verifica se já existe (evita spam horário)
-                    if not notificacao_doc_ref.get().exists:
-                        notificacao_doc_ref.set({
-                            "title": "Alerta de Ausência",
-                            "body": mensagem,
-                            "tipo": tipo_alerta,
-                            "relacionado": {"negocio_id": negocio_id},
-                            "lida": False,
-                            "data_criacao": firestore.SERVER_TIMESTAMP,
-                            "dedupe_key": notificacao_id
-                        })
-                        logger.info(f"Alerta de ausência {tipo_alerta} PERSISTIDO para admin {admin_id}")
-
-                        # 2. Enviar FCM push notification
-                        if tokens_fcm:
-                            try:
-                                from firebase_admin import messaging
-
-                                data_payload = {
-                                    "tipo": tipo_alerta,
-                                    "negocio_id": negocio_id,
-                                    "title": "Alerta de Ausência",
-                                    "body": mensagem
-                                }
-
-                                message = messaging.MulticastMessage(
-                                    notification=messaging.Notification(
-                                        title="Alerta de Ausência",
-                                        body=mensagem
-                                    ),
-                                    data=data_payload,
-                                    tokens=tokens_fcm
-                                )
-
-                                response = messaging.send_multicast(message)
-                                logger.info(f"Alerta de ausência enviado via FCM para admin {admin_id}: {response.success_count}/{len(tokens_fcm)} tokens")
-                            except Exception as e:
-                                logger.error(f"Erro ao enviar FCM para alerta de ausência: {e}")
-                    else:
-                        logger.info(f"Alerta {tipo_alerta} já enviado hoje para admin {admin_id}")
-
-                except Exception as e:
-                    logger.error(f"Erro ao persistir alerta de ausência: {e}")
-
-    except Exception as e:
-        logger.error(f"Erro ao enviar alerta de ausência {tipo_alerta}: {e}")
+    """FUNÇÃO REMOVIDA: Envia alerta de ausência para admins do negócio.
+    Esta função foi desabilitada conforme solicitação do usuário."""
+    # FUNÇÃO DESABILITADA - não faz nada
+    return

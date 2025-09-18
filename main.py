@@ -2918,15 +2918,16 @@ def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
             logger.error(f"Erro no processamento de lembretes de exames: {e}")
             stats["erros_lembretes"] = str(e)
 
-        # NOVO: Verificar disponibilidade de profissionais
-        try:
-            logger.info("Iniciando verificação de disponibilidade de profissionais")
-            profissionais_stats = crud.verificar_disponibilidade_profissionais(db)
-            stats["alertas_profissionais_enviados"] = profissionais_stats.get("alertas_enviados", 0)
-            stats["erros_profissionais"] = profissionais_stats.get("erros", 0)
-        except Exception as e:
-            logger.error(f"Erro na verificação de disponibilidade de profissionais: {e}")
-            stats["erros_profissionais"] = str(e)
+        # REMOVIDO: Verificação de disponibilidade de profissionais
+        # (Comentado conforme solicitação do usuário)
+        # try:
+        #     logger.info("Iniciando verificação de disponibilidade de profissionais")
+        #     profissionais_stats = crud.verificar_disponibilidade_profissionais(db)
+        #     stats["alertas_profissionais_enviados"] = profissionais_stats.get("alertas_enviados", 0)
+        #     stats["erros_profissionais"] = profissionais_stats.get("erros", 0)
+        # except Exception as e:
+        #     logger.error(f"Erro na verificação de disponibilidade de profissionais: {e}")
+        #     stats["erros_profissionais"] = str(e)
 
         logger.info(f"Processamento concluído: {stats}")
         return stats
