@@ -2817,8 +2817,71 @@ def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
                                             logger.warning(f"Erro ao enviar push: {push_e}")
                                 
                                 stats["total_notificadas"] += 1
-                                logger.info(f"Notificação enviada para tarefa {tarefa_id}")
-                            
+                                logger.info(f"Notificação enviada para criador da tarefa {tarefa_id}")
+
+                            # NOVA FUNCIONALIDADE: Notificar também os técnicos do paciente
+                            try:
+                                paciente_doc = db.collection('usuarios').document(paciente_id).get()
+                                if paciente_doc.exists:
+                                    paciente_data = paciente_doc.to_dict()
+                                    tecnicos_ids = paciente_data.get('tecnicos_ids', [])
+
+                                    # Buscar nome do paciente para a mensagem dos técnicos
+                                    try:
+                                        nome_raw = paciente_data.get('nome', '')
+                                        nome_paciente = crud.decrypt_data(nome_raw) if nome_raw else "o paciente"
+                                    except Exception:
+                                        nome_paciente = "o paciente"
+
+                                    # Notificar cada técnico do paciente
+                                    for tecnico_id in tecnicos_ids:
+                                        try:
+                                            tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
+                                            if tecnico_doc.exists:
+                                                tecnico_data = tecnico_doc.to_dict()
+                                                tecnico_tokens = tecnico_data.get('fcm_tokens', [])
+
+                                                # Conteúdo específico para técnicos
+                                                titulo_tecnico = "Tarefa Atrasada - Paciente sob seus cuidados"
+                                                corpo_tecnico = f"A tarefa '{descricao[:30]}...' para {nome_paciente} não foi concluída no prazo."
+
+                                                # Persistir notificação para o técnico
+                                                db.collection('usuarios').document(tecnico_id).collection('notificacoes').add({
+                                                    "title": titulo_tecnico,
+                                                    "body": corpo_tecnico,
+                                                    "tipo": "TAREFA_ATRASADA_TECNICO",
+                                                    "relacionado": {"tarefa_id": tarefa_id, "paciente_id": paciente_id},
+                                                    "lida": False,
+                                                    "data_criacao": firestore.SERVER_TIMESTAMP,
+                                                    "dedupe_key": f"TAREFA_ATRASADA_TECNICO_{tarefa_id}_{tecnico_id}"
+                                                })
+
+                                                # Enviar push para técnico
+                                                if tecnico_tokens and len(tecnico_tokens) > 0:
+                                                    data_payload_tecnico = {
+                                                        "tipo": "TAREFA_ATRASADA_TECNICO",
+                                                        "tarefa_id": tarefa_id,
+                                                        "paciente_id": paciente_id,
+                                                        "title": titulo_tecnico,
+                                                        "body": corpo_tecnico
+                                                    }
+                                                    try:
+                                                        message_tecnico = messaging.Message(
+                                                            data=data_payload_tecnico,
+                                                            token=tecnico_tokens[0]
+                                                        )
+                                                        messaging.send(message_tecnico)
+                                                        logger.info(f"Push enviado para técnico {tecnico_id} sobre tarefa {tarefa_id}")
+                                                        stats["total_notificadas"] += 1
+                                                    except Exception as push_e:
+                                                        logger.warning(f"Erro ao enviar push para técnico {tecnico_id}: {push_e}")
+
+                                        except Exception as tecnico_e:
+                                            logger.error(f"Erro ao notificar técnico {tecnico_id}: {tecnico_e}")
+
+                            except Exception as tecnicos_e:
+                                logger.error(f"Erro ao buscar técnicos para notificação da tarefa {tarefa_id}: {tecnicos_e}")
+
                     except Exception as notif_e:
                         logger.error(f"Erro ao notificar tarefa {tarefa_id}: {notif_e}")
                         # Não incrementar erro pois a tarefa principal foi processada
