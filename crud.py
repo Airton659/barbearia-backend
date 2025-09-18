@@ -2769,6 +2769,48 @@ def get_ficha_completa_paciente(db: firestore.client, paciente_id: str, consulta
     ficha['checklist'] = _dedup_checklist_items(ficha.get('checklist', []))
     return ficha
 
+def listar_prontuarios(db: firestore.client, paciente_id: str) -> List[Dict]:
+    """Lista os prontuários simples de um paciente."""
+    try:
+        coll_ref = db.collection('usuarios').document(paciente_id).collection('prontuarios')
+        docs = coll_ref.order_by('data', direction=firestore.Query.DESCENDING).stream()
+
+        prontuarios = []
+        for doc in docs:
+            data = doc.to_dict()
+            data['id'] = doc.id
+            prontuarios.append(data)
+
+        return prontuarios
+    except Exception as e:
+        logger.error(f"Erro ao listar prontuários do paciente {paciente_id}: {e}")
+        return []
+
+def criar_prontuario(db: firestore.client, paciente_id: str, texto: str, tecnico_nome: Optional[str] = None) -> Dict:
+    """Cria um novo prontuário para o paciente."""
+    try:
+        coll_ref = db.collection('usuarios').document(paciente_id).collection('prontuarios')
+
+        prontuario_data = {
+            'data': firestore.SERVER_TIMESTAMP,
+            'texto': texto,
+            'tecnico_nome': tecnico_nome
+        }
+
+        doc_ref = coll_ref.add(prontuario_data)[1]
+
+        # Retorna o documento criado
+        doc = doc_ref.get()
+        data = doc.to_dict()
+        data['id'] = doc.id
+
+        logger.info(f"Prontuário criado para paciente {paciente_id}: {doc.id}")
+        return data
+
+    except Exception as e:
+        logger.error(f"Erro ao criar prontuário para paciente {paciente_id}: {e}")
+        raise e
+
 # =================================================================================
 # FUNÇÕES DE UPDATE/DELETE DA FICHA DO PACIENTE
 # =================================================================================

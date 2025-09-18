@@ -432,7 +432,17 @@ class FichaCompletaResponse(BaseModel):
     medicacoes: List[MedicacaoResponse]
     checklist: List[ChecklistItemResponse]
     orientacoes: List[OrientacaoResponse]
-    
+
+class ProntuarioResponse(BaseModel):
+    id: str
+    data: datetime
+    texto: str
+    tecnico_nome: Optional[str] = None
+
+class ProntuarioCreate(BaseModel):
+    texto: str
+    tecnico_nome: Optional[str] = None
+
 # =================================================================================
 # SCHEMAS DE DISPONIBILIDADE
 # =================================================================================
