@@ -2882,6 +2882,68 @@ def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
                             except Exception as tecnicos_e:
                                 logger.error(f"Erro ao buscar técnicos para notificação da tarefa {tarefa_id}: {tecnicos_e}")
 
+                            # NOVA FUNCIONALIDADE: Notificar também TODOS os admins do negócio
+                            try:
+                                # Buscar todos os usuários e filtrar admins do negócio específico
+                                usuarios_ref = db.collection('usuarios')
+                                usuarios_docs = usuarios_ref.stream()
+
+                                for usuario_doc in usuarios_docs:
+                                    try:
+                                        usuario_data = usuario_doc.to_dict()
+                                        roles = usuario_data.get('roles', {})
+
+                                        # Verificar se é admin do negócio AvcbtyokbHx82pYbiraE
+                                        if 'AvcbtyokbHx82pYbiraE' in roles and roles['AvcbtyokbHx82pYbiraE'] == 'admin':
+                                            admin_id = usuario_doc.id
+
+                                            # Evitar notificar o criador novamente (já foi notificado)
+                                            if admin_id == criador_id:
+                                                continue
+
+                                            admin_tokens = usuario_data.get('fcm_tokens', [])
+
+                                            # Conteúdo específico para admins
+                                            titulo_admin = "Tarefa Atrasada - Supervisão"
+                                            corpo_admin = f"A tarefa '{descricao[:30]}...' para {nome_paciente} não foi concluída no prazo."
+
+                                            # Persistir notificação para o admin
+                                            db.collection('usuarios').document(admin_id).collection('notificacoes').add({
+                                                "title": titulo_admin,
+                                                "body": corpo_admin,
+                                                "tipo": "TAREFA_ATRASADA",
+                                                "relacionado": {"tarefa_id": tarefa_id, "paciente_id": paciente_id},
+                                                "lida": False,
+                                                "data_criacao": firestore.SERVER_TIMESTAMP,
+                                                "dedupe_key": f"TAREFA_ATRASADA_ADMIN_{tarefa_id}_{admin_id}"
+                                            })
+
+                                            # Enviar push para admin
+                                            if admin_tokens and len(admin_tokens) > 0:
+                                                data_payload_admin = {
+                                                    "tipo": "TAREFA_ATRASADA",
+                                                    "tarefa_id": tarefa_id,
+                                                    "paciente_id": paciente_id,
+                                                    "title": titulo_admin,
+                                                    "body": corpo_admin
+                                                }
+                                                try:
+                                                    message_admin = messaging.Message(
+                                                        data=data_payload_admin,
+                                                        token=admin_tokens[0]
+                                                    )
+                                                    messaging.send(message_admin)
+                                                    logger.info(f"Push enviado para admin {admin_id} sobre tarefa {tarefa_id}")
+                                                    stats["total_notificadas"] += 1
+                                                except Exception as push_e:
+                                                    logger.warning(f"Erro ao enviar push para admin {admin_id}: {push_e}")
+
+                                    except Exception as admin_e:
+                                        logger.error(f"Erro ao processar admin {usuario_doc.id}: {admin_e}")
+
+                            except Exception as admins_e:
+                                logger.error(f"Erro ao buscar admins para notificação da tarefa {tarefa_id}: {admins_e}")
+
                     except Exception as notif_e:
                         logger.error(f"Erro ao notificar tarefa {tarefa_id}: {notif_e}")
                         # Não incrementar erro pois a tarefa principal foi processada
