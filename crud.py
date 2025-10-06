@@ -4661,7 +4661,6 @@ def _notificar_criador_relatorio_avaliado(db: firestore.client, relatorio: Dict,
             logger.warning("Relatório sem criado_por_id. Não é possível notificar.")
             return
             
-        # Buscar dados do médico
         medico_doc = db.collection('usuarios').document(medico_id).get()
         if not medico_doc.exists:
             logger.error(f"Médico {medico_id} não encontrado.")
@@ -4669,7 +4668,6 @@ def _notificar_criador_relatorio_avaliado(db: firestore.client, relatorio: Dict,
         medico_data = medico_doc.to_dict()
         nome_medico = decrypt_data(medico_data.get('nome', 'Médico')) if medico_data.get('nome') else 'Médico'
         
-        # Buscar dados do paciente
         paciente_doc = db.collection('usuarios').document(paciente_id).get()
         if not paciente_doc.exists:
             logger.error(f"Paciente {paciente_id} não encontrado.")
@@ -4677,7 +4675,6 @@ def _notificar_criador_relatorio_avaliado(db: firestore.client, relatorio: Dict,
         paciente_data = paciente_doc.to_dict()
         nome_paciente = decrypt_data(paciente_data.get('nome', 'Paciente')) if paciente_data.get('nome') else 'Paciente'
         
-        # Buscar dados do criador (destinatário)
         criador_doc = db.collection('usuarios').document(criado_por_id).get()
         if not criador_doc.exists:
             logger.error(f"Criador do relatório {criado_por_id} não encontrado.")
@@ -4685,24 +4682,20 @@ def _notificar_criador_relatorio_avaliado(db: firestore.client, relatorio: Dict,
         criador_data = criador_doc.to_dict()
         tokens_fcm = criador_data.get('fcm_tokens', [])
         
-        # Preparar conteúdo da notificação
         titulo = "Relatório Avaliado"
         if status == "aprovado":
             corpo = f"O Dr(a). {nome_medico} aprovou o relatório do paciente {nome_paciente}."
         else:
             corpo = f"O Dr(a). {nome_medico} recusou o relatório do paciente {nome_paciente}."
         
-        # Dados para FCM
+        # CORREÇÃO: 'title' e 'body' removidos daqui
         data_payload = {
             "tipo": "RELATORIO_AVALIADO",
             "relatorio_id": relatorio.get('id'),
             "paciente_id": paciente_id,
             "status": status,
-            "title": titulo,
-            "body": corpo
         }
         
-        # Persistir notificação no Firestore
         notificacao_data = {
             "title": titulo,
             "body": corpo,
@@ -4716,10 +4709,8 @@ def _notificar_criador_relatorio_avaliado(db: firestore.client, relatorio: Dict,
         
         db.collection('usuarios').document(criado_por_id).collection('notificacoes').add(notificacao_data)
         
-        # Enviar push notification
         if tokens_fcm:
-            _send_data_push_to_tokens(db, criado_por_id, tokens_fcm, data_payload, "RELATORIO_AVALIADO",
-                                     notification_title=titulo, notification_body=corpo)
+            _send_data_push_to_tokens(db, criador_data.get('firebase_uid'), tokens_fcm, data_payload, titulo, corpo, "RELATORIO_AVALIADO")
             logger.info(f"Notificação de avaliação de relatório enviada para {criado_por_id}")
         else:
             logger.info(f"Usuário {criado_por_id} não possui tokens FCM registrados")
@@ -4730,7 +4721,6 @@ def _notificar_criador_relatorio_avaliado(db: firestore.client, relatorio: Dict,
 def _notificar_tecnicos_plano_atualizado(db: firestore.client, paciente_id: str, consulta_id: str):
     """Notifica todos os técnicos vinculados sobre novo plano de cuidado."""
     try:
-        # Buscar dados do paciente
         paciente_doc = db.collection('usuarios').document(paciente_id).get()
         if not paciente_doc.exists:
             logger.error(f"Paciente {paciente_id} não encontrado.")
@@ -4744,23 +4734,18 @@ def _notificar_tecnicos_plano_atualizado(db: firestore.client, paciente_id: str,
             logger.info(f"Paciente {paciente_id} não possui técnicos vinculados.")
             return
             
-        # Preparar conteúdo da notificação
         titulo = "Plano de Cuidado Atualizado"
         corpo = f"O plano de cuidado do paciente {nome_paciente} foi atualizado. Confirme a leitura para iniciar suas atividades."
         
-        # Dados para FCM
+        # CORREÇÃO: 'title' e 'body' removidos daqui
         data_payload = {
             "tipo": "PLANO_CUIDADO_ATUALIZADO",
             "paciente_id": paciente_id,
             "consulta_id": consulta_id,
-            "title": titulo,
-            "body": corpo
         }
         
-        # Notificar cada técnico
         for tecnico_id in tecnicos_ids:
             try:
-                # Buscar dados do técnico
                 tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
                 if not tecnico_doc.exists:
                     logger.warning(f"Técnico {tecnico_id} não encontrado.")
@@ -4769,7 +4754,6 @@ def _notificar_tecnicos_plano_atualizado(db: firestore.client, paciente_id: str,
                 tecnico_data = tecnico_doc.to_dict()
                 tokens_fcm = tecnico_data.get('fcm_tokens', [])
                 
-                # Persistir notificação no Firestore
                 notificacao_data = {
                     "title": titulo,
                     "body": corpo,
@@ -4782,10 +4766,8 @@ def _notificar_tecnicos_plano_atualizado(db: firestore.client, paciente_id: str,
                 
                 db.collection('usuarios').document(tecnico_id).collection('notificacoes').add(notificacao_data)
                 
-                # Enviar push notification
                 if tokens_fcm:
-                    _send_data_push_to_tokens(db, tecnico_id, tokens_fcm, data_payload, "PLANO_CUIDADO",
-                                             notification_title=titulo, notification_body=corpo)
+                    _send_data_push_to_tokens(db, tecnico_data.get('firebase_uid'), tokens_fcm, data_payload, titulo, corpo, "PLANO_CUIDADO")
                     logger.info(f"Notificação de plano atualizado enviada para técnico {tecnico_id}")
                 else:
                     logger.info(f"Técnico {tecnico_id} não possui tokens FCM registrados")
@@ -4798,10 +4780,10 @@ def _notificar_tecnicos_plano_atualizado(db: firestore.client, paciente_id: str,
     except Exception as e:
         logger.error(f"Erro ao notificar técnicos sobre plano atualizado: {e}")
 
+
 def _notificar_profissional_associacao(db: firestore.client, profissional_id: str, paciente_id: str, tipo_profissional: str):
     """Notifica um profissional (enfermeiro ou técnico) sobre associação a um paciente."""
     try:
-        # Buscar dados do paciente
         paciente_doc = db.collection('usuarios').document(paciente_id).get()
         if not paciente_doc.exists:
             logger.error(f"Paciente {paciente_id} não encontrado.")
@@ -4810,7 +4792,6 @@ def _notificar_profissional_associacao(db: firestore.client, profissional_id: st
         paciente_data = paciente_doc.to_dict()
         nome_paciente = decrypt_data(paciente_data.get('nome', 'Paciente')) if paciente_data.get('nome') else 'Paciente'
         
-        # Buscar dados do profissional (destinatário)
         profissional_doc = db.collection('usuarios').document(profissional_id).get()
         if not profissional_doc.exists:
             logger.error(f"Profissional {profissional_id} não encontrado.")
@@ -4818,23 +4799,19 @@ def _notificar_profissional_associacao(db: firestore.client, profissional_id: st
         profissional_data = profissional_doc.to_dict()
         tokens_fcm = profissional_data.get('fcm_tokens', [])
         
-        # Preparar conteúdo da notificação
         titulo = "Você foi associado a um paciente"
         if tipo_profissional == "enfermeiro":
             corpo = f"Você foi associado como enfermeiro responsável pelo paciente {nome_paciente}."
-        else:  # técnico
+        else:
             corpo = f"Você foi associado à equipe de cuidados do paciente {nome_paciente}."
         
-        # Dados para FCM
+        # CORREÇÃO: 'title' e 'body' removidos daqui
         data_payload = {
             "tipo": "ASSOCIACAO_PACIENTE",
             "paciente_id": paciente_id,
             "tipo_profissional": tipo_profissional,
-            "title": titulo,
-            "body": corpo
         }
         
-        # Persistir notificação no Firestore
         notificacao_data = {
             "title": titulo,
             "body": corpo,
@@ -4847,16 +4824,15 @@ def _notificar_profissional_associacao(db: firestore.client, profissional_id: st
         
         db.collection('usuarios').document(profissional_id).collection('notificacoes').add(notificacao_data)
         
-        # Enviar push notification
         if tokens_fcm:
-            _send_data_push_to_tokens(db, profissional_id, tokens_fcm, data_payload, "ASSOCIACAO_PACIENTE",
-                                     notification_title=titulo, notification_body=corpo)
+            _send_data_push_to_tokens(db, profissional_data.get('firebase_uid'), tokens_fcm, data_payload, titulo, corpo, "ASSOCIACAO_PACIENTE")
             logger.info(f"Notificação de associação enviada para {tipo_profissional} {profissional_id}")
         else:
             logger.info(f"{tipo_profissional.capitalize()} {profissional_id} não possui tokens FCM registrados")
             
     except Exception as e:
         logger.error(f"Erro ao notificar profissional sobre associação: {e}")
+
 
 def _verificar_checklist_completo(db: firestore.client, paciente_id: str, item_id: str):
     """Verifica se o checklist diário está 100% concluído e notifica se necessário."""
@@ -4925,7 +4901,6 @@ def _verificar_checklist_completo(db: firestore.client, paciente_id: str, item_i
 def _notificar_checklist_concluido(db: firestore.client, paciente_id: str, data_checklist: date, negocio_id: str):
     """Notifica enfermeiro e supervisor sobre checklist 100% concluído."""
     try:
-        # Buscar dados do paciente
         paciente_doc = db.collection('usuarios').document(paciente_id).get()
         if not paciente_doc.exists:
             logger.error(f"Paciente {paciente_id} não encontrado.")
@@ -4935,13 +4910,10 @@ def _notificar_checklist_concluido(db: firestore.client, paciente_id: str, data_
         nome_paciente = decrypt_data(paciente_data.get('nome', 'Paciente')) if paciente_data.get('nome') else 'Paciente'
         enfermeiro_id = paciente_data.get('enfermeiro_id')
         
-        # Buscar dados do técnico (procurar técnicos vinculados)
         tecnicos_ids = paciente_data.get('tecnicos_ids', [])
-        nome_tecnico = "Técnico"  # fallback
+        nome_tecnico = "Técnico"
         supervisor_id = None
         
-        # Para identificar qual técnico fez a ação, precisaríamos do user_id
-        # Como não temos essa info aqui, vamos pegar o primeiro técnico como exemplo
         if tecnicos_ids:
             for tecnico_id in tecnicos_ids:
                 tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
@@ -4951,27 +4923,22 @@ def _notificar_checklist_concluido(db: firestore.client, paciente_id: str, data_
                     supervisor_id = tecnico_data.get('supervisor_id')
                     break
         
-        # Preparar conteúdo da notificação
         titulo = "Checklist Diário Concluído"
         corpo = f"O técnico {nome_tecnico} concluiu o checklist diário do paciente {nome_paciente}."
         
-        # Dados para FCM
+        # CORREÇÃO: 'title' e 'body' removidos daqui
         data_payload = {
             "tipo": "CHECKLIST_CONCLUIDO",
             "paciente_id": paciente_id,
             "data": data_checklist.isoformat(),
-            "title": titulo,
-            "body": corpo
         }
         
-        # Lista de pessoas para notificar (evitar duplicatas)
         destinatarios = set()
         if enfermeiro_id:
             destinatarios.add(enfermeiro_id)
         if supervisor_id:
             destinatarios.add(supervisor_id)
         
-        # Notificar cada destinatário
         for destinatario_id in destinatarios:
             try:
                 destinatario_doc = db.collection('usuarios').document(destinatario_id).get()
@@ -4982,7 +4949,6 @@ def _notificar_checklist_concluido(db: firestore.client, paciente_id: str, data_
                 destinatario_data = destinatario_doc.to_dict()
                 tokens_fcm = destinatario_data.get('fcm_tokens', [])
                 
-                # Persistir notificação no Firestore
                 notificacao_data = {
                     "title": titulo,
                     "body": corpo,
@@ -4995,10 +4961,8 @@ def _notificar_checklist_concluido(db: firestore.client, paciente_id: str, data_
                 
                 db.collection('usuarios').document(destinatario_id).collection('notificacoes').add(notificacao_data)
                 
-                # Enviar push notification
                 if tokens_fcm:
-                    _send_data_push_to_tokens(db, destinatario_id, tokens_fcm, data_payload, "CHECKLIST_CONCLUIDO",
-                                             notification_title=titulo, notification_body=corpo)
+                    _send_data_push_to_tokens(db, destinatario_data.get('firebase_uid'), tokens_fcm, data_payload, titulo, corpo, "CHECKLIST_CONCLUIDO")
                     logger.info(f"Notificação de checklist concluído enviada para {destinatario_id}")
                 else:
                     logger.info(f"Destinatário {destinatario_id} não possui tokens FCM registrados")
@@ -5010,6 +4974,7 @@ def _notificar_checklist_concluido(db: firestore.client, paciente_id: str, data_
         
     except Exception as e:
         logger.error(f"Erro ao notificar checklist concluído: {e}")
+
 
 def atualizar_dados_pessoais_paciente(db: firestore.client, paciente_id: str, dados_pessoais: schemas.PacienteUpdateDadosPessoais) -> Optional[Dict]:
     """
@@ -5677,7 +5642,6 @@ def _notificar_medico_novo_relatorio(db: firestore.client, relatorio: Dict):
             logger.warning(f"Dados insuficientes no relatório {relatorio.get('id')} para notificar o médico.")
             return
 
-        # Buscar dados do médico (destinatário)
         medico_doc = db.collection('usuarios').document(medico_id).get()
         if not medico_doc.exists:
             logger.error(f"Médico {medico_id} não encontrado para notificação.")
@@ -5685,26 +5649,22 @@ def _notificar_medico_novo_relatorio(db: firestore.client, relatorio: Dict):
         medico_data = medico_doc.to_dict()
         tokens_fcm = medico_data.get('fcm_tokens', [])
 
-        # Buscar nomes para a mensagem
         paciente_doc = db.collection('usuarios').document(paciente_id).get()
         nome_paciente = decrypt_data(paciente_doc.to_dict().get('nome', '')) if paciente_doc.exists else "Paciente"
         
         criador_doc = db.collection('usuarios').document(criado_por_id).get()
         nome_criador = decrypt_data(criador_doc.to_dict().get('nome', '')) if criador_doc.exists else "A equipe"
 
-        # Conteúdo da notificação
         titulo = "Novo Relatório para Avaliação"
         corpo = f"{nome_criador} criou um novo relatório para o paciente {nome_paciente} que precisa da sua avaliação."
         
+        # CORREÇÃO: 'title' e 'body' removidos daqui
         data_payload = {
             "tipo": "NOVO_RELATORIO_MEDICO",
             "relatorio_id": relatorio.get('id'),
             "paciente_id": paciente_id,
-            "title": titulo,
-            "body": corpo
         }
 
-        # Persistir notificação no Firestore
         db.collection('usuarios').document(medico_id).collection('notificacoes').add({
             "title": titulo, "body": corpo, "tipo": "NOVO_RELATORIO_MEDICO",
             "relacionado": { "relatorio_id": relatorio.get('id'), "paciente_id": paciente_id },
@@ -5712,10 +5672,8 @@ def _notificar_medico_novo_relatorio(db: firestore.client, relatorio: Dict):
             "dedupe_key": f"NOVO_RELATORIO_{relatorio.get('id')}"
         })
 
-        # Enviar Push Notification
         if tokens_fcm:
-            _send_data_push_to_tokens(db, medico_data.get('firebase_uid'), tokens_fcm, data_payload, "[Novo Relatório]",
-                                     notification_title=titulo, notification_body=corpo)
+            _send_data_push_to_tokens(db, medico_data.get('firebase_uid'), tokens_fcm, data_payload, titulo, corpo, "[Novo Relatório]")
             logger.info(f"Notificação de novo relatório enviada para o médico {medico_id}.")
 
     except Exception as e:
@@ -5732,7 +5690,6 @@ def _notificar_enfermeiro_novo_registro_diario(db: firestore.client, registro: D
             logger.warning(f"Dados insuficientes no registro {registro.get('id')} para notificar o enfermeiro.")
             return
 
-        # Buscar dados do paciente para encontrar o enfermeiro responsável
         paciente_doc = db.collection('usuarios').document(paciente_id).get()
         if not paciente_doc.exists:
             logger.error(f"Paciente {paciente_id} não encontrado.")
@@ -5745,7 +5702,6 @@ def _notificar_enfermeiro_novo_registro_diario(db: firestore.client, registro: D
             logger.info(f"Paciente {paciente_id} não possui enfermeiro vinculado. Nenhuma notificação enviada.")
             return
 
-        # Buscar dados do enfermeiro (destinatário)
         enfermeiro_doc = db.collection('usuarios').document(enfermeiro_id).get()
         if not enfermeiro_doc.exists:
             logger.error(f"Enfermeiro {enfermeiro_id} não encontrado.")
@@ -5753,23 +5709,19 @@ def _notificar_enfermeiro_novo_registro_diario(db: firestore.client, registro: D
         enfermeiro_data = enfermeiro_doc.to_dict()
         tokens_fcm = enfermeiro_data.get('fcm_tokens', [])
         
-        # Buscar nome do técnico
         tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
         nome_tecnico = decrypt_data(tecnico_doc.to_dict().get('nome', '')) if tecnico_doc.exists else "Um técnico"
 
-        # Conteúdo da notificação
         titulo = "Novo Registro no Diário"
         corpo = f"{nome_tecnico} adicionou um novo registro no diário do paciente {nome_paciente}."
         
+        # CORREÇÃO: 'title' e 'body' removidos daqui
         data_payload = {
             "tipo": "NOVO_REGISTRO_DIARIO",
             "registro_id": registro.get('id'),
             "paciente_id": paciente_id,
-            "title": titulo,
-            "body": corpo
         }
 
-        # Persistir notificação no Firestore
         db.collection('usuarios').document(enfermeiro_id).collection('notificacoes').add({
             "title": titulo, "body": corpo, "tipo": "NOVO_REGISTRO_DIARIO",
             "relacionado": { "registro_id": registro.get('id'), "paciente_id": paciente_id },
@@ -5777,14 +5729,13 @@ def _notificar_enfermeiro_novo_registro_diario(db: firestore.client, registro: D
             "dedupe_key": f"NOVO_REGISTRO_{registro.get('id')}"
         })
 
-        # Enviar Push Notification
         if tokens_fcm:
-            _send_data_push_to_tokens(db, enfermeiro_data.get('firebase_uid'), tokens_fcm, data_payload, "[Novo Registro Diário]",
-                                     notification_title=titulo, notification_body=corpo)
+            _send_data_push_to_tokens(db, enfermeiro_data.get('firebase_uid'), tokens_fcm, data_payload, titulo, corpo, "[Novo Registro Diário]")
             logger.info(f"Notificação de novo registro diário enviada para o enfermeiro {enfermeiro_id}.")
 
     except Exception as e:
         logger.error(f"Erro ao notificar enfermeiro sobre novo registro diário: {e}")
+    
 
 
 # Em crud.py, adicione esta função ao final
@@ -5800,7 +5751,6 @@ def _notificar_tarefa_concluida(db: firestore.client, tarefa: Dict):
             logger.warning(f"Dados insuficientes na tarefa {tarefa.get('id')} para notificar conclusão.")
             return
 
-        # Buscar dados do criador (destinatário)
         criador_doc = db.collection('usuarios').document(criador_id).get()
         if not criador_doc.exists:
             logger.error(f"Criador da tarefa {criador_id} não encontrado.")
@@ -5808,25 +5758,22 @@ def _notificar_tarefa_concluida(db: firestore.client, tarefa: Dict):
         criador_data = criador_doc.to_dict()
         tokens_fcm = criador_data.get('fcm_tokens', [])
         
-        # Buscar nomes
         tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
         nome_tecnico = decrypt_data(tecnico_doc.to_dict().get('nome', '')) if tecnico_doc.exists else "O técnico"
         
         paciente_doc = db.collection('usuarios').document(paciente_id).get()
         nome_paciente = decrypt_data(paciente_doc.to_dict().get('nome', '')) if paciente_doc.exists else "o paciente"
 
-        # Conteúdo
         titulo = "Tarefa Concluída!"
         corpo = f"{nome_tecnico} concluiu a tarefa '{tarefa.get('descricao', '')[:30]}...' para {nome_paciente}."
         
+        # CORREÇÃO: 'title' e 'body' removidos daqui
         data_payload = {
             "tipo": "TAREFA_CONCLUIDA",
             "tarefa_id": tarefa.get('id'),
             "paciente_id": paciente_id,
-            "title": titulo, "body": corpo
         }
 
-        # Persistir notificação
         db.collection('usuarios').document(criador_id).collection('notificacoes').add({
             "title": titulo, "body": corpo, "tipo": "TAREFA_CONCLUIDA",
             "relacionado": { "tarefa_id": tarefa.get('id'), "paciente_id": paciente_id },
@@ -5834,10 +5781,8 @@ def _notificar_tarefa_concluida(db: firestore.client, tarefa: Dict):
             "dedupe_key": f"TAREFA_CONCLUIDA_{tarefa.get('id')}"
         })
 
-        # Enviar Push
         if tokens_fcm:
-            _send_data_push_to_tokens(db, criador_data.get('firebase_uid'), tokens_fcm, data_payload, "[Tarefa Concluída]",
-                                     notification_title=titulo, notification_body=corpo)
+            _send_data_push_to_tokens(db, criador_data.get('firebase_uid'), tokens_fcm, data_payload, titulo, corpo, "[Tarefa Concluída]")
             logger.info(f"Notificação de tarefa concluída enviada para {criador_id}.")
 
     except Exception as e:
@@ -5858,7 +5803,6 @@ def _notificar_tarefa_atrasada(db: firestore.client, tarefa_a_verificar: Dict):
             logger.warning("Dados insuficientes no registro de verificação para notificar atraso.")
             return
 
-        # Buscar a descrição da tarefa original
         tarefa_doc = db.collection('tarefas_essenciais').document(tarefa_id).get()
         if not tarefa_doc.exists:
             logger.error(f"Tarefa original {tarefa_id} não encontrada para notificação de atraso.")
@@ -5866,14 +5810,12 @@ def _notificar_tarefa_atrasada(db: firestore.client, tarefa_a_verificar: Dict):
         
         descricao_tarefa = tarefa_doc.to_dict().get('descricao', 'Nome da tarefa não encontrado')
         
-        # Buscar dados do criador (destinatário)
         criador_doc = db.collection('usuarios').document(criador_id).get()
         if not criador_doc.exists:
             return
         criador_data = criador_doc.to_dict()
         tokens_fcm = criador_data.get('fcm_tokens', [])
         
-        # Buscar nome do paciente com tratamento de erro
         try:
             paciente_doc = db.collection('usuarios').document(paciente_id).get()
             if paciente_doc.exists:
@@ -5885,18 +5827,16 @@ def _notificar_tarefa_atrasada(db: firestore.client, tarefa_a_verificar: Dict):
             logger.warning(f"Erro ao buscar nome do paciente {paciente_id}: {e}")
             nome_paciente = "o paciente"
 
-        # Conteúdo
         titulo = "Alerta: Tarefa Atrasada!"
         corpo = f"A tarefa '{descricao_tarefa[:30]}...' para o paciente {nome_paciente} não foi concluída até o prazo final."
         
+        # CORREÇÃO: 'title' e 'body' removidos daqui
         data_payload = {
             "tipo": "TAREFA_ATRASADA",
             "tarefa_id": tarefa_id,
             "paciente_id": paciente_id,
-            "title": titulo, "body": corpo
         }
 
-        # Persistir notificação
         db.collection('usuarios').document(criador_id).collection('notificacoes').add({
             "title": titulo, "body": corpo, "tipo": "TAREFA_ATRASADA",
             "relacionado": { "tarefa_id": tarefa_id, "paciente_id": paciente_id },
@@ -5904,18 +5844,13 @@ def _notificar_tarefa_atrasada(db: firestore.client, tarefa_a_verificar: Dict):
             "dedupe_key": f"TAREFA_ATRASADA_{tarefa_id}"
         })
 
-        # Enviar Push
         if tokens_fcm:
-            _send_data_push_to_tokens(db, criador_data.get('firebase_uid'), tokens_fcm, data_payload, "[Tarefa Atrasada]",
-                                     notification_title=titulo, notification_body=corpo)
+            _send_data_push_to_tokens(db, criador_data.get('firebase_uid'), tokens_fcm, data_payload, titulo, corpo, "[Tarefa Atrasada]")
             logger.info(f"Notificação de tarefa atrasada ({tarefa_id}) enviada para {criador_id}.")
 
     except Exception as e:
         logger.error(f"Erro ao notificar tarefa atrasada: {e}")
 
-# Em crud.py, substitua esta função
-
-# Em crud.py, substitua esta função
 
 def processar_tarefas_atrasadas(db: firestore.client) -> Dict:
     """
@@ -6106,8 +6041,9 @@ def processar_lembretes_exames(db: firestore.client) -> Dict:
     Esta função é projetada para ser chamada por um job agendado (Cloud Scheduler).
     """
     stats = {"total_exames_verificados": 0, "total_lembretes_enviados": 0, "erros": 0}
-
-    # Data de amanhã com timezone UTC
+    
+    from datetime import timezone, timedelta
+    
     amanha = datetime.now(timezone.utc) + timedelta(days=1)
     data_amanha_inicio = amanha.replace(hour=0, minute=0, second=0, microsecond=0)
     data_amanha_fim = amanha.replace(hour=23, minute=59, second=59, microsecond=999999)
@@ -6115,13 +6051,11 @@ def processar_lembretes_exames(db: firestore.client) -> Dict:
     logger.info(f"Processando lembretes para exames entre {data_amanha_inicio} e {data_amanha_fim}")
 
     try:
-        # Busca todos os usuários para verificar seus exames
         usuarios_ref = db.collection('usuarios')
 
         for usuario_doc in usuarios_ref.stream():
             usuario_id = usuario_doc.id
 
-            # Busca exames do usuário marcados para amanhã
             exames_ref = usuario_doc.reference.collection('exames')
             query = exames_ref.where('data_exame', '>=', data_amanha_inicio).where('data_exame', '<=', data_amanha_fim)
 
@@ -6130,9 +6064,9 @@ def processar_lembretes_exames(db: firestore.client) -> Dict:
 
             if exames_amanha:
                 try:
-                    # Busca dados do paciente
                     usuario_data = usuario_doc.to_dict()
-                    nome_paciente = usuario_data.get('nome', 'Paciente')
+                    nome_paciente_raw = usuario_data.get('nome', '')
+                    nome_paciente = decrypt_data(nome_paciente_raw) if nome_paciente_raw else "Paciente"
                     tokens_fcm = usuario_data.get('fcm_tokens', [])
 
                     for exame_doc in exames_amanha:
@@ -6141,19 +6075,15 @@ def processar_lembretes_exames(db: firestore.client) -> Dict:
                             nome_exame = exame_data.get('nome_exame', 'Exame')
                             horario_exame = exame_data.get('horario_exame', '')
 
-                            # Prepara mensagem do lembrete
                             horario_texto = f" às {horario_exame}" if horario_exame else ""
                             mensagem_title = "Lembrete de Exame"
                             mensagem_body = f"Olá {nome_paciente}! Você tem o exame '{nome_exame}' marcado para amanhã{horario_texto}."
 
-                            # ID único para evitar notificações duplicadas
                             notificacao_id = f"LEMBRETE_EXAME:{exame_doc.id}:{data_amanha_inicio.strftime('%Y%m%d')}"
 
-                            # 1. Persistir a notificação no Firestore
                             try:
                                 notificacao_doc_ref = usuario_doc.reference.collection('notificacoes').document(notificacao_id)
 
-                                # Verifica se já existe para evitar duplicatas
                                 if not notificacao_doc_ref.get().exists:
                                     notificacao_doc_ref.set({
                                         "title": mensagem_title,
@@ -6178,14 +6108,12 @@ def processar_lembretes_exames(db: firestore.client) -> Dict:
                                 stats["erros"] += 1
                                 continue
 
-                            # 2. Enviar a notificação via FCM, se houver tokens
                             if tokens_fcm:
+                                # CORREÇÃO: 'title' e 'body' removidos daqui
                                 data_payload = {
                                     "tipo": "LEMBRETE_EXAME",
                                     "exame_id": exame_doc.id,
                                     "paciente_id": usuario_id,
-                                    "title": mensagem_title,
-                                    "body": mensagem_body
                                 }
                                 try:
                                     from firebase_admin import messaging

@@ -2695,145 +2695,103 @@ def processar_notificacoes_agendadas(db: firestore.client, now: datetime) -> dic
         return stats
 
 
+# SUBSTITUA ESTA FUNÇÃO INTEIRA NO SEU ARQUIVO main.py
+
 @app.post("/tasks/process-overdue-v2", response_model=schemas.ProcessarTarefasResponse, tags=["Jobs Agendados"])
 def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
     """
     (VERSÃO ALTERNATIVA - PÚBLICO) Processa tarefas atrasadas com lógica simplificada
     """
     from datetime import datetime, timezone
+    from firebase_admin import messaging
     
     stats = {"total_verificadas": 0, "total_notificadas": 0, "erros": 0}
     
     try:
-        # Data atual com timezone UTC
         now = datetime.now(timezone.utc)
         logger.info(f"Iniciando processamento de tarefas atrasadas - {now}")
         
-        # 1. Buscar tarefas a verificar pendentes (sem filtro de data para evitar índice composto)
         verificacao_ref = db.collection('tarefas_a_verificar')
         query = verificacao_ref.where('status', '==', 'pendente')
         
         todas_pendentes = list(query.stream())
         logger.info(f"Encontradas {len(todas_pendentes)} tarefas pendentes")
         
-        # 2. Filtrar manualmente por data vencida (com debug de timezone)
         tarefas_para_verificar = []
         for doc in todas_pendentes:
             data = doc.to_dict()
             data_limite = data.get('dataHoraLimite')
             
             if data_limite:
-                # Debug timezone
-                logger.info(f"Comparando: now={now} vs data_limite={data_limite} (tarefa {data.get('tarefaId')})")
-                
-                # Converter ambos para UTC se necessário
                 if hasattr(data_limite, 'replace'):
-                    # Se data_limite tem timezone, garantir que seja UTC
                     if data_limite.tzinfo is None:
                         data_limite = data_limite.replace(tzinfo=timezone.utc)
                     else:
                         data_limite = data_limite.astimezone(timezone.utc)
                 
-                # Comparar
                 if data_limite <= now:
-                    logger.info(f"Tarefa {data.get('tarefaId')} está vencida")
                     tarefas_para_verificar.append(doc)
-                else:
-                    logger.info(f"Tarefa {data.get('tarefaId')} ainda não venceu")
-            else:
-                logger.warning(f"Tarefa {data.get('tarefaId')} sem dataHoraLimite")
-        
+
         stats["total_verificadas"] = len(tarefas_para_verificar)
         
-        logger.info(f"Encontradas {len(tarefas_para_verificar)} tarefas para verificar")
-        
         if not tarefas_para_verificar:
-            logger.info("Nenhuma tarefa atrasada encontrada")
-            return stats
-
-        # 2. Processar cada tarefa
-        for doc_verificacao in tarefas_para_verificar:
-            try:
-                dados = doc_verificacao.to_dict()
-                tarefa_id = dados.get('tarefaId')
-                
-                if not tarefa_id:
-                    logger.warning(f"Documento sem tarefaId: {doc_verificacao.id}")
-                    continue
-                
-                # Verificar se tarefa original ainda não foi concluída
-                tarefa_ref = db.collection('tarefas_essenciais').document(tarefa_id)
-                tarefa_doc = tarefa_ref.get()
-                
-                if tarefa_doc.exists and not tarefa_doc.to_dict().get('foiConcluida', False):
-                    # Tarefa ainda não foi concluída - enviar notificação
-                    try:
-                        tarefa_data = tarefa_doc.to_dict()
-                        criador_id = dados.get('criadoPorId')
-                        paciente_id = dados.get('pacienteId')
-                        
-                        if criador_id and paciente_id:
-                            # Buscar dados do criador
-                            criador_doc = db.collection('usuarios').document(criador_id).get()
-                            if criador_doc.exists:
-                                criador_data = criador_doc.to_dict()
-                                tokens_fcm = criador_data.get('fcm_tokens', [])
-                                
-                                # Conteúdo da notificação
-                                titulo = "Alerta: Tarefa Atrasada!"
-                                descricao = tarefa_data.get('descricao', 'Tarefa')
-                                corpo = f"A tarefa '{descricao[:30]}...' não foi concluída até o prazo final."
-                                
-                                # Persistir notificação no banco
-                                db.collection('usuarios').document(criador_id).collection('notificacoes').add({
-                                    "title": titulo,
-                                    "body": corpo,
-                                    "tipo": "TAREFA_ATRASADA",
-                                    "relacionado": {"tarefa_id": tarefa_id, "paciente_id": paciente_id},
-                                    "lida": False,
-                                    "data_criacao": firestore.SERVER_TIMESTAMP,
-                                    "dedupe_key": f"TAREFA_ATRASADA_{tarefa_id}"
-                                })
-                                
-                                # Enviar push notification (se há tokens FCM)
-                                if tokens_fcm:
-                                    data_payload = {
-                                        "tipo": "TAREFA_ATRASADA",
-                                        "tarefa_id": tarefa_id,
-                                        "paciente_id": paciente_id,
-                                        "title": titulo,
-                                        "body": corpo
-                                    }
-                                    # Simplificado: enviar apenas para o primeiro token
+            logger.info("Nenhuma tarefa atrasada encontrada, pulando para outras tarefas agendadas.")
+        else:
+            for doc_verificacao in tarefas_para_verificar:
+                try:
+                    dados = doc_verificacao.to_dict()
+                    tarefa_id = dados.get('tarefaId')
+                    
+                    if not tarefa_id:
+                        continue
+                    
+                    tarefa_ref = db.collection('tarefas_essenciais').document(tarefa_id)
+                    tarefa_doc = tarefa_ref.get()
+                    
+                    if tarefa_doc.exists and not tarefa_doc.to_dict().get('foiConcluida', False):
+                        try:
+                            tarefa_data = tarefa_doc.to_dict()
+                            criador_id = dados.get('criadoPorId')
+                            paciente_id = dados.get('pacienteId')
+                            
+                            if criador_id and paciente_id:
+                                # Notificar Criador
+                                criador_doc = db.collection('usuarios').document(criador_id).get()
+                                if criador_doc.exists:
+                                    criador_data = criador_doc.to_dict()
+                                    tokens_fcm = criador_data.get('fcm_tokens', [])
+                                    
+                                    titulo = "Alerta: Tarefa Atrasada!"
+                                    descricao = tarefa_data.get('descricao', 'Tarefa')
+                                    corpo = f"A tarefa '{descricao[:30]}...' não foi concluída até o prazo final."
+                                    
+                                    db.collection('usuarios').document(criador_id).collection('notificacoes').add({
+                                        "title": titulo, "body": corpo, "tipo": "TAREFA_ATRASADA",
+                                        "relacionado": {"tarefa_id": tarefa_id, "paciente_id": paciente_id},
+                                        "lida": False, "data_criacao": firestore.SERVER_TIMESTAMP,
+                                        "dedupe_key": f"TAREFA_ATRASADA_{tarefa_id}"
+                                    })
+                                    
                                     if tokens_fcm and len(tokens_fcm) > 0:
-                                        try:
-                                            message = messaging.Message(
-                                                data=data_payload,
-                                                token=tokens_fcm[0]
-                                            )
-                                            messaging.send(message)
-                                            logger.info(f"Push enviado para tarefa {tarefa_id}")
-                                        except Exception as push_e:
-                                            logger.warning(f"Erro ao enviar push: {push_e}")
-                                
-                                stats["total_notificadas"] += 1
-                                logger.info(f"Notificação enviada para criador da tarefa {tarefa_id}")
+                                        data_payload = {"tipo": "TAREFA_ATRASADA", "tarefa_id": tarefa_id, "paciente_id": paciente_id}
+                                        message = messaging.Message(
+                                            notification=messaging.Notification(title=titulo, body=corpo),
+                                            data=data_payload,
+                                            token=tokens_fcm[0]
+                                        )
+                                        messaging.send(message)
+                                        stats["total_notificadas"] += 1
+                                        logger.info(f"Push de tarefa atrasada enviado para o criador {criador_id}")
 
-                            # NOVA FUNCIONALIDADE: Notificar também os técnicos do paciente
-                            try:
-                                paciente_doc = db.collection('usuarios').document(paciente_id).get()
-                                if paciente_doc.exists:
-                                    paciente_data = paciente_doc.to_dict()
+                                # Notificar Técnicos e Admins
+                                paciente_doc_full = db.collection('usuarios').document(paciente_id).get()
+                                if paciente_doc_full.exists:
+                                    paciente_data = paciente_doc_full.to_dict()
                                     tecnicos_ids = paciente_data.get('tecnicos_ids', [])
+                                    nome_paciente_raw = paciente_data.get('nome', '')
+                                    nome_paciente = crud.decrypt_data(nome_paciente_raw) if nome_paciente_raw else "o paciente"
 
-                                    # Buscar nome do paciente para a mensagem dos técnicos
-                                    try:
-                                        nome_raw = paciente_data.get('nome', '')
-                                        nome_paciente = crud.decrypt_data(nome_raw) if nome_raw else "o paciente"
-                                    except Exception:
-                                        nome_paciente = "o paciente"
-
-                                    # Notificar cada técnico do paciente
+                                    # Notificar Técnicos
                                     for tecnico_id in tecnicos_ids:
                                         try:
                                             tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
@@ -2841,135 +2799,87 @@ def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
                                                 tecnico_data = tecnico_doc.to_dict()
                                                 tecnico_tokens = tecnico_data.get('fcm_tokens', [])
 
-                                                # Conteúdo específico para técnicos
                                                 titulo_tecnico = "Tarefa Atrasada - Paciente sob seus cuidados"
                                                 corpo_tecnico = f"A tarefa '{descricao[:30]}...' para {nome_paciente} não foi concluída no prazo."
 
-                                                # Persistir notificação para o técnico
                                                 db.collection('usuarios').document(tecnico_id).collection('notificacoes').add({
-                                                    "title": titulo_tecnico,
-                                                    "body": corpo_tecnico,
-                                                    "tipo": "TAREFA_ATRASADA_TECNICO",
+                                                    "title": titulo_tecnico, "body": corpo_tecnico, "tipo": "TAREFA_ATRASADA_TECNICO",
                                                     "relacionado": {"tarefa_id": tarefa_id, "paciente_id": paciente_id},
-                                                    "lida": False,
-                                                    "data_criacao": firestore.SERVER_TIMESTAMP,
+                                                    "lida": False, "data_criacao": firestore.SERVER_TIMESTAMP,
                                                     "dedupe_key": f"TAREFA_ATRASADA_TECNICO_{tarefa_id}_{tecnico_id}"
                                                 })
 
-                                                # Enviar push para técnico
                                                 if tecnico_tokens and len(tecnico_tokens) > 0:
-                                                    data_payload_tecnico = {
-                                                        "tipo": "TAREFA_ATRASADA_TECNICO",
-                                                        "tarefa_id": tarefa_id,
-                                                        "paciente_id": paciente_id,
-                                                        "title": titulo_tecnico,
-                                                        "body": corpo_tecnico
-                                                    }
-                                                    try:
-                                                        message_tecnico = messaging.Message(
-                                                            data=data_payload_tecnico,
-                                                            token=tecnico_tokens[0]
-                                                        )
-                                                        messaging.send(message_tecnico)
-                                                        logger.info(f"Push enviado para técnico {tecnico_id} sobre tarefa {tarefa_id}")
-                                                        stats["total_notificadas"] += 1
-                                                    except Exception as push_e:
-                                                        logger.warning(f"Erro ao enviar push para técnico {tecnico_id}: {push_e}")
-
+                                                    data_payload_tecnico = {"tipo": "TAREFA_ATRASADA_TECNICO", "tarefa_id": tarefa_id, "paciente_id": paciente_id}
+                                                    message_tecnico = messaging.Message(
+                                                        notification=messaging.Notification(title=titulo_tecnico, body=corpo_tecnico),
+                                                        data=data_payload_tecnico,
+                                                        token=tecnico_tokens[0]
+                                                    )
+                                                    messaging.send(message_tecnico)
+                                                    stats["total_notificadas"] += 1
+                                                    logger.info(f"Push de tarefa atrasada enviado para técnico {tecnico_id}")
                                         except Exception as tecnico_e:
                                             logger.error(f"Erro ao notificar técnico {tecnico_id}: {tecnico_e}")
 
-                            except Exception as tecnicos_e:
-                                logger.error(f"Erro ao buscar técnicos para notificação da tarefa {tarefa_id}: {tecnicos_e}")
+                                    # Notificar Admins
+                                    usuarios_ref = db.collection('usuarios')
+                                    usuarios_docs = usuarios_ref.stream()
+                                    for usuario_doc in usuarios_docs:
+                                        try:
+                                            usuario_data = usuario_doc.to_dict()
+                                            roles = usuario_data.get('roles', {})
+                                            
+                                            # ASSUMINDO QUE O ID DO NEGÓCIO É FIXO AQUI, CONFORME O CÓDIGO ANTERIOR
+                                            negocio_id_fixo = "AvcbtyokbHx82pYbiraE" 
+                                            if negocio_id_fixo in roles and roles[negocio_id_fixo] == 'admin':
+                                                admin_id = usuario_doc.id
 
-                            # NOVA FUNCIONALIDADE: Notificar também TODOS os admins do negócio
-                            try:
-                                # Buscar todos os usuários e filtrar admins do negócio específico
-                                usuarios_ref = db.collection('usuarios')
-                                usuarios_docs = usuarios_ref.stream()
+                                                if admin_id == criador_id:
+                                                    continue
 
-                                for usuario_doc in usuarios_docs:
-                                    try:
-                                        usuario_data = usuario_doc.to_dict()
-                                        roles = usuario_data.get('roles', {})
+                                                admin_tokens = usuario_data.get('fcm_tokens', [])
+                                                titulo_admin = "Tarefa Atrasada - Supervisão"
+                                                corpo_admin = f"A tarefa '{descricao[:30]}...' para {nome_paciente} não foi concluída no prazo."
 
-                                        # Verificar se é admin do negócio AvcbtyokbHx82pYbiraE
-                                        if 'AvcbtyokbHx82pYbiraE' in roles and roles['AvcbtyokbHx82pYbiraE'] == 'admin':
-                                            admin_id = usuario_doc.id
+                                                db.collection('usuarios').document(admin_id).collection('notificacoes').add({
+                                                    "title": titulo_admin, "body": corpo_admin, "tipo": "TAREFA_ATRASADA",
+                                                    "relacionado": {"tarefa_id": tarefa_id, "paciente_id": paciente_id},
+                                                    "lida": False, "data_criacao": firestore.SERVER_TIMESTAMP,
+                                                    "dedupe_key": f"TAREFA_ATRASADA_ADMIN_{tarefa_id}_{admin_id}"
+                                                })
 
-                                            # Evitar notificar o criador novamente (já foi notificado)
-                                            if admin_id == criador_id:
-                                                continue
-
-                                            admin_tokens = usuario_data.get('fcm_tokens', [])
-
-                                            # Conteúdo específico para admins
-                                            titulo_admin = "Tarefa Atrasada - Supervisão"
-                                            corpo_admin = f"A tarefa '{descricao[:30]}...' para {nome_paciente} não foi concluída no prazo."
-
-                                            # Persistir notificação para o admin
-                                            db.collection('usuarios').document(admin_id).collection('notificacoes').add({
-                                                "title": titulo_admin,
-                                                "body": corpo_admin,
-                                                "tipo": "TAREFA_ATRASADA",
-                                                "relacionado": {"tarefa_id": tarefa_id, "paciente_id": paciente_id},
-                                                "lida": False,
-                                                "data_criacao": firestore.SERVER_TIMESTAMP,
-                                                "dedupe_key": f"TAREFA_ATRASADA_ADMIN_{tarefa_id}_{admin_id}"
-                                            })
-
-                                            # Enviar push para admin
-                                            if admin_tokens and len(admin_tokens) > 0:
-                                                data_payload_admin = {
-                                                    "tipo": "TAREFA_ATRASADA",
-                                                    "tarefa_id": tarefa_id,
-                                                    "paciente_id": paciente_id,
-                                                    "title": titulo_admin,
-                                                    "body": corpo_admin
-                                                }
-                                                try:
+                                                if admin_tokens and len(admin_tokens) > 0:
+                                                    data_payload_admin = {"tipo": "TAREFA_ATRASADA", "tarefa_id": tarefa_id, "paciente_id": paciente_id}
                                                     message_admin = messaging.Message(
+                                                        notification=messaging.Notification(title=titulo_admin, body=corpo_admin),
                                                         data=data_payload_admin,
                                                         token=admin_tokens[0]
                                                     )
                                                     messaging.send(message_admin)
-                                                    logger.info(f"Push enviado para admin {admin_id} sobre tarefa {tarefa_id}")
                                                     stats["total_notificadas"] += 1
-                                                except Exception as push_e:
-                                                    logger.warning(f"Erro ao enviar push para admin {admin_id}: {push_e}")
-
-                                    except Exception as admin_e:
-                                        logger.error(f"Erro ao processar admin {usuario_doc.id}: {admin_e}")
-
-                            except Exception as admins_e:
-                                logger.error(f"Erro ao buscar admins para notificação da tarefa {tarefa_id}: {admins_e}")
-
-                    except Exception as notif_e:
-                        logger.error(f"Erro ao notificar tarefa {tarefa_id}: {notif_e}")
-                        # Não incrementar erro pois a tarefa principal foi processada
-                
-                # Marcar como processado
-                doc_verificacao.reference.update({"status": "processado"})
-                
-            except Exception as e:
-                stats["erros"] += 1
-                logger.error(f"Erro ao processar tarefa individual: {e}")
-                # Marcar como erro
-                try:
+                                                    logger.info(f"Push de tarefa atrasada enviado para admin {admin_id}")
+                                        except Exception as admin_e:
+                                            logger.error(f"Erro ao processar notificação para admin {usuario_doc.id}: {admin_e}")
+                        except Exception as notif_e:
+                            logger.error(f"Erro ao processar notificação para tarefa {tarefa_id}: {notif_e}")
+                    
+                    doc_verificacao.reference.update({"status": "processado"})
+                    
+                except Exception as e:
+                    stats["erros"] += 1
+                    logger.error(f"Erro ao processar tarefa individual: {e}")
                     doc_verificacao.reference.update({"status": "erro", "mensagem_erro": str(e)})
-                except:
-                    pass
 
-        # NOVO: Processar notificações agendadas
+        # Processar outras tarefas agendadas
         try:
             logger.info("Iniciando processamento de notificações agendadas")
-            notificacoes_stats = processar_notificacoes_agendadas(db, now)
+            notificacoes_stats = crud.processar_notificacoes_agendadas(db, now)
             stats.update(notificacoes_stats)
         except Exception as e:
             logger.error(f"Erro no processamento de notificações agendadas: {e}")
             stats["erros_notificacoes"] = str(e)
 
-        # NOVO: Processar lembretes de exames (1 dia antes)
         try:
             logger.info("Iniciando processamento de lembretes de exames")
             lembretes_stats = crud.processar_lembretes_exames(db)
@@ -2980,17 +2890,6 @@ def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
             logger.error(f"Erro no processamento de lembretes de exames: {e}")
             stats["erros_lembretes"] = str(e)
 
-        # REMOVIDO: Verificação de disponibilidade de profissionais
-        # (Comentado conforme solicitação do usuário)
-        # try:
-        #     logger.info("Iniciando verificação de disponibilidade de profissionais")
-        #     profissionais_stats = crud.verificar_disponibilidade_profissionais(db)
-        #     stats["alertas_profissionais_enviados"] = profissionais_stats.get("alertas_enviados", 0)
-        #     stats["erros_profissionais"] = profissionais_stats.get("erros", 0)
-        # except Exception as e:
-        #     logger.error(f"Erro na verificação de disponibilidade de profissionais: {e}")
-        #     stats["erros_profissionais"] = str(e)
-
         logger.info(f"Processamento concluído: {stats}")
         return stats
 
@@ -2998,8 +2897,6 @@ def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
         logger.error(f"Erro geral no processamento: {e}")
         stats["erros"] += 1
         return stats
-
-
 
 @app.get("/tasks/debug-verificacao", tags=["Jobs Agendados"])
 def debug_verificacao(db: firestore.client = Depends(get_db)):
