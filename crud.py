@@ -1272,10 +1272,12 @@ def _send_data_push_to_tokens(
     firebase_uid_destinatario: str,
     tokens: List[str],
     data_dict: Dict[str, str],
-    logger_prefix: str = ""
+    logger_prefix: str = "",
+    notification_title: str = None,
+    notification_body: str = None
 ) -> None:
     """
-    Envia mensagens data-only usando messaging.send(...) por token.
+    Envia mensagens FCM com notification e data objects.
     Remove tokens inválidos (Unregistered) do usuário.
     """
     successes = 0
@@ -1283,7 +1285,17 @@ def _send_data_push_to_tokens(
 
     for t in list(tokens or []):
         try:
-            messaging.send(messaging.Message(data=data_dict, token=t))
+            # Constrói a mensagem com notification e data objects
+            message_kwargs = {"data": data_dict, "token": t}
+
+            # Adiciona notification object se título e corpo forem fornecidos
+            if notification_title and notification_body:
+                message_kwargs["notification"] = messaging.Notification(
+                    title=notification_title,
+                    body=notification_body
+                )
+
+            messaging.send(messaging.Message(**message_kwargs))
             successes += 1
         except Exception as e:
             failures += 1
@@ -1399,7 +1411,9 @@ def criar_agendamento(db: firestore.client, agendamento_data: schemas.Agendament
                     firebase_uid_destinatario=profissional['usuario_uid'],
                     tokens=prof_user['fcm_tokens'],
                     data_dict=data_payload,
-                    logger_prefix="[Novo agendamento] "
+                    logger_prefix="[Novo agendamento] ",
+                    notification_title="Novo Agendamento!",
+                    notification_body=mensagem_body
                 )
             except Exception as e:
                 logger.error(f"Erro ao ENVIAR notificação de novo agendamento: {e}")
@@ -1468,7 +1482,9 @@ def cancelar_agendamento(db: firestore.client, agendamento_id: str, cliente_id: 
                         firebase_uid_destinatario=profissional['usuario_uid'],
                         tokens=prof_user['fcm_tokens'],
                         data_dict=data_payload,
-                        logger_prefix="[Cancelamento pelo cliente] "
+                        logger_prefix="[Cancelamento pelo cliente] ",
+                        notification_title="Agendamento Cancelado",
+                        notification_body=mensagem_body
                     )
                 except Exception as e:
                     logger.error(f"Erro ao ENVIAR notificação de cancelamento para o profissional {profissional['id']}: {e}")
@@ -1985,7 +2001,9 @@ def _notificar_cliente_cancelamento(db: firestore.client, agendamento: Dict, age
                 firebase_uid_destinatario=cliente_data.get('firebase_uid'),
                 tokens=fcm_tokens,
                 data_dict=data_payload,
-                logger_prefix="[Cancelamento pelo profissional] "
+                logger_prefix="[Cancelamento pelo profissional] ",
+                notification_title="Agendamento Cancelado",
+                notification_body=mensagem_body
             )
         else:
             logger.info(f"Cliente {cliente_id} não possui tokens FCM para notificar.")
@@ -4700,7 +4718,8 @@ def _notificar_criador_relatorio_avaliado(db: firestore.client, relatorio: Dict,
         
         # Enviar push notification
         if tokens_fcm:
-            _send_data_push_to_tokens(db, criado_por_id, tokens_fcm, data_payload, "RELATORIO_AVALIADO")
+            _send_data_push_to_tokens(db, criado_por_id, tokens_fcm, data_payload, "RELATORIO_AVALIADO",
+                                     notification_title=titulo, notification_body=corpo)
             logger.info(f"Notificação de avaliação de relatório enviada para {criado_por_id}")
         else:
             logger.info(f"Usuário {criado_por_id} não possui tokens FCM registrados")
@@ -4765,7 +4784,8 @@ def _notificar_tecnicos_plano_atualizado(db: firestore.client, paciente_id: str,
                 
                 # Enviar push notification
                 if tokens_fcm:
-                    _send_data_push_to_tokens(db, tecnico_id, tokens_fcm, data_payload, "PLANO_CUIDADO")
+                    _send_data_push_to_tokens(db, tecnico_id, tokens_fcm, data_payload, "PLANO_CUIDADO",
+                                             notification_title=titulo, notification_body=corpo)
                     logger.info(f"Notificação de plano atualizado enviada para técnico {tecnico_id}")
                 else:
                     logger.info(f"Técnico {tecnico_id} não possui tokens FCM registrados")
@@ -4829,7 +4849,8 @@ def _notificar_profissional_associacao(db: firestore.client, profissional_id: st
         
         # Enviar push notification
         if tokens_fcm:
-            _send_data_push_to_tokens(db, profissional_id, tokens_fcm, data_payload, "ASSOCIACAO_PACIENTE")
+            _send_data_push_to_tokens(db, profissional_id, tokens_fcm, data_payload, "ASSOCIACAO_PACIENTE",
+                                     notification_title=titulo, notification_body=corpo)
             logger.info(f"Notificação de associação enviada para {tipo_profissional} {profissional_id}")
         else:
             logger.info(f"{tipo_profissional.capitalize()} {profissional_id} não possui tokens FCM registrados")
@@ -4976,7 +4997,8 @@ def _notificar_checklist_concluido(db: firestore.client, paciente_id: str, data_
                 
                 # Enviar push notification
                 if tokens_fcm:
-                    _send_data_push_to_tokens(db, destinatario_id, tokens_fcm, data_payload, "CHECKLIST_CONCLUIDO")
+                    _send_data_push_to_tokens(db, destinatario_id, tokens_fcm, data_payload, "CHECKLIST_CONCLUIDO",
+                                             notification_title=titulo, notification_body=corpo)
                     logger.info(f"Notificação de checklist concluído enviada para {destinatario_id}")
                 else:
                     logger.info(f"Destinatário {destinatario_id} não possui tokens FCM registrados")
@@ -5692,7 +5714,8 @@ def _notificar_medico_novo_relatorio(db: firestore.client, relatorio: Dict):
 
         # Enviar Push Notification
         if tokens_fcm:
-            _send_data_push_to_tokens(db, medico_data.get('firebase_uid'), tokens_fcm, data_payload, "[Novo Relatório]")
+            _send_data_push_to_tokens(db, medico_data.get('firebase_uid'), tokens_fcm, data_payload, "[Novo Relatório]",
+                                     notification_title=titulo, notification_body=corpo)
             logger.info(f"Notificação de novo relatório enviada para o médico {medico_id}.")
 
     except Exception as e:
@@ -5756,7 +5779,8 @@ def _notificar_enfermeiro_novo_registro_diario(db: firestore.client, registro: D
 
         # Enviar Push Notification
         if tokens_fcm:
-            _send_data_push_to_tokens(db, enfermeiro_data.get('firebase_uid'), tokens_fcm, data_payload, "[Novo Registro Diário]")
+            _send_data_push_to_tokens(db, enfermeiro_data.get('firebase_uid'), tokens_fcm, data_payload, "[Novo Registro Diário]",
+                                     notification_title=titulo, notification_body=corpo)
             logger.info(f"Notificação de novo registro diário enviada para o enfermeiro {enfermeiro_id}.")
 
     except Exception as e:
@@ -5812,7 +5836,8 @@ def _notificar_tarefa_concluida(db: firestore.client, tarefa: Dict):
 
         # Enviar Push
         if tokens_fcm:
-            _send_data_push_to_tokens(db, criador_data.get('firebase_uid'), tokens_fcm, data_payload, "[Tarefa Concluída]")
+            _send_data_push_to_tokens(db, criador_data.get('firebase_uid'), tokens_fcm, data_payload, "[Tarefa Concluída]",
+                                     notification_title=titulo, notification_body=corpo)
             logger.info(f"Notificação de tarefa concluída enviada para {criador_id}.")
 
     except Exception as e:
@@ -5881,7 +5906,8 @@ def _notificar_tarefa_atrasada(db: firestore.client, tarefa_a_verificar: Dict):
 
         # Enviar Push
         if tokens_fcm:
-            _send_data_push_to_tokens(db, criador_data.get('firebase_uid'), tokens_fcm, data_payload, "[Tarefa Atrasada]")
+            _send_data_push_to_tokens(db, criador_data.get('firebase_uid'), tokens_fcm, data_payload, "[Tarefa Atrasada]",
+                                     notification_title=titulo, notification_body=corpo)
             logger.info(f"Notificação de tarefa atrasada ({tarefa_id}) enviada para {criador_id}.")
 
     except Exception as e:
