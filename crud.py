@@ -4859,97 +4859,158 @@ def _notificar_criador_relatorio_avaliado(db: firestore.client, relatorio: Dict,
     except Exception as e:
         logger.error(f"Erro ao notificar avaliação de relatório: {e}")
 
+# SUBSTITUA ESTA FUNÇÃO INTEIRA NO SEU ARQUIVO crud.py
+
 def _notificar_tecnicos_plano_atualizado(db: firestore.client, paciente_id: str, consulta_id: str):
     """Notifica todos os técnicos vinculados sobre novo plano de cuidado."""
     try:
+        print(f"--- INICIANDO NOTIFICAÇÃO DE PLANO DE CUIDADO ATUALIZADO para paciente {paciente_id} ---")
+        
+        # PASSO 1 e 2: Buscar dados do paciente e dos técnicos
         paciente_doc = db.collection('usuarios').document(paciente_id).get()
-        if not paciente_doc.exists: return
+        if not paciente_doc.exists:
+            print(f"[ERRO DE NOTIFICAÇÃO] Paciente {paciente_id} não encontrado.")
+            return
             
         paciente_data = paciente_doc.to_dict()
         nome_paciente = decrypt_data(paciente_data.get('nome', '')) if paciente_data.get('nome') else 'Paciente'
         tecnicos_ids = paciente_data.get('tecnicos_ids', [])
         
-        if not tecnicos_ids: return
-            
+        if not tecnicos_ids:
+            print(f"[INFO] Paciente {paciente_id} não possui técnicos vinculados. Nenhuma notificação enviada.")
+            return
+        
+        print(f"[PASSO A] Notificação será enviada para {len(tecnicos_ids)} técnico(s).")
+
+        # PASSO 3: Construir a mensagem visual
         titulo = "Plano de Cuidado Atualizado"
         corpo = f"O plano de cuidado do paciente {nome_paciente} foi atualizado. Confirme a leitura para iniciar suas atividades."
-        
+
+        # PASSO 4: Construir os dados de lógica
         data_payload = {
             "tipo": "PLANO_CUIDADO_ATUALIZADO",
             "paciente_id": paciente_id,
             "consulta_id": consulta_id,
         }
         
+        # Itera sobre cada técnico para enviar a notificação individualmente
         for tecnico_id in tecnicos_ids:
             try:
                 tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
-                if not tecnico_doc.exists: continue
+                if not tecnico_doc.exists:
+                    print(f"[AVISO] Técnico com ID {tecnico_id} não foi encontrado. Pulando.")
+                    continue
                     
                 tecnico_data = tecnico_doc.to_dict()
                 tokens_fcm = tecnico_data.get('fcm_tokens', [])
                 
+                print(f"[PASSO B - Técnico {tecnico_id}] Destinatário: {tecnico_data.get('email')}. Tokens: {len(tokens_fcm)}")
+
+                # PASSO 5: Persistir a notificação no histórico
                 db.collection('usuarios').document(tecnico_id).collection('notificacoes').add({
                     "title": titulo, "body": corpo, "tipo": "PLANO_CUIDADO_ATUALIZADO",
                     "relacionado": { "paciente_id": paciente_id, "consulta_id": consulta_id },
                     "lida": False, "data_criacao": firestore.SERVER_TIMESTAMP
                 })
-                
+                print(f"[PASSO C - Técnico {tecnico_id}] Notificação persistida no Firestore.")
+
+                # PASSO 6: Enviar o push em loop
                 if tokens_fcm:
-                    message = messaging.MulticastMessage(
-                        notification=messaging.Notification(title=titulo, body=corpo),
-                        data=data_payload,
-                        tokens=tokens_fcm
-                    )
-                    messaging.send_multicast(message)
+                    print(f"[PASSO D - Técnico {tecnico_id}] Enviando notificação para {len(tokens_fcm)} token(s)...")
+                    sucessos = 0
+                    for token in tokens_fcm:
+                        try:
+                            message = messaging.Message(
+                                notification=messaging.Notification(title=titulo, body=corpo),
+                                data=data_payload,
+                                token=token
+                            )
+                            messaging.send(message)
+                            sucessos += 1
+                        except Exception as e:
+                            logger.error(f"Erro ao enviar para o token {token[:10]}...: {e}")
+                    print(f"[PASSO E SUCESSO - Técnico {tecnico_id}] Envio concluído. Sucessos: {sucessos}")
+                else:
+                    print(f"[PASSO D FALHA - Técnico {tecnico_id}] Nenhum token FCM encontrado.")
+                    
             except Exception as e:
-                logger.error(f"Erro ao notificar técnico {tecnico_id}: {e}")
+                logger.error(f"Erro ao processar notificação para o técnico {tecnico_id}: {e}")
                 
     except Exception as e:
-        logger.error(f"Erro ao notificar técnicos sobre plano atualizado: {e}")
+        print(f"[ERRO CRÍTICO NA NOTIFICAÇÃO DE PLANO DE CUIDADO] Exceção: {e}")
+        import traceback
+        print(traceback.format_exc())
 
 
 def _notificar_profissional_associacao(db: firestore.client, profissional_id: str, paciente_id: str, tipo_profissional: str):
     """Notifica um profissional (enfermeiro ou técnico) sobre associação a um paciente."""
     try:
+        print(f"--- INICIANDO NOTIFICAÇÃO DE ASSOCIAÇÃO para profissional {profissional_id} ---")
+        
+        # PASSO 1 e 2: Buscar dados do paciente e do profissional (destinatário)
         paciente_doc = db.collection('usuarios').document(paciente_id).get()
-        if not paciente_doc.exists: return
+        if not paciente_doc.exists:
+            print(f"[ERRO DE NOTIFICAÇÃO] Paciente {paciente_id} não encontrado.")
+            return
             
         paciente_data = paciente_doc.to_dict()
         nome_paciente = decrypt_data(paciente_data.get('nome', '')) if paciente_data.get('nome') else 'Paciente'
         
         profissional_doc = db.collection('usuarios').document(profissional_id).get()
-        if not profissional_doc.exists: return
+        if not profissional_doc.exists:
+            print(f"[ERRO DE NOTIFICAÇÃO] Profissional {profissional_id} não encontrado.")
+            return
         profissional_data = profissional_doc.to_dict()
         tokens_fcm = profissional_data.get('fcm_tokens', [])
         
-        titulo = "Você foi associado a um paciente"
+        print(f"[PASSO A] Destinatário: {profissional_data.get('email')}. Tokens encontrados: {len(tokens_fcm)}")
+
+        # PASSO 3: Construir a Mensagem Visual
+        titulo = "Nova Associação de Paciente"
         if tipo_profissional == "enfermeiro":
             corpo = f"Você foi associado como enfermeiro responsável pelo paciente {nome_paciente}."
         else:
             corpo = f"Você foi associado à equipe de cuidados do paciente {nome_paciente}."
-        
+
+        # PASSO 4: Construir os Dados de Lógica
         data_payload = {
             "tipo": "ASSOCIACAO_PACIENTE",
             "paciente_id": paciente_id,
             "tipo_profissional": tipo_profissional,
         }
-        
+        print(f"[PASSO B] Payload montado. Título: '{titulo}', Corpo: '{corpo}'")
+
+        # PASSO 5: Persistir a Notificação no Histórico
         db.collection('usuarios').document(profissional_id).collection('notificacoes').add({
             "title": titulo, "body": corpo, "tipo": "ASSOCIACAO_PACIENTE",
             "relacionado": { "paciente_id": paciente_id },
             "lida": False, "data_criacao": firestore.SERVER_TIMESTAMP
         })
-        
+        print(f"[PASSO C] Notificação persistida no Firestore para o usuário {profissional_id}.")
+
+        # PASSO 6: Enviar o Push em Loop
         if tokens_fcm:
-            message = messaging.MulticastMessage(
-                notification=messaging.Notification(title=titulo, body=corpo),
-                data=data_payload,
-                tokens=tokens_fcm
-            )
-            messaging.send_multicast(message)
+            print(f"[PASSO D] Enviando notificação para {len(tokens_fcm)} token(s) em loop...")
+            sucessos = 0
+            for token in tokens_fcm:
+                try:
+                    message = messaging.Message(
+                        notification=messaging.Notification(title=titulo, body=corpo),
+                        data=data_payload,
+                        token=token
+                    )
+                    messaging.send(message)
+                    sucessos += 1
+                except Exception as e:
+                    logger.error(f"Erro ao enviar para o token {token[:10]}...: {e}")
+            print(f"[PASSO E SUCESSO] Envio de associação concluído. Sucessos: {sucessos}")
+        else:
+            print("[PASSO D FALHA] Nenhum token FCM encontrado. Push não enviado.")
             
     except Exception as e:
-        logger.error(f"Erro ao notificar profissional sobre associação: {e}")
+        print(f"[ERRO CRÍTICO NA NOTIFICAÇÃO DE ASSOCIAÇÃO] Exceção: {e}")
+        import traceback
+        print(traceback.format_exc())
 
 
 def _verificar_checklist_completo(db: firestore.client, paciente_id: str, item_id: str):
