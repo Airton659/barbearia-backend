@@ -4708,10 +4708,13 @@ def aprovar_relatorio(db: firestore.client, relatorio_id: str, medico_id: str) -
     print("--- FINALIZANDO APROVAÇÃO DO RELATÓRIO ---")
     return relatorio
 
+# SUBSTITUA ESTA FUNÇÃO INTEIRA EM crud.py
+
 def recusar_relatorio(db: firestore.client, relatorio_id: str, medico_id: str, motivo: str) -> Optional[Dict]:
     """
-    Muda o status de um relatório para 'recusado' e adiciona o motivo.
+    Muda o status de um relatório para 'recusado', adiciona o motivo e notifica o criador.
     """
+    print(f"--- INICIANDO RECUSA DO RELATÓRIO {relatorio_id} PELO MÉDICO {medico_id} ---")
     relatorio_ref = db.collection('relatorios_medicos').document(relatorio_id)
     relatorio_doc = relatorio_ref.get()
 
@@ -4725,16 +4728,68 @@ def recusar_relatorio(db: firestore.client, relatorio_id: str, medico_id: str, m
     })
     
     updated_doc = relatorio_ref.get()
-    data = updated_doc.to_dict()
-    data['id'] = updated_doc.id
+    relatorio = updated_doc.to_dict()
+    relatorio['id'] = updated_doc.id
+    print("[PASSO 1 - RECUSA] Status atualizado com sucesso.")
     
-    # Notificar criador do relatório sobre recusa
+    # --- LÓGICA DE NOTIFICAÇÃO DIRETA E CORRIGIDA ---
     try:
-        _notificar_criador_relatorio_avaliado(db, data, "recusado")
+        criado_por_id = relatorio.get('criado_por_id')
+        paciente_id = relatorio.get('paciente_id')
+
+        if not criado_por_id:
+            logger.warning(f"Relatório {relatorio_id} sem criador_id para notificar.")
+            return relatorio
+
+        medico_doc = db.collection('usuarios').document(medico_id).get()
+        nome_medico = decrypt_data(medico_doc.to_dict().get('nome', '')) if medico_doc.exists else "Médico"
+        
+        paciente_doc = db.collection('usuarios').document(paciente_id).get()
+        nome_paciente = decrypt_data(paciente_doc.to_dict().get('nome', '')) if paciente_doc.exists else "Paciente"
+
+        criador_doc = db.collection('usuarios').document(criado_por_id).get()
+        if not criador_doc.exists:
+            return relatorio
+        
+        criador_data = criador_doc.to_dict()
+        tokens_fcm = criador_data.get('fcm_tokens', [])
+
+        # CORREÇÃO DO TÍTULO E CORPO PARA SEGUIR O PADRÃO
+        titulo = "Relatório Avaliado"
+        corpo = f"O Dr(a). {nome_medico} recusou o relatório do paciente {nome_paciente}."
+
+        data_payload = {
+            "tipo": "RELATORIO_AVALIADO",
+            "relatorio_id": relatorio.get('id', ''),
+            "paciente_id": str(paciente_id),
+            "status": "recusado",
+        }
+
+        db.collection('usuarios').document(criado_por_id).collection('notificacoes').add({
+            "title": titulo, "body": corpo, "tipo": "RELATORIO_AVALIADO",
+            "relacionado": { "relatorio_id": relatorio.get('id'), "paciente_id": paciente_id },
+            "lida": False, "data_criacao": firestore.SERVER_TIMESTAMP
+        })
+
+        if tokens_fcm:
+            sucessos = 0
+            for token in tokens_fcm:
+                try:
+                    message = messaging.Message(
+                        notification=messaging.Notification(title=titulo, body=corpo),
+                        data=data_payload,
+                        token=token
+                    )
+                    messaging.send(message)
+                    sucessos += 1
+                except Exception as e:
+                    logger.error(f"Erro ao enviar para o token {token[:10]}...: {e}")
+            logger.info(f"Notificação de relatório RECUSADO enviada. Sucessos: {sucessos}")
+    
     except Exception as e:
         logger.error(f"Erro ao notificar recusa de relatório {relatorio_id}: {e}")
-    
-    return data
+        
+    return relatorio
 
 def _notificar_criador_relatorio_avaliado(db: firestore.client, relatorio: Dict, status: str):
     """Notifica o criador do relatório sobre aprovação/recusa pelo médico."""
@@ -5717,6 +5772,8 @@ def marcar_tarefa_como_concluida(db: firestore.client, tarefa_id: str, tecnico: 
 # NOVAS FUNÇÕES DE NOTIFICAÇÃO (SETEMBRO 2025)
 # =================================================================================
 
+# SUBSTITUA ESTA FUNÇÃO INTEIRA EM crud.py
+
 def _notificar_medico_novo_relatorio(db: firestore.client, relatorio: Dict):
     """Notifica o médico vinculado sobre um novo relatório pendente de avaliação."""
     try:
@@ -5724,8 +5781,8 @@ def _notificar_medico_novo_relatorio(db: firestore.client, relatorio: Dict):
         paciente_id = relatorio.get('paciente_id')
         criado_por_id = relatorio.get('criado_por_id')
 
-        if not medico_id or not paciente_id or not criado_por_id:
-            logger.warning(f"Dados insuficientes no relatório {relatorio.get('id')} para notificar o médico.")
+        if not medico_id:
+            logger.warning(f"Relatório {relatorio.get('id')} sem medico_id para notificar.")
             return
 
         medico_doc = db.collection('usuarios').document(medico_id).get()
@@ -5741,26 +5798,36 @@ def _notificar_medico_novo_relatorio(db: firestore.client, relatorio: Dict):
         criador_doc = db.collection('usuarios').document(criado_por_id).get()
         nome_criador = decrypt_data(criador_doc.to_dict().get('nome', '')) if criador_doc.exists else "A equipe"
 
+        # CORREÇÃO DO TÍTULO E CORPO PARA SEGUIR O PADRÃO
         titulo = "Novo Relatório para Avaliação"
         corpo = f"{nome_criador} criou um novo relatório para o paciente {nome_paciente} que precisa da sua avaliação."
         
-        # CORREÇÃO: 'title' e 'body' removidos daqui
         data_payload = {
             "tipo": "NOVO_RELATORIO_MEDICO",
-            "relatorio_id": relatorio.get('id'),
-            "paciente_id": paciente_id,
+            "relatorio_id": relatorio.get('id', ''),
+            "paciente_id": str(paciente_id),
         }
 
         db.collection('usuarios').document(medico_id).collection('notificacoes').add({
             "title": titulo, "body": corpo, "tipo": "NOVO_RELATORIO_MEDICO",
             "relacionado": { "relatorio_id": relatorio.get('id'), "paciente_id": paciente_id },
-            "lida": False, "data_criacao": firestore.SERVER_TIMESTAMP,
-            "dedupe_key": f"NOVO_RELATORIO_{relatorio.get('id')}"
+            "lida": False, "data_criacao": firestore.SERVER_TIMESTAMP
         })
 
         if tokens_fcm:
-            _send_data_push_to_tokens(db, medico_data.get('firebase_uid'), tokens_fcm, data_payload, titulo, corpo, "[Novo Relatório]")
-            logger.info(f"Notificação de novo relatório enviada para o médico {medico_id}.")
+            sucessos = 0
+            for token in tokens_fcm:
+                try:
+                    message = messaging.Message(
+                        notification=messaging.Notification(title=titulo, body=corpo),
+                        data=data_payload,
+                        token=token
+                    )
+                    messaging.send(message)
+                    sucessos += 1
+                except Exception as e:
+                    logger.error(f"Erro ao enviar para o token {token[:10]}...: {e}")
+            logger.info(f"Notificação de NOVO relatório enviada. Sucessos: {sucessos}")
 
     except Exception as e:
         logger.error(f"Erro ao notificar médico sobre novo relatório: {e}")

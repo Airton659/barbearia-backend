@@ -3006,3 +3006,28 @@ def debug_technician_notifications(db: firestore.client = Depends(get_db)):
 
     except Exception as e:
         return {"erro": str(e), "debug_info": debug_info}
+
+# ADICIONE ESTE ENDPOINT NO SEU ARQUIVO main.py
+
+@app.post("/me/logout", status_code=status.HTTP_200_OK, tags=["Usuários"])
+def logout_user(
+    request: schemas.FCMTokenRequest,
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db: firestore.client = Depends(get_db)
+):
+    """
+    (Autenticado) Remove o token de notificação (FCM) do usuário ao fazer logout.
+    O frontend DEVE chamar este endpoint ANTES de deslogar o usuário localmente.
+    """
+    if not request.fcm_token:
+        # Retorna sucesso mesmo que o token não seja enviado para não quebrar o fluxo de logout no front.
+        logger.warning(f"Logout para usuário {current_user.id} sem Fcm Token fornecido.")
+        return {"message": "Logout processado sem remoção de token."}
+    try:
+        logger.info(f"Removendo token FCM para o usuário {current_user.id} durante o logout.")
+        crud.remover_fcm_token(db, current_user.firebase_uid, request.fcm_token)
+        return {"message": "Token FCM removido com sucesso."}
+    except Exception as e:
+        logger.error(f"Erro ao remover token FCM no logout para o UID {current_user.firebase_uid}: {e}")
+        # Retorna sucesso mesmo se falhar para não bloquear o logout no frontend.
+        return {"message": "Processo de logout no backend concluído (com erro interno na remoção do token)."}
