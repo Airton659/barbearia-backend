@@ -4595,9 +4595,11 @@ def listar_relatorios_pendentes_medico(db: firestore.client, medico_id: str, neg
         logger.error(f"Stack trace: {traceback.format_exc()}")
     return relatorios
 
+# SUBSTITUA A FUNÇÃO 'aprovar_relatorio' INTEIRA PELA VERSÃO ABAIXO
+
 def aprovar_relatorio(db: firestore.client, relatorio_id: str, medico_id: str) -> Optional[Dict]:
     """
-    Muda o status de um relatório para 'aprovado'.
+    Muda o status de um relatório para 'aprovado' e notifica o criador.
     """
     relatorio_ref = db.collection('relatorios_medicos').document(relatorio_id)
     relatorio_doc = relatorio_ref.get()
@@ -4605,22 +4607,77 @@ def aprovar_relatorio(db: firestore.client, relatorio_id: str, medico_id: str) -
     if not relatorio_doc.exists or relatorio_doc.to_dict().get('medico_id') != medico_id:
         raise HTTPException(status_code=403, detail="Acesso negado: este relatório não está atribuído a você.")
 
+    # 1. Atualiza o status do relatório no banco
     relatorio_ref.update({
         "status": "aprovado",
         "data_revisao": datetime.utcnow()
     })
     
     updated_doc = relatorio_ref.get()
-    data = updated_doc.to_dict()
-    data['id'] = updated_doc.id
+    relatorio = updated_doc.to_dict()
+    relatorio['id'] = updated_doc.id
     
-    # Notificar criador do relatório sobre aprovação
+    # --- INÍCIO DA LÓGICA DE NOTIFICAÇÃO (AGORA DENTRO DA FUNÇÃO) ---
     try:
-        _notificar_criador_relatorio_avaliado(db, data, "aprovado")
+        criado_por_id = relatorio.get('criado_por_id')
+        paciente_id = relatorio.get('paciente_id')
+        status = "aprovado"
+
+        if not criado_por_id:
+            logger.warning(f"Relatório {relatorio_id} sem criador_id para notificar.")
+            return relatorio
+
+        # Busca os nomes para montar a mensagem
+        medico_doc = db.collection('usuarios').document(medico_id).get()
+        nome_medico = decrypt_data(medico_doc.to_dict().get('nome', '')) if medico_doc.exists else "Médico"
+        
+        paciente_doc = db.collection('usuarios').document(paciente_id).get()
+        nome_paciente = decrypt_data(paciente_doc.to_dict().get('nome', '')) if paciente_doc.exists else "Paciente"
+
+        # Busca os dados do criador para pegar os tokens FCM
+        criador_doc = db.collection('usuarios').document(criado_por_id).get()
+        if not criador_doc.exists:
+            logger.error(f"Criador do relatório {criado_por_id} não encontrado.")
+            return relatorio
+        
+        criador_data = criador_doc.to_dict()
+        tokens_fcm = criador_data.get('fcm_tokens', [])
+
+        # Define o título e o corpo da notificação VISÍVEL
+        titulo = "Relatório Avaliado"
+        corpo = f"O Dr(a). {nome_medico} aprovou o relatório do paciente {nome_paciente}."
+
+        # Define o payload de DADOS para o app
+        data_payload = {
+            "tipo": "RELATORIO_AVALIADO",
+            "relatorio_id": relatorio.get('id', ''),
+            "paciente_id": paciente_id,
+            "status": status,
+        }
+
+        # Salva a notificação no histórico do usuário no Firestore
+        db.collection('usuarios').document(criado_por_id).collection('notificacoes').add({
+            "title": titulo, "body": corpo, "tipo": "RELATORIO_AVALIADO",
+            "relacionado": { "relatorio_id": relatorio.get('id'), "paciente_id": paciente_id },
+            "lida": False, "data_criacao": firestore.SERVER_TIMESTAMP
+        })
+
+        # Envia a notificação push se houver tokens
+        if tokens_fcm:
+            # Monta a mensagem para o FCM com os dois objetos: 'notification' e 'data'
+            message = messaging.MulticastMessage(
+                notification=messaging.Notification(title=titulo, body=corpo),
+                data=data_payload,
+                tokens=tokens_fcm
+            )
+            messaging.send_multicast(message)
+            logger.info(f"Notificação de relatório {status} enviada para {criado_por_id}")
+    
     except Exception as e:
         logger.error(f"Erro ao notificar aprovação de relatório {relatorio_id}: {e}")
+    # --- FIM DA LÓGICA DE NOTIFICAÇÃO ---
     
-    return data
+    return relatorio
 
 def recusar_relatorio(db: firestore.client, relatorio_id: str, medico_id: str, motivo: str) -> Optional[Dict]:
     """
