@@ -2753,12 +2753,22 @@ def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
                                 "relacionado": {"tarefa_id": tarefa_id, "paciente_id": paciente_id},
                                 "lida": False, "data_criacao": firestore.SERVER_TIMESTAMP
                             })
-                            message = messaging.MulticastMessage(
-                                notification=messaging.Notification(title=titulo, body=corpo),
-                                data=data_payload,
-                                tokens=user_doc.to_dict()['fcm_tokens']
-                            )
-                            messaging.send_multicast(message)
+                            # PASSO 6: Enviar o Push em Loop (Método Funcional)
+                            tokens_fcm = user_doc.to_dict()["fcm_tokens"]
+                            if tokens_fcm:
+                                sucessos = 0
+                                for token in tokens_fcm:
+                                    try:
+                                        message = messaging.Message(
+                                            notification=messaging.Notification(title=titulo, body=corpo),
+                                            data=data_payload,
+                                            token=token
+                                        )
+                                        messaging.send(message)
+                                        sucessos += 1
+                                    except Exception as e:
+                                        logger.error(f"Erro ao enviar notificação de tarefa atrasada para o token {token[:10]}...: {e}")
+                                logger.info(f"Envio de notificação de tarefa atrasada concluído. Sucessos: {sucessos}")
                             stats["total_notificadas"] += 1
                 
                 doc_verificacao.reference.update({"status": "processado"})
