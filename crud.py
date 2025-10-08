@@ -5077,66 +5077,64 @@ def _verificar_checklist_completo(db: firestore.client, paciente_id: str, item_i
     except Exception as e:
         logger.error(f"Erro ao verificar checklist completo: {e}")
 
-def _notificar_checklist_concluido(db: firestore.client, paciente_id: str, data_checklist: date, negocio_id: str):
-    """Notifica enfermeiro e supervisor sobre checklist 100% concluído."""
-    try:
-        paciente_doc = db.collection('usuarios').document(paciente_id).get()
-        if not paciente_doc.exists: return
-            
-        paciente_data = paciente_doc.to_dict()
-        nome_paciente = decrypt_data(paciente_data.get('nome', '')) if paciente_data.get('nome') else 'Paciente'
-        enfermeiro_id = paciente_data.get('enfermeiro_id')
-        
-        tecnicos_ids = paciente_data.get('tecnicos_ids', [])
-        nome_tecnico = "O técnico"
-        supervisor_id = None
-        
-        if tecnicos_ids:
-            tecnico_doc = db.collection('usuarios').document(tecnicos_ids[0]).get()
-            if tecnico_doc.exists:
-                tecnico_data = tecnico_doc.to_dict()
-                nome_tecnico = decrypt_data(tecnico_data.get('nome', '')) if tecnico_data.get('nome') else 'O técnico'
-                supervisor_id = tecnico_data.get('supervisor_id')
-        
-        titulo = "Checklist Diário Concluído"
-        corpo = f"{nome_tecnico} concluiu o checklist diário do paciente {nome_paciente}."
-        
-        data_payload = {
-            "tipo": "CHECKLIST_CONCLUIDO",
-            "paciente_id": paciente_id,
-            "data": data_checklist.isoformat(),
-        }
-        
-        destinatarios = set()
-        if enfermeiro_id: destinatarios.add(enfermeiro_id)
-        if supervisor_id: destinatarios.add(supervisor_id)
-        
-        for dest_id in destinatarios:
-            try:
-                dest_doc = db.collection('usuarios').document(dest_id).get()
-                if not dest_doc.exists: continue
-                    
-                dest_data = dest_doc.to_dict()
-                tokens_fcm = dest_data.get('fcm_tokens', [])
-                
-                db.collection('usuarios').document(dest_id).collection('notificacoes').add({
-                    "title": titulo, "body": corpo, "tipo": "CHECKLIST_CONCLUIDO",
-                    "relacionado": { "paciente_id": paciente_id, "data": data_checklist.isoformat() },
-                    "lida": False, "data_criacao": firestore.SERVER_TIMESTAMP
-                })
-                
-                if tokens_fcm:
-                    message = messaging.MulticastMessage(
-                        notification=messaging.Notification(title=titulo, body=corpo),
-                        data=data_payload,
-                        tokens=tokens_fcm
-                    )
-                    messaging.send_multicast(message)
-            except Exception as e:
-                logger.error(f"Erro ao notificar destinatário {dest_id} sobre checklist: {e}")
-    except Exception as e:
-        logger.error(f"Erro ao notificar checklist concluído: {e}")
+# =================================================================================
+# FUNÇÃO DE VERIFICAÇÃO DE CHECKLIST (VERSÃO OTIMIZADA)
+# =================================================================================
 
+def _verificar_checklist_completo(db: firestore.client, paciente_id: str, item_id: str):
+    """
+    Verifica se o checklist diário está 100% concluído após uma atualização e,
+    se estiver, dispara a notificação para os responsáveis.
+    [VERSÃO CORRIGIDA E OTIMIZADA]
+    """
+    try:
+        # Pega a referência do item que acabou de ser atualizado para obter seus dados
+        item_ref = db.collection('usuarios').document(paciente_id).collection('checklist').document(item_id)
+        item_doc = item_ref.get()
+        if not item_doc.exists:
+            return
+
+        item_data = item_doc.to_dict()
+        data_criacao = item_data.get('data_criacao')
+        negocio_id = item_data.get('negocio_id')
+        consulta_id = item_data.get('consulta_id') # ID do plano de cuidado
+
+        if not all([data_criacao, negocio_id, consulta_id]):
+            logger.warning(f"Item de checklist {item_id} não possui dados essenciais (data, negocio, consulta).")
+            return
+
+        dia_do_checklist = data_criacao.date()
+
+        # Monta a query para buscar todos os itens do mesmo plano de cuidado e do mesmo dia
+        start_of_day = datetime.combine(dia_do_checklist, time.min)
+        end_of_day = datetime.combine(dia_do_checklist, time.max)
+        
+        checklist_ref = db.collection('usuarios').document(paciente_id).collection('checklist')
+        query = checklist_ref.where('consulta_id', '==', consulta_id)\
+                             .where('data_criacao', '>=', start_of_day)\
+                             .where('data_criacao', '<=', end_of_day)
+
+        docs_do_dia = list(query.stream())
+        
+        total_itens_no_dia = len(docs_do_dia)
+        
+        # Se não há itens para o dia, não há o que fazer
+        if total_itens_no_dia == 0:
+            return
+
+        # Verifica se TODOS os itens encontrados estão concluídos
+        todos_concluidos = all(doc.to_dict().get('concluido', False) for doc in docs_do_dia)
+
+        if todos_concluidos:
+            logger.info(f"CONFIRMADO: Checklist 100% concluído para paciente {paciente_id} em {dia_do_checklist}. Disparando notificação.")
+            # Chama a função de notificação que já corrigimos
+            _notificar_checklist_concluido(db, paciente_id, dia_do_checklist, negocio_id)
+        else:
+            itens_concluidos = sum(1 for doc in docs_do_dia if doc.to_dict().get('concluido', False))
+            logger.info(f"Checklist parcial: {itens_concluidos}/{total_itens_no_dia} itens concluídos para paciente {paciente_id}.")
+
+    except Exception as e:
+        logger.error(f"Erro crítico ao verificar a conclusão do checklist para o paciente {paciente_id}: {e}")
 
 def atualizar_dados_pessoais_paciente(db: firestore.client, paciente_id: str, dados_pessoais: schemas.PacienteUpdateDadosPessoais) -> Optional[Dict]:
     """
