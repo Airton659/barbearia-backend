@@ -1431,6 +1431,48 @@ def register_fcm_token_endpoint(
     crud.adicionar_fcm_token(db, current_user.firebase_uid, request.fcm_token)
     return {"message": "FCM token registrado com sucesso."}
 
+@app.post("/me/register-apns-token", status_code=status.HTTP_200_OK, tags=["Usuários"])
+def register_apns_token_endpoint(
+    request: schemas.APNsTokenRequest,
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db: firestore.client = Depends(get_db)
+):
+    """Registra ou atualiza o token de notificação APNs (Safari/iOS Web Push) para o dispositivo do usuário."""
+    crud.adicionar_apns_token(db, current_user.firebase_uid, request.apns_token)
+    return {"message": "APNs token registrado com sucesso."}
+
+@app.delete("/me/remove-apns-token", status_code=status.HTTP_200_OK, tags=["Usuários"])
+def remove_apns_token_endpoint(
+    request: schemas.APNsTokenRequest,
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
+    db: firestore.client = Depends(get_db)
+):
+    """Remove um token APNs do usuário."""
+    crud.remover_apns_token(db, current_user.firebase_uid, request.apns_token)
+    return {"message": "APNs token removido com sucesso."}
+
+@app.get("/apns/status", status_code=status.HTTP_200_OK, tags=["Debug"])
+def check_apns_status():
+    """Verifica se o serviço APNs está configurado e funcionando."""
+    from apns_service import get_apns_service
+
+    apns_service = get_apns_service()
+
+    if apns_service.enabled:
+        return {
+            "apns_habilitado": True,
+            "topic": apns_service.topic,
+            "sandbox": apns_service.use_sandbox,
+            "mensagem": "✅ APNs está configurado e pronto para uso!"
+        }
+    else:
+        return {
+            "apns_habilitado": False,
+            "topic": None,
+            "sandbox": None,
+            "mensagem": "❌ APNs não está configurado. Verifique as variáveis de ambiente e o arquivo .p8"
+        }
+
 @app.put("/users/update-profile", response_model=schemas.UserProfileUpdateResponse, tags=["Usuários"])
 def update_user_profile(
     update_data: schemas.UserProfileUpdate,

@@ -10,3 +10,5 @@ python-multipart==0.0.9
 httpx==0.27.0
 google-cloud-kms==2.19.0
 cryptography==42.0.8
+PyJWT==2.8.0
+h2==4.1.0

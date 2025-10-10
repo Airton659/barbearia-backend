@@ -5,6 +5,7 @@ steps:
     - 'build'
     - '--no-cache'
     - '-t'
+    # ALTERAÇÃO AQUI: troque 'barbearia-backend-gc' pelo seu novo ID de projeto
     - 'southamerica-east1-docker.pkg.dev/teste-notificacao-barbearia/barbearia-repo/barbearia-app:latest'
     - '.'
 
@@ -12,6 +13,7 @@ steps:
 - name: 'gcr.io/cloud-builders/docker'
   args:
     - 'push'
+    # ALTERAÇÃO AQUI: troque 'barbearia-backend-gc' pelo seu novo ID de projeto
     - 'southamerica-east1-docker.pkg.dev/teste-notificacao-barbearia/barbearia-repo/barbearia-app:latest'
 
   # 3. Faz o deploy da nova imagem no Google Cloud Run
@@ -22,26 +24,24 @@ steps:
     - 'deploy'
     - 'barbearia-backend-service'
     - '--image'
+    # ALTERAÇÃO AQUI: troque 'barbearia-backend-gc' pelo seu novo ID de projeto
     - 'southamerica-east1-docker.pkg.dev/teste-notificacao-barbearia/barbearia-repo/barbearia-app:latest'
     - '--platform'
     - 'managed'
     - '--region'
     - 'southamerica-east1'
     - '--allow-unauthenticated'
-    # ========== SECRETS (Firebase + APNs) ==========
-    # Firebase: montado como variável de ambiente
-    # APNs: montado como arquivo em /app/secrets/apns-auth-key.p8
     - '--set-secrets'
-    - 'FIREBASE_ADMIN_CREDENTIALS=firebase-admin-credentials:latest,/app/secrets/apns-auth-key.p8=apns-auth-key:latest'
-    # ========== VARIÁVEIS DE AMBIENTE ==========
-    # Variáveis existentes + novas variáveis APNs
+    - 'FIREBASE_ADMIN_CREDENTIALS=firebase-admin-credentials:latest'
     - '--set-env-vars'
-    - 'CLOUD_STORAGE_BUCKET_NAME=barbearia-app-fotoss,GCP_PROJECT_ID=teste-notificacao-barbearia,KMS_CRYPTO_KEY_NAME=projects/teste-notificacao-barbearia/locations/southamerica-east1/keyRings/barbearia-app-keys/cryptoKeys/firestore-data-key/cryptoKeyVersions/1,APNS_KEY_PATH=/app/secrets/apns-auth-key.p8,APNS_KEY_ID=UD85TPJ89Y,APNS_TEAM_ID=M83XX73UUS,APNS_TOPIC=web.ygg.conciergeanalicegrubert,APNS_USE_SANDBOX=False'
+    # Verifique se o nome do bucket é o mesmo que você criou na Etapa 1.4
+    - 'CLOUD_STORAGE_BUCKET_NAME=barbearia-app-fotoss,GCP_PROJECT_ID=teste-notificacao-barbearia,KMS_CRYPTO_KEY_NAME=projects/teste-notificacao-barbearia/locations/southamerica-east1/keyRings/barbearia-app-keys/cryptoKeys/firestore-data-key/cryptoKeyVersions/1'
 
 # Define a imagem que foi construída
 images:
+  # ALTERAÇÃO AQUI: troque 'barbearia-backend-gc' pelo seu novo ID de projeto
   - 'southamerica-east1-docker.pkg.dev/teste-notificacao-barbearia/barbearia-repo/barbearia-app:latest'
 
 # Adiciona a configuração de logging
 options:
-  logging: CLOUD_LOGGING_ONLY
+  logging: CLOUD_LOGGING_ONLY 

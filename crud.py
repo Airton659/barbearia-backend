@@ -327,6 +327,32 @@ def remover_fcm_token(db: firestore.client, firebase_uid: str, fcm_token: str):
     except Exception as e:
         logger.error(f"Erro ao remover FCM token para o UID {firebase_uid}: {e}")
 
+def adicionar_apns_token(db: firestore.client, firebase_uid: str, apns_token: str):
+    """Adiciona um APNs token (Safari/iOS) a um usuário, evitando duplicatas."""
+    try:
+        user_doc = buscar_usuario_por_firebase_uid(db, firebase_uid)
+        if user_doc:
+            doc_ref = db.collection('usuarios').document(user_doc['id'])
+            doc_ref.update({
+                'apns_tokens': firestore.ArrayUnion([apns_token])
+            })
+            logger.info(f"✅ Token APNs adicionado com sucesso para o UID {firebase_uid}")
+    except Exception as e:
+        logger.error(f"Erro ao adicionar APNs token para o UID {firebase_uid}: {e}")
+
+def remover_apns_token(db: firestore.client, firebase_uid: str, apns_token: str):
+    """Remove um APNs token de um usuário."""
+    try:
+        user_doc = buscar_usuario_por_firebase_uid(db, firebase_uid)
+        if user_doc:
+            doc_ref = db.collection('usuarios').document(user_doc['id'])
+            doc_ref.update({
+                'apns_tokens': firestore.ArrayRemove([apns_token])
+            })
+            logger.info(f"✅ Token APNs removido com sucesso para o UID {firebase_uid}")
+    except Exception as e:
+        logger.error(f"Erro ao remover APNs token para o UID {firebase_uid}: {e}")
+
 # =================================================================================
 # FUNÇÕES DE ADMINISTRAÇÃO DA PLATAFORMA (SUPER-ADMIN)
 # =================================================================================

@@ -59,6 +59,7 @@ class UsuarioProfile(UsuarioBase):
     roles: dict[str, str] = Field({}, description="Dicionário de negocio_id para role.")
     status_por_negocio: Dict[str, str] = Field({}, description="Status do usuário por negócio (ex: 'ativo', 'inativo').")
     fcm_tokens: List[str] = []
+    apns_tokens: List[str] = Field([], description="Tokens APNs para Safari/iOS Web Push")
     profissional_id: Optional[str] = Field(None, description="ID do perfil profissional, se aplicável.")
     supervisor_id: Optional[str] = Field(None, description="ID do usuário supervisor.")
     enfermeiro_vinculado_id: Optional[str] = Field(None, description="ID do profissional (enfermeiro) vinculado.")
@@ -93,6 +94,12 @@ class FCMTokenUpdate(BaseModel):
 
 class FCMTokenRequest(BaseModel):
     fcm_token: str
+
+class APNsTokenUpdate(BaseModel):
+    apns_token: str
+
+class APNsTokenRequest(BaseModel):
+    apns_token: str
 
 class RoleUpdateRequest(BaseModel):
     role: str = Field(..., description="O novo papel do usuário (ex: 'cliente', 'profissional', 'admin', 'tecnico', 'medico').")
