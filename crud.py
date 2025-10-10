@@ -1279,6 +1279,7 @@ def _send_data_push_to_tokens(
     """
     Envia mensagens FCM com notification e data objects.
     Remove tokens inválidos (Unregistered) do usuário.
+    Inclui tag webpush para evitar notificações duplicadas na web.
     """
     successes = 0
     failures = 0
@@ -1294,6 +1295,35 @@ def _send_data_push_to_tokens(
                     title=notification_title,
                     body=notification_body
                 )
+
+            # Gera tag webpush única para evitar duplicação em navegador/PWA
+            tipo = data_dict.get("tipo", "NOTIFICACAO")
+            tag_parts = [tipo]
+
+            # Adiciona IDs relevantes à tag baseado no tipo de notificação
+            if "relatorio_id" in data_dict:
+                tag_parts.append(f"relatorio-{data_dict['relatorio_id']}")
+            if "tarefa_id" in data_dict:
+                tag_parts.append(f"tarefa-{data_dict['tarefa_id']}")
+            if "exame_id" in data_dict:
+                tag_parts.append(f"exame-{data_dict['exame_id']}")
+            if "suporte_id" in data_dict:
+                tag_parts.append(f"suporte-{data_dict['suporte_id']}")
+            if "registro_id" in data_dict:
+                tag_parts.append(f"registro-{data_dict['registro_id']}")
+            if "consulta_id" in data_dict:
+                tag_parts.append(f"consulta-{data_dict['consulta_id']}")
+            if "paciente_id" in data_dict:
+                tag_parts.append(f"paciente-{data_dict['paciente_id']}")
+
+            webpush_tag = "-".join(tag_parts)
+
+            # Adiciona configuração webpush com tag
+            message_kwargs["webpush"] = messaging.WebpushConfig(
+                notification=messaging.WebpushNotification(
+                    tag=webpush_tag
+                )
+            )
 
             messaging.send(messaging.Message(**message_kwargs))
             successes += 1
@@ -1399,9 +1429,10 @@ def criar_agendamento(db: firestore.client, agendamento_data: schemas.Agendament
 
         # 2. Enviar a notificação via FCM, se houver tokens
         if prof_user.get('fcm_tokens'):
+            titulo = "Novo Agendamento!"
+            corpo = mensagem_body
+
             data_payload = {
-                "title": "Novo Agendamento!",
-                "body": mensagem_body,
                 "tipo": "NOVO_AGENDAMENTO",
                 "agendamento_id": doc_ref.id
             }
@@ -1412,8 +1443,8 @@ def criar_agendamento(db: firestore.client, agendamento_data: schemas.Agendament
                     tokens=prof_user['fcm_tokens'],
                     data_dict=data_payload,
                     logger_prefix="[Novo agendamento] ",
-                    notification_title="Novo Agendamento!",
-                    notification_body=mensagem_body
+                    notification_title=titulo,
+                    notification_body=corpo
                 )
             except Exception as e:
                 logger.error(f"Erro ao ENVIAR notificação de novo agendamento: {e}")
@@ -1471,9 +1502,10 @@ def cancelar_agendamento(db: firestore.client, agendamento_id: str, cliente_id: 
 
             # 2. Enviar a notificação via FCM, se houver tokens
             if prof_user.get('fcm_tokens'):
+                titulo = "Agendamento Cancelado"
+                corpo = mensagem_body
+
                 data_payload = {
-                    "title": "Agendamento Cancelado",
-                    "body": mensagem_body,
                     "tipo": "AGENDAMENTO_CANCELADO_CLIENTE"
                 }
                 try:
@@ -1483,8 +1515,8 @@ def cancelar_agendamento(db: firestore.client, agendamento_id: str, cliente_id: 
                         tokens=prof_user['fcm_tokens'],
                         data_dict=data_payload,
                         logger_prefix="[Cancelamento pelo cliente] ",
-                        notification_title="Agendamento Cancelado",
-                        notification_body=mensagem_body
+                        notification_title=titulo,
+                        notification_body=corpo
                     )
                 except Exception as e:
                     logger.error(f"Erro ao ENVIAR notificação de cancelamento para o profissional {profissional['id']}: {e}")
@@ -1990,11 +2022,12 @@ def _notificar_cliente_cancelamento(db: firestore.client, agendamento: Dict, age
         # 2. Enviar a notificação via FCM
         fcm_tokens = cliente_data.get('fcm_tokens')
         if fcm_tokens:
+            titulo = "Agendamento Cancelado"
+            corpo = mensagem_body
+
             data_payload = {
-                "title": "Agendamento Cancelado",
-                "body": mensagem_body,
                 "tipo": "AGENDAMENTO_CANCELADO",
-                "agendamento_id": agendamento_id 
+                "agendamento_id": agendamento_id
             }
             _send_data_push_to_tokens(
                 db=db,
@@ -2002,8 +2035,8 @@ def _notificar_cliente_cancelamento(db: firestore.client, agendamento: Dict, age
                 tokens=fcm_tokens,
                 data_dict=data_payload,
                 logger_prefix="[Cancelamento pelo profissional] ",
-                notification_title="Agendamento Cancelado",
-                notification_body=mensagem_body
+                notification_title=titulo,
+                notification_body=corpo
             )
         else:
             logger.info(f"Cliente {cliente_id} não possui tokens FCM para notificar.")
@@ -2051,20 +2084,29 @@ def _notificar_cliente_confirmacao(db: firestore.client, agendamento: Dict, agen
         # 2. Enviar a notificação via FCM
         fcm_tokens = cliente_data.get('fcm_tokens')
         if fcm_tokens:
+            titulo = "Agendamento Confirmado"
+            corpo = mensagem_body
+
             data_payload = {
                 "tipo": "AGENDAMENTO_CONFIRMADO",
                 "agendamento_id": agendamento_id,
                 "click_action": f"/agendamentos/{agendamento_id}"
             }
 
-            message = messaging.MulticastMessage(
-                notification=messaging.Notification(title="Agendamento Confirmado", body=mensagem_body),
-                data=data_payload,
-                tokens=fcm_tokens
-            )
-
-            response = messaging.send_multicast(message)
-            logger.info(f"Notificação FCM de confirmação enviada para {len(fcm_tokens)} token(s) do cliente {cliente_id}. Sucessos: {response.success_count}")
+            # PASSO 6: Enviar o push em loop
+            sucessos = 0
+            for token in fcm_tokens:
+                try:
+                    message = messaging.Message(
+                        notification=messaging.Notification(title=titulo, body=corpo),
+                        data=data_payload,
+                        token=token
+                    )
+                    messaging.send(message)
+                    sucessos += 1
+                except Exception as e:
+                    logger.error(f"Erro ao enviar para o token {token[:10]}...: {e}")
+            logger.info(f"Notificação FCM de confirmação enviada. Sucessos: {sucessos}")
         else:
             logger.info(f"Cliente {cliente_id} não possui tokens FCM para notificar.")
 
@@ -4678,8 +4720,10 @@ def aprovar_relatorio(db: firestore.client, relatorio_id: str, medico_id: str) -
         # Envia a notificação push se houver tokens
         if tokens_fcm:
             print(f"[PASSO 7] Enviando notificação para {len(tokens_fcm)} token(s) em loop...")
-            
-            # ** AQUI ESTÁ A CORREÇÃO CRÍTICA **
+
+            # Gera tag webpush única
+            webpush_tag = f"RELATORIO_AVALIADO-relatorio-{relatorio.get('id', '')}-paciente-{paciente_id}"
+
             # Usando loop com messaging.send() em vez de send_multicast()
             sucessos = 0
             falhas = 0
@@ -4688,7 +4732,10 @@ def aprovar_relatorio(db: firestore.client, relatorio_id: str, medico_id: str) -
                     message = messaging.Message(
                         notification=messaging.Notification(title=titulo, body=corpo),
                         data=data_payload,
-                        token=token
+                        token=token,
+                        webpush=messaging.WebpushConfig(
+                            notification=messaging.WebpushNotification(tag=webpush_tag)
+                        )
                     )
                     messaging.send(message)
                     sucessos += 1
@@ -4772,13 +4819,19 @@ def recusar_relatorio(db: firestore.client, relatorio_id: str, medico_id: str, m
         })
 
         if tokens_fcm:
+            # Gera tag webpush única
+            webpush_tag = f"RELATORIO_AVALIADO-relatorio-{relatorio.get('id', '')}-paciente-{paciente_id}"
+
             sucessos = 0
             for token in tokens_fcm:
                 try:
                     message = messaging.Message(
                         notification=messaging.Notification(title=titulo, body=corpo),
                         data=data_payload,
-                        token=token
+                        token=token,
+                        webpush=messaging.WebpushConfig(
+                            notification=messaging.WebpushNotification(tag=webpush_tag)
+                        )
                     )
                     messaging.send(message)
                     sucessos += 1
@@ -4851,7 +4904,15 @@ def _notificar_criador_relatorio_avaliado(db: firestore.client, relatorio: Dict,
         db.collection('usuarios').document(criado_por_id).collection('notificacoes').add(notificacao_data)
         
         if tokens_fcm:
-            _send_data_push_to_tokens(db, criador_data.get('firebase_uid'), tokens_fcm, data_payload, titulo, corpo, "RELATORIO_AVALIADO")
+            _send_data_push_to_tokens(
+                db=db,
+                firebase_uid_destinatario=criador_data.get('firebase_uid'),
+                tokens=tokens_fcm,
+                data_dict=data_payload,
+                logger_prefix="[RELATORIO_AVALIADO] ",
+                notification_title=titulo,
+                notification_body=corpo
+            )
             logger.info(f"Notificação de avaliação de relatório enviada para {criado_por_id}")
         else:
             logger.info(f"Usuário {criado_por_id} não possui tokens FCM registrados")
@@ -4917,13 +4978,20 @@ def _notificar_tecnicos_plano_atualizado(db: firestore.client, paciente_id: str,
                 # PASSO 6: Enviar o push em loop
                 if tokens_fcm:
                     print(f"[PASSO D - Técnico {tecnico_id}] Enviando notificação para {len(tokens_fcm)} token(s)...")
+
+                    # Gera tag webpush única
+                    webpush_tag = f"PLANO_CUIDADO_ATUALIZADO-consulta-{consulta_id}-paciente-{paciente_id}"
+
                     sucessos = 0
                     for token in tokens_fcm:
                         try:
                             message = messaging.Message(
                                 notification=messaging.Notification(title=titulo, body=corpo),
                                 data=data_payload,
-                                token=token
+                                token=token,
+                                webpush=messaging.WebpushConfig(
+                                    notification=messaging.WebpushNotification(tag=webpush_tag)
+                                )
                             )
                             messaging.send(message)
                             sucessos += 1
@@ -4991,13 +5059,20 @@ def _notificar_profissional_associacao(db: firestore.client, profissional_id: st
         # PASSO 6: Enviar o Push em Loop
         if tokens_fcm:
             print(f"[PASSO D] Enviando notificação para {len(tokens_fcm)} token(s) em loop...")
+
+            # Gera tag webpush única
+            webpush_tag = f"ASSOCIACAO_PACIENTE-paciente-{paciente_id}-profissional-{profissional_id}"
+
             sucessos = 0
             for token in tokens_fcm:
                 try:
                     message = messaging.Message(
                         notification=messaging.Notification(title=titulo, body=corpo),
                         data=data_payload,
-                        token=token
+                        token=token,
+                        webpush=messaging.WebpushConfig(
+                            notification=messaging.WebpushNotification(tag=webpush_tag)
+                        )
                     )
                     messaging.send(message)
                     sucessos += 1
@@ -5013,69 +5088,160 @@ def _notificar_profissional_associacao(db: firestore.client, profissional_id: st
         print(traceback.format_exc())
 
 
-def _verificar_checklist_completo(db: firestore.client, paciente_id: str, item_id: str):
-    """Verifica se o checklist diário está 100% concluído e notifica se necessário."""
+def _notificar_checklist_concluido(db: firestore.client, paciente_id: str, dia_do_checklist: date, negocio_id: str):
+    """
+    Notifica os responsáveis (Enfermeiro e Admin) que o checklist diário de um paciente foi concluído.
+    Segue o padrão de notificação definitivo.
+    """
     try:
-        # Obter o item atualizado para pegar a data
+        print(f"--- INICIANDO NOTIFICAÇÃO DE CHECKLIST COMPLETO para paciente {paciente_id} ---")
+
+        # PASSO 1 e 2: Coletar IDs e Buscar Dados Completos
+        paciente_doc = db.collection('usuarios').document(paciente_id).get()
+        if not paciente_doc.exists:
+            print(f"[ERRO DE NOTIFICAÇÃO] Paciente {paciente_id} não encontrado.")
+            return
+
+        paciente_data = paciente_doc.to_dict()
+        nome_paciente = decrypt_data(paciente_data.get('nome', '')) if paciente_data.get('nome') else 'Paciente'
+        enfermeiro_id = paciente_data.get('enfermeiro_id')
+
+        destinatarios_ids = set()
+        if enfermeiro_id:
+            destinatarios_ids.add(enfermeiro_id)
+
+        # Adicionar admins do negócio aos destinatários
+        query_admins = db.collection('usuarios').where(f'roles.{negocio_id}', '==', 'admin')
+        for admin_doc in query_admins.stream():
+            destinatarios_ids.add(admin_doc.id)
+
+        if not destinatarios_ids:
+            print(f"[INFO] Nenhum destinatário (enfermeiro/admin) encontrado para notificar sobre o paciente {paciente_id}.")
+            return
+
+        print(f"[PASSO A] Notificação será enviada para {len(destinatarios_ids)} destinatário(s).")
+
+        # PASSO 3: Construir a Mensagem Visual
+        titulo = "Checklist Concluído"
+        corpo = f"O checklist diário do paciente {nome_paciente} para o dia {dia_do_checklist.strftime('%d/%m/%Y')} foi 100% concluído."
+
+        # PASSO 4: Construir os Dados de Lógica
+        data_payload = {
+            "tipo": "CHECKLIST_CONCLUIDO",
+            "paciente_id": paciente_id,
+            "data_checklist": dia_do_checklist.isoformat(),
+        }
+
+        # Itera sobre cada destinatário para enviar a notificação
+        for dest_id in destinatarios_ids:
+            try:
+                dest_doc = db.collection('usuarios').document(dest_id).get()
+                if not dest_doc.exists:
+                    print(f"[AVISO] Destinatário com ID {dest_id} não foi encontrado. Pulando.")
+                    continue
+
+                dest_data = dest_doc.to_dict()
+                tokens_fcm = dest_data.get('fcm_tokens', [])
+                print(f"[PASSO B - Destinatário {dest_id}] E-mail: {dest_data.get('email')}. Tokens: {len(tokens_fcm)}")
+
+                # PASSO 5: Persistir a Notificação no Histórico
+                db.collection('usuarios').document(dest_id).collection('notificacoes').add({
+                    "title": titulo, "body": corpo, "tipo": "CHECKLIST_CONCLUIDO",
+                    "relacionado": { "paciente_id": paciente_id, "data_checklist": dia_do_checklist.isoformat() },
+                    "lida": False, "data_criacao": firestore.SERVER_TIMESTAMP
+                })
+                print(f"[PASSO C - Destinatário {dest_id}] Notificação persistida no Firestore.")
+
+                # PASSO 6: Enviar o Push em Loop
+                if tokens_fcm:
+                    print(f"[PASSO D - Destinatário {dest_id}] Enviando notificação para {len(tokens_fcm)} token(s)...")
+
+                    # Gera tag webpush única
+                    webpush_tag = f"CHECKLIST_CONCLUIDO-paciente-{paciente_id}-data-{dia_do_checklist.isoformat()}"
+
+                    sucessos = 0
+                    for token in tokens_fcm:
+                        try:
+                            message = messaging.Message(
+                                notification=messaging.Notification(title=titulo, body=corpo),
+                                data=data_payload,
+                                token=token,
+                                webpush=messaging.WebpushConfig(
+                                    notification=messaging.WebpushNotification(tag=webpush_tag)
+                                )
+                            )
+                            messaging.send(message)
+                            sucessos += 1
+                        except Exception as e:
+                            logger.error(f"Erro ao enviar para o token {token[:10]}...: {e}")
+                    print(f"[PASSO E SUCESSO - Destinatário {dest_id}] Envio concluído. Sucessos: {sucessos}")
+                else:
+                    print(f"[PASSO D FALHA - Destinatário {dest_id}] Nenhum token FCM encontrado.")
+
+            except Exception as e:
+                logger.error(f"Erro ao processar notificação para o destinatário {dest_id}: {e}")
+
+    except Exception as e:
+        print(f"[ERRO CRÍTICO NA NOTIFICAÇÃO DE CHECKLIST COMPLETO] Exceção: {e}")
+        import traceback
+        print(traceback.format_exc())
+
+
+def _verificar_checklist_completo(db: firestore.client, paciente_id: str, item_id: str):
+    """
+    Verifica se o checklist diário está 100% concluído após uma atualização e,
+    se estiver, dispara a notificação para os responsáveis.
+    [VERSÃO CORRIGIDA E OTIMIZADA]
+    """
+    try:
+        # Pega a referência do item que acabou de ser atualizado para obter seus dados
         item_ref = db.collection('usuarios').document(paciente_id).collection('checklist').document(item_id)
         item_doc = item_ref.get()
         if not item_doc.exists:
             return
-            
+
         item_data = item_doc.to_dict()
         data_criacao = item_data.get('data_criacao')
         negocio_id = item_data.get('negocio_id')
-        
-        if not data_criacao or not negocio_id:
-            logger.warning("Item do checklist sem data_criacao ou negocio_id")
+        consulta_id = item_data.get('consulta_id') # ID do plano de cuidado
+
+        if not all([data_criacao, negocio_id, consulta_id]):
+            logger.warning(f"Item de checklist {item_id} não possui dados essenciais (data, negocio, consulta).")
             return
-            
-        # Converter timestamp para data para comparação
-        from datetime import datetime
-        if hasattr(data_criacao, 'date'):
-            data_item = data_criacao.date()
-        else:
-            # Se for string ou outro formato, tentar converter
-            data_item = datetime.fromisoformat(str(data_criacao).split('T')[0]).date()
-            
-        # Buscar todos os itens do mesmo dia e negócio
+
+        dia_do_checklist = data_criacao.date()
+
+        # Monta a query para buscar todos os itens do mesmo plano de cuidado e do mesmo dia
+        start_of_day = datetime.combine(dia_do_checklist, time.min)
+        end_of_day = datetime.combine(dia_do_checklist, time.max)
+        
         checklist_ref = db.collection('usuarios').document(paciente_id).collection('checklist')
-        query = checklist_ref.where('negocio_id', '==', negocio_id)
+        query = checklist_ref.where('consulta_id', '==', consulta_id)\
+                             .where('data_criacao', '>=', start_of_day)\
+                             .where('data_criacao', '<=', end_of_day)
+
+        docs_do_dia = list(query.stream())
         
-        # Filtrar itens do mesmo dia
-        todos_itens = []
-        itens_concluidos = 0
+        total_itens_no_dia = len(docs_do_dia)
         
-        for doc in query.stream():
-            data_doc = doc.to_dict()
-            doc_data_criacao = data_doc.get('data_criacao')
-            
-            if doc_data_criacao:
-                if hasattr(doc_data_criacao, 'date'):
-                    doc_data = doc_data_criacao.date()
-                else:
-                    doc_data = datetime.fromisoformat(str(doc_data_criacao).split('T')[0]).date()
-                
-                # Se é do mesmo dia
-                if doc_data == data_item:
-                    todos_itens.append(data_doc)
-                    if data_doc.get('concluido', False):
-                        itens_concluidos += 1
-        
-        # Verificar se todos os itens estão concluídos
-        total_itens = len(todos_itens)
-        if total_itens > 0 and itens_concluidos == total_itens:
-            logger.info(f"Checklist 100% concluído para paciente {paciente_id} em {data_item}")
-            
-            # Obter ID do técnico que fez a última marcação
-            # (assumindo que o current_user seria passado, mas vamos buscar pelo ultimo item atualizado)
-            # Para simplificar, vamos buscar o enfermeiro e supervisor do paciente
-            _notificar_checklist_concluido(db, paciente_id, data_item, negocio_id)
+        # Se não há itens para o dia, não há o que fazer
+        if total_itens_no_dia == 0:
+            return
+
+        # Verifica se TODOS os itens encontrados estão concluídos
+        todos_concluidos = all(doc.to_dict().get('concluido', False) for doc in docs_do_dia)
+
+        if todos_concluidos:
+            logger.info(f"CONFIRMADO: Checklist 100% concluído para paciente {paciente_id} em {dia_do_checklist}. Disparando notificação.")
+            # Chama a função de notificação que já corrigimos
+            _notificar_checklist_concluido(db, paciente_id, dia_do_checklist, negocio_id)
         else:
-            logger.info(f"Checklist parcial: {itens_concluidos}/{total_itens} itens concluídos para paciente {paciente_id}")
-            
+            itens_concluidos = sum(1 for doc in docs_do_dia if doc.to_dict().get('concluido', False))
+            logger.info(f"Checklist parcial: {itens_concluidos}/{total_itens_no_dia} itens concluídos para paciente {paciente_id}.")
+
     except Exception as e:
-        logger.error(f"Erro ao verificar checklist completo: {e}")
+        logger.error(f"Erro crítico ao verificar a conclusão do checklist para o paciente {paciente_id}: {e}")
+
 
 # =================================================================================
 # FUNÇÃO DE VERIFICAÇÃO DE CHECKLIST (VERSÃO OTIMIZADA)
@@ -5834,13 +6000,19 @@ def _notificar_medico_novo_relatorio(db: firestore.client, relatorio: Dict):
         })
 
         if tokens_fcm:
+            # Gera tag webpush única
+            webpush_tag = f"NOVO_RELATORIO_MEDICO-relatorio-{relatorio.get('id', '')}-paciente-{paciente_id}"
+
             sucessos = 0
             for token in tokens_fcm:
                 try:
                     message = messaging.Message(
                         notification=messaging.Notification(title=titulo, body=corpo),
                         data=data_payload,
-                        token=token
+                        token=token,
+                        webpush=messaging.WebpushConfig(
+                            notification=messaging.WebpushNotification(tag=webpush_tag)
+                        )
                     )
                     messaging.send(message)
                     sucessos += 1
@@ -5892,12 +6064,26 @@ def _notificar_enfermeiro_novo_registro_diario(db: firestore.client, registro: D
         })
 
         if tokens_fcm:
-            message = messaging.MulticastMessage(
-                notification=messaging.Notification(title=titulo, body=corpo),
-                data=data_payload,
-                tokens=tokens_fcm
-            )
-            messaging.send_multicast(message)
+            # Gera tag webpush única
+            webpush_tag = f"NOVO_REGISTRO_DIARIO-registro-{registro.get('id', '')}-paciente-{paciente_id}"
+
+            # PASSO 6: Enviar o push em loop
+            sucessos = 0
+            for token in tokens_fcm:
+                try:
+                    message = messaging.Message(
+                        notification=messaging.Notification(title=titulo, body=corpo),
+                        data=data_payload,
+                        token=token,
+                        webpush=messaging.WebpushConfig(
+                            notification=messaging.WebpushNotification(tag=webpush_tag)
+                        )
+                    )
+                    messaging.send(message)
+                    sucessos += 1
+                except Exception as e:
+                    logger.error(f"Erro ao enviar para o token {token[:10]}...: {e}")
+            logger.info(f"Notificação de novo registro diário enviada. Sucessos: {sucessos}")
 
     except Exception as e:
         logger.error(f"Erro ao notificar enfermeiro sobre novo registro diário: {e}")
@@ -5938,12 +6124,26 @@ def _notificar_tarefa_concluida(db: firestore.client, tarefa: Dict):
         })
 
         if tokens_fcm:
-            message = messaging.MulticastMessage(
-                notification=messaging.Notification(title=titulo, body=corpo),
-                data=data_payload,
-                tokens=tokens_fcm
-            )
-            messaging.send_multicast(message)
+            # Gera tag webpush única
+            webpush_tag = f"TAREFA_CONCLUIDA-tarefa-{tarefa.get('id', '')}-paciente-{paciente_id}"
+
+            # PASSO 6: Enviar o push em loop
+            sucessos = 0
+            for token in tokens_fcm:
+                try:
+                    message = messaging.Message(
+                        notification=messaging.Notification(title=titulo, body=corpo),
+                        data=data_payload,
+                        token=token,
+                        webpush=messaging.WebpushConfig(
+                            notification=messaging.WebpushNotification(tag=webpush_tag)
+                        )
+                    )
+                    messaging.send(message)
+                    sucessos += 1
+                except Exception as e:
+                    logger.error(f"Erro ao enviar para o token {token[:10]}...: {e}")
+            logger.info(f"Notificação de tarefa concluída enviada. Sucessos: {sucessos}")
 
     except Exception as e:
         logger.error(f"Erro ao notificar tarefa concluída: {e}")
@@ -6001,7 +6201,15 @@ def _notificar_tarefa_atrasada(db: firestore.client, tarefa_a_verificar: Dict):
         })
 
         if tokens_fcm:
-            _send_data_push_to_tokens(db, criador_data.get('firebase_uid'), tokens_fcm, data_payload, titulo, corpo, "[Tarefa Atrasada]")
+            _send_data_push_to_tokens(
+                db=db,
+                firebase_uid_destinatario=criador_data.get('firebase_uid'),
+                tokens=tokens_fcm,
+                data_dict=data_payload,
+                logger_prefix="[Tarefa Atrasada] ",
+                notification_title=titulo,
+                notification_body=corpo
+            )
             logger.info(f"Notificação de tarefa atrasada ({tarefa_id}) enviada para {criador_id}.")
 
     except Exception as e:
@@ -6094,12 +6302,27 @@ def _notificar_paciente_exame_criado(db: firestore.client, paciente_id: str, exa
                 "exame_id": str(exame_id),
                 "paciente_id": paciente_id
             }
-            message = messaging.MulticastMessage(
-                notification=messaging.Notification(title=titulo, body=mensagem_body),
-                data=data_payload,
-                tokens=tokens_fcm
-            )
-            messaging.send_multicast(message)
+
+            # Gera tag webpush única
+            webpush_tag = f"EXAME_CRIADO-exame-{exame_id}-paciente-{paciente_id}"
+
+            # PASSO 6: Enviar o push em loop
+            sucessos = 0
+            for token in tokens_fcm:
+                try:
+                    message = messaging.Message(
+                        notification=messaging.Notification(title=titulo, body=mensagem_body),
+                        data=data_payload,
+                        token=token,
+                        webpush=messaging.WebpushConfig(
+                            notification=messaging.WebpushNotification(tag=webpush_tag)
+                        )
+                    )
+                    messaging.send(message)
+                    sucessos += 1
+                except Exception as e:
+                    logger.error(f"Erro ao enviar para o token {token[:10]}...: {e}")
+            logger.info(f"Notificação de exame criado enviada. Sucessos: {sucessos}")
 
     except Exception as e:
         logger.error(f"Erro ao notificar exame criado para paciente {paciente_id}: {e}")
@@ -6136,12 +6359,27 @@ def _notificar_paciente_suporte_adicionado(db: firestore.client, paciente_id: st
                 "suporte_id": str(suporte_id),
                 "paciente_id": paciente_id
             }
-            message = messaging.MulticastMessage(
-                notification=messaging.Notification(title=titulo, body=mensagem_body),
-                data=data_payload,
-                tokens=tokens_fcm
-            )
-            messaging.send_multicast(message)
+
+            # Gera tag webpush única
+            webpush_tag = f"SUPORTE_ADICIONADO-suporte-{suporte_id}-paciente-{paciente_id}"
+
+            # PASSO 6: Enviar o push em loop
+            sucessos = 0
+            for token in tokens_fcm:
+                try:
+                    message = messaging.Message(
+                        notification=messaging.Notification(title=titulo, body=mensagem_body),
+                        data=data_payload,
+                        token=token,
+                        webpush=messaging.WebpushConfig(
+                            notification=messaging.WebpushNotification(tag=webpush_tag)
+                        )
+                    )
+                    messaging.send(message)
+                    sucessos += 1
+                except Exception as e:
+                    logger.error(f"Erro ao enviar para o token {token[:10]}...: {e}")
+            logger.info(f"Notificação de suporte adicionado enviada. Sucessos: {sucessos}")
 
     except Exception as e:
         logger.error(f"Erro ao notificar suporte adicionado para paciente {paciente_id}: {e}")
@@ -6194,13 +6432,29 @@ def processar_lembretes_exames(db: firestore.client) -> Dict:
 
                             if tokens_fcm:
                                 data_payload = {"tipo": "LEMBRETE_EXAME", "exame_id": exame_doc.id}
-                                message = messaging.MulticastMessage(
-                                    notification=messaging.Notification(title=mensagem_title, body=mensagem_body),
-                                    data=data_payload,
-                                    tokens=tokens_fcm
-                                )
-                                messaging.send_multicast(message)
-                                stats["total_lembretes_enviados"] += 1
+
+                                # Gera tag webpush única
+                                webpush_tag = f"LEMBRETE_EXAME-exame-{exame_doc.id}-paciente-{usuario_id}"
+
+                                # PASSO 6: Enviar o push em loop
+                                sucessos = 0
+                                for token in tokens_fcm:
+                                    try:
+                                        message = messaging.Message(
+                                            notification=messaging.Notification(title=mensagem_title, body=mensagem_body),
+                                            data=data_payload,
+                                            token=token,
+                                            webpush=messaging.WebpushConfig(
+                                                notification=messaging.WebpushNotification(tag=webpush_tag)
+                                            )
+                                        )
+                                        messaging.send(message)
+                                        sucessos += 1
+                                    except Exception as e:
+                                        logger.error(f"Erro ao enviar lembrete para o token {token[:10]}...: {e}")
+                                if sucessos > 0:
+                                    stats["total_lembretes_enviados"] += 1
+                                logger.info(f"Lembrete de exame enviado. Sucessos: {sucessos}")
                     except Exception as e:
                         stats["erros"] += 1
                         logger.error(f"Erro ao processar lembrete para exame {exame_doc.id}: {e}")
@@ -6255,13 +6509,19 @@ def processar_notificacoes_agendadas(db: firestore.client, now: datetime) -> dic
                 })
 
                 if tokens_fcm:
+                    # Gera tag webpush única
+                    webpush_tag = f"LEMBRETE_AGENDADO-notificacao-{doc_notificacao.id}-paciente-{paciente_id}"
+
                     # Usando o padrão de loop que funciona
                     for token in tokens_fcm:
                         try:
                             message = messaging.Message(
                                 notification=messaging.Notification(title=titulo, body=mensagem),
                                 data={"tipo": "LEMBRETE_AGENDADO", "notificacao_agendada_id": doc_notificacao.id},
-                                token=token
+                                token=token,
+                                webpush=messaging.WebpushConfig(
+                                    notification=messaging.WebpushNotification(tag=webpush_tag)
+                                )
                             )
                             messaging.send(message)
                         except Exception as send_error:
