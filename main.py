@@ -2671,8 +2671,48 @@ def processar_notificacoes_agendadas(db: firestore.client, now: datetime) -> dic
                     "dedupe_key": f"AGENDADA_{doc_notificacao.id}"
                 })
 
-                # Enviar push notification se houver tokens FCM
-                if tokens_fcm:
+                # HÍBRIDO: Tenta Web Push VAPID primeiro, depois FCM como fallback
+                data_payload = {"tipo": "LEMBRETE_AGENDADO", "notificacao_agendada_id": doc_notificacao.id}
+                webpush_tag = f"LEMBRETE_AGENDADO-{doc_notificacao.id}-paciente-{paciente_id}"
+                enviado_vapid = False
+
+                # 1. Tentar Web Push VAPID
+                webpush_subscription = paciente_data.get('webpush_subscription_exames')
+                if webpush_subscription:
+                    try:
+                        from pywebpush import webpush, WebPushException
+                        from vapid_config import VAPID_PRIVATE_KEY, VAPID_CLAIMS_EMAIL
+                        import json
+
+                        payload = json.dumps({
+                            "title": titulo,
+                            "body": mensagem,
+                            "data": data_payload,
+                            "tag": webpush_tag
+                        })
+
+                        webpush(
+                            subscription_info={
+                                "endpoint": webpush_subscription["endpoint"],
+                                "keys": webpush_subscription["keys"]
+                            },
+                            data=payload,
+                            vapid_private_key=VAPID_PRIVATE_KEY,
+                            vapid_claims={"sub": VAPID_CLAIMS_EMAIL}
+                        )
+
+                        enviado_vapid = True
+                        logger.info(f"✅ LEMBRETE_AGENDADO enviado via Web Push para {paciente_id}")
+
+                    except WebPushException as e:
+                        logger.error(f"❌ Erro Web Push para {paciente_id}: {e}")
+                        if e.response and e.response.status_code == 410:
+                            paciente_doc.reference.update({"webpush_subscription_exames": firestore.DELETE_FIELD})
+                    except Exception as e:
+                        logger.error(f"❌ Erro Web Push para {paciente_id}: {e}")
+
+                # 2. Fallback: FCM (se VAPID não enviou)
+                if not enviado_vapid and tokens_fcm:
                     try:
                         from firebase_admin import messaging
 
@@ -2681,15 +2721,12 @@ def processar_notificacoes_agendadas(db: firestore.client, now: datetime) -> dic
                                 title=titulo,
                                 body=mensagem
                             ),
-                            data={
-                                "tipo": "LEMBRETE_AGENDADO",
-                                "notificacao_agendada_id": doc_notificacao.id
-                            },
+                            data=data_payload,
                             tokens=tokens_fcm
                         )
 
                         response = messaging.send_multicast(message)
-                        logger.info(f"Push enviado para {len(tokens_fcm)} tokens, {response.success_count} sucessos")
+                        logger.info(f"✅ LEMBRETE_AGENDADO enviado via FCM: {response.success_count} sucessos")
 
                         # Remover tokens inválidos
                         if response.failure_count > 0:
@@ -2804,8 +2841,50 @@ def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
                                     "relacionado": {"tarefa_id": tarefa_id, "paciente_id": paciente_id},
                                     "lida": False, "data_criacao": firestore.SERVER_TIMESTAMP
                                 })
-                                
-                                if tokens_fcm:
+
+                                # HÍBRIDO: Tenta Web Push VAPID primeiro, depois FCM como fallback
+                                webpush_tag = f"TAREFA_ATRASADA-tarefa-{tarefa_id}-paciente-{paciente_id}"
+                                enviado_vapid = False
+
+                                # 1. Tentar Web Push VAPID
+                                webpush_subscription = user_data.get('webpush_subscription_exames')
+                                if webpush_subscription:
+                                    try:
+                                        from pywebpush import webpush, WebPushException
+                                        from vapid_config import VAPID_PRIVATE_KEY, VAPID_CLAIMS_EMAIL
+                                        import json
+
+                                        payload = json.dumps({
+                                            "title": titulo,
+                                            "body": corpo,
+                                            "data": data_payload,
+                                            "tag": webpush_tag
+                                        })
+
+                                        webpush(
+                                            subscription_info={
+                                                "endpoint": webpush_subscription["endpoint"],
+                                                "keys": webpush_subscription["keys"]
+                                            },
+                                            data=payload,
+                                            vapid_private_key=VAPID_PRIVATE_KEY,
+                                            vapid_claims={"sub": VAPID_CLAIMS_EMAIL}
+                                        )
+
+                                        enviado_vapid = True
+                                        stats["total_notificadas"] += 1
+                                        logger.info(f"✅ TAREFA_ATRASADA enviada via Web Push para {user_id}")
+
+                                    except WebPushException as e:
+                                        logger.warning(f"⚠️ Falha VAPID para {user_id}: {e}, tentando FCM...")
+                                        if e.response and e.response.status_code in [403, 410]:
+                                            logger.warning(f"⚠️ Subscription VAPID inválida/expirada, removendo...")
+                                            user_doc.reference.update({"webpush_subscription_exames": firestore.DELETE_FIELD})
+                                    except Exception as e:
+                                        logger.warning(f"⚠️ Erro Web Push para {user_id}: {e}, tentando FCM...")
+
+                                # 2. Fallback: FCM (se VAPID não enviou)
+                                if not enviado_vapid and tokens_fcm:
                                     for token in tokens_fcm:
                                         try:
                                             message = messaging.Message(
@@ -2815,8 +2894,9 @@ def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
                                             )
                                             messaging.send(message)
                                             stats["total_notificadas"] += 1
+                                            logger.info(f"✅ TAREFA_ATRASADA enviada via FCM para {user_id}")
                                         except Exception as e:
-                                            logger.error(f"Erro ao enviar notificação de tarefa atrasada para token {token[:10]}...: {e}")
+                                            logger.error(f"Erro ao enviar FCM para token {token[:10]}...: {e}")
                     
                     doc_verificacao.reference.update({"status": "processado"})
                 except Exception as e:
@@ -2842,6 +2922,127 @@ def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
 
     logger.info(f"Processamento de jobs concluído: {stats}")
     return stats
+
+@app.post("/processar-lembretes-exames", tags=["Jobs Agendados"])
+def processar_lembretes_exames_endpoint(db: firestore.client = Depends(get_db)):
+    """
+    Endpoint para processar lembretes dinâmicos de exames.
+    - COM horário: envia 1h antes
+    - SEM horário: envia às 09:00 do dia
+    """
+    try:
+        logger.info("--- INICIANDO PROCESSAMENTO DE LEMBRETES DE EXAMES ---")
+        stats = crud.processar_lembretes_exames(db)
+        logger.info(f"Lembretes processados: {stats}")
+        return stats
+    except Exception as e:
+        logger.error(f"Erro ao processar lembretes de exames: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/test-notificacao/{paciente_id}", tags=["Debug"])
+def test_notificacao_paciente(paciente_id: str, db: firestore.client = Depends(get_db)):
+    """Envia notificação de teste para um paciente específico"""
+    from firebase_admin import messaging
+    try:
+        paciente_doc = db.collection('usuarios').document(paciente_id).get()
+        if not paciente_doc.exists:
+            raise HTTPException(status_code=404, detail="Paciente não encontrado")
+
+        paciente_data = paciente_doc.to_dict()
+        fcm_tokens = paciente_data.get('fcm_tokens', [])
+
+        if not fcm_tokens:
+            return {"erro": "Paciente não tem FCM tokens registrados"}
+
+        titulo = "Teste de Notificação"
+        corpo = "Esta é uma notificação de teste do sistema."
+
+        resultados = []
+        for token in fcm_tokens:
+            try:
+                message = messaging.Message(
+                    notification=messaging.Notification(title=titulo, body=corpo),
+                    data={"tipo": "TESTE", "paciente_id": paciente_id},
+                    token=token
+                )
+                response = messaging.send(message)
+                resultados.append({"token": token[:20] + "...", "status": "enviado", "response": response})
+            except Exception as e:
+                resultados.append({"token": token[:20] + "...", "status": "erro", "erro": str(e)})
+
+        return {
+            "paciente_id": paciente_id,
+            "total_tokens": len(fcm_tokens),
+            "resultados": resultados
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================================
+# WEB PUSH VAPID ENDPOINTS (Apenas para Lembretes de Exames)
+# ============================================================================
+
+@app.get("/vapid-public-key", tags=["Web Push"])
+def get_vapid_public_key():
+    """Retorna a chave pública VAPID para o frontend configurar Web Push"""
+    from vapid_config import VAPID_PUBLIC_KEY
+    return {"publicKey": VAPID_PUBLIC_KEY}
+
+class WebPushSubscription(BaseModel):
+    endpoint: str
+    keys: dict  # {"p256dh": "...", "auth": "..."}
+
+@app.post("/usuarios/{usuario_id}/webpush-subscription", tags=["Web Push"])
+def salvar_webpush_subscription(
+    usuario_id: str,
+    subscription: WebPushSubscription,
+    db: firestore.client = Depends(get_db)
+):
+    """
+    Salva o Web Push subscription do usuário (apenas para lembretes de exames).
+    Frontend deve chamar após usuário permitir notificações.
+    """
+    try:
+        usuario_ref = db.collection('usuarios').document(usuario_id)
+        usuario_doc = usuario_ref.get()
+
+        if not usuario_doc.exists:
+            raise HTTPException(status_code=404, detail="Usuário não encontrado")
+
+        # Salvar subscription
+        subscription_data = {
+            "endpoint": subscription.endpoint,
+            "keys": subscription.keys,
+            "created_at": firestore.SERVER_TIMESTAMP
+        }
+
+        usuario_ref.update({
+            "webpush_subscription_exames": subscription_data
+        })
+
+        return {"status": "success", "message": "Web Push subscription salva com sucesso"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/usuarios/{usuario_id}/webpush-subscription", tags=["Web Push"])
+def remover_webpush_subscription(
+    usuario_id: str,
+    db: firestore.client = Depends(get_db)
+):
+    """Remove o Web Push subscription do usuário"""
+    try:
+        usuario_ref = db.collection('usuarios').document(usuario_id)
+        usuario_ref.update({
+            "webpush_subscription_exames": firestore.DELETE_FIELD
+        })
+        return {"status": "success", "message": "Subscription removida"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/tasks/debug-verificacao", tags=["Jobs Agendados"])
 def debug_verificacao(db: firestore.client = Depends(get_db)):

@@ -844,8 +844,15 @@ class RelatorioMedicoUpdate(BaseModel):
     status: Optional[str] = Field(None, description="Status do relatório")
     motivo_recusa: Optional[str] = Field(None, description="Motivo de recusa se aplicável")
 
+class UsuarioSimples(BaseModel):
+    """Schema simplificado de usuário para populate em relatórios"""
+    id: str
+    nome: str
+    email: str
+
 class RelatorioMedicoResponse(RelatorioMedicoBase):
     id: str
+    criado_por: Optional[UsuarioSimples] = Field(None, description="Informações do usuário que criou o relatório")
 
 class RecusarRelatorioRequest(BaseModel):
     motivo: str = Field(..., description="Justificativa da recusa.")

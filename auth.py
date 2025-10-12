@@ -369,24 +369,28 @@ def get_relatorio_autorizado(
     Permite acesso ao Admin/Profissional do negócio ou ao Médico atribuído.
     Retorna o dicionário do relatório se autorizado.
     """
+    import crud  # Import local para evitar dependência circular
+
     relatorio_doc = db.collection('relatorios_medicos').document(relatorio_id).get()
     if not relatorio_doc.exists:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Relatório não encontrado.")
-    
+
     relatorio_data = relatorio_doc.to_dict()
     relatorio_data['id'] = relatorio_doc.id
     negocio_id = relatorio_data.get('negocio_id')
     medico_id = relatorio_data.get('medico_id')
 
     user_roles = current_user.roles
-    
+
     # 1. Admin ou Profissional do negócio têm acesso
     if user_roles.get(negocio_id) in ['admin', 'profissional']:
-        return relatorio_data
+        # Popula o criado_por antes de retornar
+        return crud._popular_criado_por(db, relatorio_data)
 
     # 2. O médico atribuído ao relatório tem acesso
     if user_roles.get(negocio_id) == 'medico' and current_user.id == medico_id:
-        return relatorio_data
+        # Popula o criado_por antes de retornar
+        return crud._popular_criado_por(db, relatorio_data)
 
     # 3. Nega o acesso para todos os outros casos
     raise HTTPException(
