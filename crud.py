@@ -2588,13 +2588,17 @@ def listar_pacientes_por_profissional_ou_tecnico(db: firestore.client, negocio_i
                             endereco_descriptografado[key] = value
                     paciente_data['endereco'] = endereco_descriptografado
                 
+                # --- INÍCIO DA ADIÇÃO SOLICITADA ---
+                profile_image_url = paciente_data.get('profile_image_url') or paciente_data.get('profile_image')
+                paciente_data['profile_image_url'] = profile_image_url
+                # --- FIM DA ADIÇÃO SOLICITADA ---
+
                 pacientes.append(paciente_data)
         
         return pacientes
     except Exception as e:
         logger.error(f"Erro ao listar pacientes para o usuário {usuario_id} com role '{role}': {e}")
         return []
-        
     
 def criar_consulta(db: firestore.client, consulta_data: schemas.ConsultaCreate) -> Dict:
     """Salva uma nova consulta na subcoleção de um paciente."""
