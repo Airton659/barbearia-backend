@@ -7057,3 +7057,48 @@ def _enviar_alerta_ausencia(db: firestore.client, negocio_id: str, tipo_alerta: 
     Esta função foi desabilitada conforme solicitação do usuário."""
     # FUNÇÃO DESABILITADA - não faz nada
     return
+
+
+# Em crud.py, adicione esta nova função
+
+def get_usuario_por_id(db: firestore.client, usuario_id: str) -> Optional[Dict]:
+    """
+    Busca um usuário pelo seu ID de documento do Firestore e descriptografa os dados.
+    """
+    try:
+        usuario_ref = db.collection('usuarios').document(usuario_id)
+        usuario_doc = usuario_ref.get()
+
+        if not usuario_doc.exists:
+            return None
+
+        usuario_data = usuario_doc.to_dict()
+        usuario_data['id'] = usuario_doc.id
+
+        # Descriptografar dados sensíveis
+        if 'nome' in usuario_data and usuario_data['nome']:
+            try:
+                usuario_data['nome'] = decrypt_data(usuario_data['nome'])
+            except Exception:
+                usuario_data['nome'] = "[Erro na descriptografia]"
+        
+        # Lógica robusta para obter a URL da imagem de perfil
+        profile_image_url = usuario_data.get('profile_image_url') or usuario_data.get('profile_image')
+        
+        # Fallback para a foto de perfil do profissional (se aplicável)
+        if not profile_image_url:
+             firebase_uid = usuario_data.get('firebase_uid')
+             if firebase_uid:
+                # Assumindo que o primeiro negócio é o contexto
+                negocio_id = next(iter(usuario_data.get('roles', {})), None)
+                if negocio_id:
+                    perfil_prof = buscar_profissional_por_uid(db, negocio_id, firebase_uid)
+                    if perfil_prof:
+                        profile_image_url = perfil_prof.get('fotos', {}).get('thumbnail')
+
+        usuario_data['profile_image_url'] = profile_image_url
+        
+        return usuario_data
+    except Exception as e:
+        logger.error(f"Erro ao buscar usuário por ID {usuario_id}: {e}")
+        return None

@@ -3177,3 +3177,45 @@ def logout_user(
         logger.error(f"Erro ao remover token FCM no logout para o UID {current_user.firebase_uid}: {e}")
         # Retorna sucesso mesmo se falhar para não bloquear o logout no frontend.
         return {"message": "Processo de logout no backend concluído (com erro interno na remoção do token)."}
+    
+
+# Em main.py, adicione estes dois novos endpoints
+
+@app.get("/negocios/{negocio_id}/usuarios/{user_id}", response_model=schemas.UsuarioProfile, tags=["Admin - Gestão do Negócio"])
+def get_detalhes_usuario_negocio(
+    user_id: str,
+    negocio_id: str = Depends(validate_path_negocio_id),
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_profissional_user),
+    db: firestore.client = Depends(get_db)
+):
+    """
+    (Admin ou Profissional) Retorna os detalhes de um usuário específico do negócio.
+    """
+    usuario = crud.get_usuario_por_id(db, user_id)
+    if not usuario or negocio_id not in usuario.get('roles', {}):
+        raise HTTPException(status_code=404, detail="Usuário não encontrado ou não pertence a este negócio.")
+    
+    # Garante que todos os campos do schema sejam preenchidos
+    usuario.setdefault('fcm_tokens', [])
+    usuario.setdefault('apns_tokens', [])
+    
+    return usuario
+
+@app.get("/pacientes/{paciente_id}/dados-completos", response_model=schemas.UsuarioProfile, tags=["Ficha do Paciente"])
+def get_dados_completos_paciente(
+    paciente_id: str,
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
+    db: firestore.client = Depends(get_db)
+):
+    """
+    (Autorizado) Retorna os dados completos de um paciente, incluindo a URL da imagem de perfil.
+    """
+    paciente = crud.get_usuario_por_id(db, paciente_id)
+    if not paciente:
+        raise HTTPException(status_code=404, detail="Paciente não encontrado.")
+    
+    # Garante que todos os campos do schema sejam preenchidos para evitar erros
+    paciente.setdefault('fcm_tokens', [])
+    paciente.setdefault('apns_tokens', [])
+    
+    return paciente
