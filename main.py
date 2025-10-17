@@ -1,6 +1,6 @@
 # barbearia-backend/main.py (Versão estável com Checklist do Técnico)
 
-from fastapi import FastAPI, Depends, HTTPException, status, Header, Path, Query, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, status, Header, Path, Query, UploadFile, File, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,6 +32,33 @@ from fastapi.responses import JSONResponse
 # --- Modelo para a requisição de promoção ---
 class PromoteRequest(BaseModel):
     firebase_uid: str
+
+# --- Schemas para Cloud Tasks ---
+class NotificarTarefaAtrasadaRequest(BaseModel):
+    tarefa_id: str
+    paciente_id: str
+    negocio_id: str
+    criado_por_id: str
+    descricao: str
+    data_hora_limite: str
+
+class NotificarTarefaAtrasadaResponse(BaseModel):
+    success: bool
+    message: str
+    tarefa_id: str
+
+class NotificarLembreteExameRequest(BaseModel):
+    exame_id: str
+    paciente_id: str
+    negocio_id: str
+    nome_exame: str
+    data_exame: str
+    horario_exame: Optional[str] = None
+
+class NotificarLembreteExameResponse(BaseModel):
+    success: bool
+    message: str
+    exame_id: str
 
 # --- Configuração da Aplicação ---
 app = FastAPI(
@@ -2034,12 +2061,17 @@ def get_resultados_pesquisas(
 def criar_tarefa_essencial(
     paciente_id: str,
     tarefa_data: schemas.TarefaAgendadaCreate,
+    request: Request,
     current_user: schemas.UsuarioProfile = Depends(get_admin_or_profissional_autorizado_paciente),
     negocio_id: str = Depends(validate_negocio_id),
     db: firestore.client = Depends(get_db)
 ):
     """(Admin ou Enfermeiro) Cria uma nova tarefa essencial para um paciente com prazo."""
-    nova_tarefa = crud.criar_tarefa(db, paciente_id, negocio_id, tarefa_data, current_user)
+    # Obtém a URL do serviço para o Cloud Tasks
+    service_url = os.getenv('CLOUD_RUN_SERVICE_URL') or str(request.base_url).rstrip('/')
+
+    # USA A NOVA VERSÃO COM CLOUD TASKS
+    nova_tarefa = crud.criar_tarefa_v2(db, paciente_id, negocio_id, tarefa_data, current_user, service_url)
     return nova_tarefa
 
 @app.get("/pacientes/{paciente_id}/tarefas", response_model=List[schemas.TarefaAgendadaResponse], tags=["Tarefas Essenciais"])
@@ -2059,10 +2091,11 @@ def concluir_tarefa_essencial(
     db: firestore.client = Depends(get_db)
 ):
     """(Técnico) Marca uma tarefa como concluída."""
-    tarefa_concluida = crud.marcar_tarefa_como_concluida(db, tarefa_id, current_user)
+    # USA A NOVA VERSÃO QUE CANCELA CLOUD TASKS
+    tarefa_concluida = crud.marcar_tarefa_como_concluida_v2(db, tarefa_id, current_user)
     if not tarefa_concluida:
         raise HTTPException(status_code=404, detail="Tarefa não encontrada ou já concluída.")
-    
+
     return tarefa_concluida
 
 # =================================================================================
@@ -2778,9 +2811,9 @@ def processar_notificacoes_agendadas(db: firestore.client, now: datetime) -> dic
 def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
     """
     (PÚBLICO) Processa tarefas atrasadas, notificações agendadas e lembretes de exames.
+    [CORRIGIDO PARA USAR A LÓGICA DE NOTIFICAÇÃO CENTRALIZADA]
     """
     from datetime import datetime, timezone
-    from firebase_admin import messaging
     
     stats = {"total_verificadas": 0, "total_notificadas": 0, "erros": 0}
     now = datetime.now(timezone.utc)
@@ -2790,14 +2823,9 @@ def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
         
         # 1. Processar Tarefas Atrasadas
         verificacao_ref = db.collection('tarefas_a_verificar')
-        query = verificacao_ref.where('status', '==', 'pendente')
+        query = verificacao_ref.where('status', '==', 'pendente').where('dataHoraLimite', '<=', now)
         
-        tarefas_para_verificar = []
-        for doc in query.stream():
-            dados = doc.to_dict()
-            data_limite = dados.get('dataHoraLimite')
-            if data_limite and data_limite.replace(tzinfo=timezone.utc) <= now:
-                tarefas_para_verificar.append(doc)
+        tarefas_para_verificar = list(query.stream())
 
         stats["total_verificadas"] = len(tarefas_para_verificar)
         logger.info(f"Tarefas pendentes encontradas para verificação: {stats['total_verificadas']}")
@@ -2805,105 +2833,31 @@ def process_overdue_tasks_v2(db: firestore.client = Depends(get_db)):
         if tarefas_para_verificar:
             for doc_verificacao in tarefas_para_verificar:
                 try:
-                    dados = doc_verificacao.to_dict()
-                    tarefa_id = dados.get('tarefaId')
+                    dados_verificacao = doc_verificacao.to_dict()
+                    tarefa_id = dados_verificacao.get('tarefaId')
                     if not tarefa_id: continue
 
                     tarefa_ref = db.collection('tarefas_essenciais').document(tarefa_id)
                     tarefa_doc = tarefa_ref.get()
 
+                    # Verifica se a tarefa ainda existe e não foi concluída
                     if tarefa_doc.exists and not tarefa_doc.to_dict().get('foiConcluida', False):
-                        tarefa_data = tarefa_doc.to_dict()
-                        paciente_id = tarefa_data.get('pacienteId')
-                        descricao = tarefa_data.get('descricao', 'Tarefa')
                         
-                        paciente_doc = db.collection('usuarios').document(paciente_id).get()
-                        nome_paciente = crud.decrypt_data(paciente_doc.to_dict().get('nome', '')) if paciente_doc.exists and paciente_doc.to_dict().get('nome') else "o paciente"
+                        # --- INÍCIO DA CORREÇÃO ---
+                        # LÓGICA ANTIGA E INCORRETA REMOVIDA.
+                        # AGORA CHAMA A FUNÇÃO CENTRALIZADA E CORRETA DO CRUD.
+                        crud._notificar_tarefa_atrasada(db, dados_verificacao)
+                        stats["total_notificadas"] += 1
+                        # --- FIM DA CORREÇÃO ---
 
-                        titulo = "Alerta: Tarefa Atrasada!"
-                        corpo = f"A tarefa '{descricao[:30]}...' para o paciente {nome_paciente} não foi concluída no prazo."
-                        data_payload = {"tipo": "TAREFA_ATRASADA", "tarefa_id": tarefa_id, "paciente_id": paciente_id}
-
-                        destinatarios = set()
-                        if tarefa_data.get('criadoPorId'): destinatarios.add(tarefa_data['criadoPorId'])
-                        if paciente_doc.exists:
-                            for tecnico_id in paciente_doc.to_dict().get('tecnicos_ids', []):
-                                destinatarios.add(tecnico_id)
-                        
-                        for user_id in destinatarios:
-                            user_doc = db.collection('usuarios').document(user_id).get()
-                            if user_doc.exists:
-                                user_data = user_doc.to_dict()
-                                tokens_fcm = user_data.get('fcm_tokens', [])
-                                
-                                db.collection('usuarios').document(user_id).collection('notificacoes').add({
-                                    "title": titulo, "body": corpo, "tipo": "TAREFA_ATRASADA",
-                                    "relacionado": {"tarefa_id": tarefa_id, "paciente_id": paciente_id},
-                                    "lida": False, "data_criacao": firestore.SERVER_TIMESTAMP
-                                })
-
-                                # HÍBRIDO: Tenta Web Push VAPID primeiro, depois FCM como fallback
-                                webpush_tag = f"TAREFA_ATRASADA-tarefa-{tarefa_id}-paciente-{paciente_id}"
-                                enviado_vapid = False
-
-                                # 1. Tentar Web Push VAPID
-                                webpush_subscription = user_data.get('webpush_subscription_exames')
-                                if webpush_subscription:
-                                    try:
-                                        from pywebpush import webpush, WebPushException
-                                        from vapid_config import VAPID_PRIVATE_KEY, VAPID_CLAIMS_EMAIL
-                                        import json
-
-                                        payload = json.dumps({
-                                            "title": titulo,
-                                            "body": corpo,
-                                            "data": data_payload,
-                                            "tag": webpush_tag
-                                        })
-
-                                        webpush(
-                                            subscription_info={
-                                                "endpoint": webpush_subscription["endpoint"],
-                                                "keys": webpush_subscription["keys"]
-                                            },
-                                            data=payload,
-                                            vapid_private_key=VAPID_PRIVATE_KEY,
-                                            vapid_claims={"sub": VAPID_CLAIMS_EMAIL}
-                                        )
-
-                                        enviado_vapid = True
-                                        stats["total_notificadas"] += 1
-                                        logger.info(f"✅ TAREFA_ATRASADA enviada via Web Push para {user_id}")
-
-                                    except WebPushException as e:
-                                        logger.warning(f"⚠️ Falha VAPID para {user_id}: {e}, tentando FCM...")
-                                        if e.response and e.response.status_code in [403, 410]:
-                                            logger.warning(f"⚠️ Subscription VAPID inválida/expirada, removendo...")
-                                            user_doc.reference.update({"webpush_subscription_exames": firestore.DELETE_FIELD})
-                                    except Exception as e:
-                                        logger.warning(f"⚠️ Erro Web Push para {user_id}: {e}, tentando FCM...")
-
-                                # 2. Fallback: FCM (se VAPID não enviou)
-                                if not enviado_vapid and tokens_fcm:
-                                    for token in tokens_fcm:
-                                        try:
-                                            message = messaging.Message(
-                                                notification=messaging.Notification(title=titulo, body=corpo),
-                                                data=data_payload,
-                                                token=token
-                                            )
-                                            messaging.send(message)
-                                            stats["total_notificadas"] += 1
-                                            logger.info(f"✅ TAREFA_ATRASADA enviada via FCM para {user_id}")
-                                        except Exception as e:
-                                            logger.error(f"Erro ao enviar FCM para token {token[:10]}...: {e}")
-                    
                     doc_verificacao.reference.update({"status": "processado"})
+
                 except Exception as e:
                     stats["erros"] += 1
                     logger.error(f"Erro ao processar tarefa atrasada {doc_verificacao.id}: {e}")
+                    doc_verificacao.reference.update({"status": "erro", "erro": str(e)})
 
-        # 2. Processar outras tarefas agendadas (sempre executa)
+        # 2. Processar outras tarefas agendadas (lógica existente permanece)
         try:
             logger.info("Iniciando processamento de notificações agendadas")
             stats.update(crud.processar_notificacoes_agendadas(db, now))
@@ -3219,3 +3173,217 @@ def get_dados_completos_paciente(
     paciente.setdefault('apns_tokens', [])
     
     return paciente
+# =================================================================================
+# ENDPOINTS CLOUD TASKS - NOTIFICAÇÕES AGENDADAS
+# =================================================================================
+
+@app.post(
+    "/internal/notificar-tarefa-atrasada",
+    response_model=NotificarTarefaAtrasadaResponse,
+    tags=["Internal - Cloud Tasks"]
+)
+async def processar_notificacao_tarefa_atrasada(
+    request: Request,
+    payload: NotificarTarefaAtrasadaRequest,
+    db: firestore.client = Depends(get_db)
+):
+    """
+    Endpoint INTERNO chamado pelo Cloud Tasks para enviar notificação de tarefa atrasada.
+    
+    SEGURANÇA: Chamado apenas pelo Cloud Tasks via OIDC token.
+    """
+    try:
+        logger.info(f"📨 Recebido webhook do Cloud Tasks para tarefa {payload.tarefa_id}")
+
+        # Valida se tarefa existe e não foi concluída
+        tarefa_ref = db.collection('tarefas_essenciais').document(payload.tarefa_id)
+        tarefa_doc = tarefa_ref.get()
+
+        if not tarefa_doc.exists:
+            logger.warning(f"⚠️ Tarefa {payload.tarefa_id} não existe mais")
+            return NotificarTarefaAtrasadaResponse(
+                success=True,
+                message="Tarefa não existe mais",
+                tarefa_id=payload.tarefa_id
+            )
+
+        tarefa_data = tarefa_doc.to_dict()
+
+        if tarefa_data.get('foiConcluida'):
+            logger.info(f"ℹ️ Tarefa {payload.tarefa_id} já foi concluída")
+            return NotificarTarefaAtrasadaResponse(
+                success=True,
+                message="Tarefa já foi concluída",
+                tarefa_id=payload.tarefa_id
+            )
+
+        # Envia notificações
+        crud.enviar_notificacoes_tarefa_atrasada(
+            db=db,
+            tarefa_id=payload.tarefa_id,
+            paciente_id=payload.paciente_id,
+            negocio_id=payload.negocio_id,
+            criado_por_id=payload.criado_por_id,
+            descricao=payload.descricao
+        )
+
+        logger.info(f"✅ Notificações enviadas para tarefa {payload.tarefa_id}")
+
+        return NotificarTarefaAtrasadaResponse(
+            success=True,
+            message="Notificações enviadas com sucesso",
+            tarefa_id=payload.tarefa_id
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Erro ao processar notificação: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao processar notificação: {str(e)}"
+        )
+
+
+@app.post(
+    "/internal/notificar-lembrete-exame",
+    response_model=NotificarLembreteExameResponse,
+    tags=["Internal - Cloud Tasks"]
+)
+async def processar_lembrete_exame(
+    payload: NotificarLembreteExameRequest,
+    db: firestore.client = Depends(get_db)
+):
+    """
+    Endpoint INTERNO chamado pelo Cloud Tasks para enviar lembrete de exame.
+
+    SEGURANÇA: Chamado apenas pelo Cloud Tasks via OIDC token.
+    """
+    try:
+        print("=" * 80)
+        print("🔔 [LEMBRETE EXAME] Endpoint /internal/notificar-lembrete-exame chamado!")
+        print(f"📦 [LEMBRETE EXAME] Payload recebido: {payload.dict()}")
+        print(f"🔍 [LEMBRETE EXAME] IDs extraídos:")
+        print(f"   - exame_id: {payload.exame_id}")
+        print(f"   - paciente_id: {payload.paciente_id}")
+        print(f"   - negocio_id: {payload.negocio_id}")
+        print(f"   - nome_exame: {payload.nome_exame}")
+        print(f"   - data_exame: {payload.data_exame}")
+        print(f"   - horario_exame: {payload.horario_exame}")
+
+        logger.info(f"📨 Recebido webhook do Cloud Tasks para exame {payload.exame_id}")
+
+        # Valida se exame existe
+        print(f"🔍 [LEMBRETE EXAME] Buscando exame {payload.exame_id} do paciente {payload.paciente_id}...")
+        exame_ref = db.collection('usuarios').document(payload.paciente_id).collection('exames').document(payload.exame_id)
+        exame_doc = exame_ref.get()
+
+        if not exame_doc.exists:
+            print(f"❌ [LEMBRETE EXAME] Exame {payload.exame_id} não encontrado!")
+            logger.warning(f"⚠️ Exame {payload.exame_id} não existe mais")
+            return NotificarLembreteExameResponse(
+                success=True,
+                message="Exame não existe mais",
+                exame_id=payload.exame_id
+            )
+
+        exame_data = exame_doc.to_dict()
+        print(f"✅ [LEMBRETE EXAME] Exame encontrado: {exame_data.get('nome_exame')}")
+
+        # Buscar paciente
+        print(f"🔍 [LEMBRETE EXAME] Buscando dados do paciente {payload.paciente_id}...")
+        paciente_ref = db.collection('usuarios').document(payload.paciente_id)
+        paciente_doc = paciente_ref.get()
+
+        if not paciente_doc.exists:
+            print(f"❌ [LEMBRETE EXAME] Paciente {payload.paciente_id} não encontrado!")
+            logger.warning(f"⚠️ Paciente {payload.paciente_id} não encontrado")
+            return NotificarLembreteExameResponse(
+                success=False,
+                message="Paciente não encontrado",
+                exame_id=payload.exame_id
+            )
+
+        paciente_data = paciente_doc.to_dict()
+        fcm_tokens = paciente_data.get('fcm_tokens', [])
+        apns_tokens = paciente_data.get('apns_tokens', [])
+        print(f"✅ [LEMBRETE EXAME] Paciente encontrado. FCM tokens: {len(fcm_tokens)}, APNs tokens: {len(apns_tokens)}")
+
+        if not fcm_tokens and not apns_tokens:
+            print(f"⚠️ [LEMBRETE EXAME] Paciente não tem tokens de notificação!")
+            logger.warning(f"⚠️ Paciente {payload.paciente_id} sem tokens")
+
+        # Envia lembrete
+        print(f"📤 [LEMBRETE EXAME] Chamando crud.enviar_lembrete_exame()...")
+        crud.enviar_lembrete_exame(
+            db=db,
+            exame_id=payload.exame_id,
+            paciente_id=payload.paciente_id,
+            negocio_id=payload.negocio_id,
+            nome_exame=payload.nome_exame,
+            data_exame=payload.data_exame,
+            horario_exame=payload.horario_exame
+        )
+
+        print(f"✅ [LEMBRETE EXAME] crud.enviar_lembrete_exame() concluído!")
+        print("=" * 80)
+        logger.info(f"✅ Lembrete enviado para exame {payload.exame_id}")
+
+        return NotificarLembreteExameResponse(
+            success=True,
+            message="Lembrete enviado com sucesso",
+            exame_id=payload.exame_id
+        )
+
+    except Exception as e:
+        print(f"❌ [LEMBRETE EXAME] ERRO CRÍTICO: {str(e)}")
+        print(f"❌ [LEMBRETE EXAME] Traceback completo:")
+        import traceback
+        print(traceback.format_exc())
+        print("=" * 80)
+        logger.error(f"❌ Erro ao processar lembrete: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao processar lembrete: {str(e)}"
+        )
+
+
+@app.post(
+    "/tasks/test-notificacao-atrasada/{tarefa_id}",
+    tags=["Jobs Agendados", "Debug"]
+)
+def testar_notificacao_tarefa_atrasada(
+    tarefa_id: str,
+    db: firestore.client = Depends(get_db),
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase)
+):
+    """
+    Endpoint de TESTE para disparar notificação manualmente.
+    """
+    try:
+        tarefa_ref = db.collection('tarefas_essenciais').document(tarefa_id)
+        tarefa_doc = tarefa_ref.get()
+
+        if not tarefa_doc.exists:
+            raise HTTPException(status_code=404, detail=f"Tarefa {tarefa_id} não encontrada")
+
+        tarefa_data = tarefa_doc.to_dict()
+
+        crud.enviar_notificacoes_tarefa_atrasada(
+            db=db,
+            tarefa_id=tarefa_id,
+            paciente_id=tarefa_data['pacienteId'],
+            negocio_id=tarefa_data['negocioId'],
+            criado_por_id=tarefa_data['criadoPorId'],
+            descricao=tarefa_data.get('descricao', 'Tarefa de teste')
+        )
+
+        return {
+            "success": True,
+            "message": f"Notificação de teste enviada para tarefa {tarefa_id}",
+            "tarefa_id": tarefa_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao testar notificação: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

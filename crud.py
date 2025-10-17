@@ -2,6 +2,7 @@
 
 import schemas
 from datetime import datetime, date, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 import pytz
 from typing import Optional, List, Dict, Union
 from crypto_utils import encrypt_data, decrypt_data
@@ -304,67 +305,327 @@ def check_admin_status(db: firestore.client, negocio_id: str) -> bool:
         return False
 
 
+# ---------------------------------------------------------------------
+# FUNÇÕES AUXILIARES PARA VALIDAÇÃO DE TOKENS
+# ---------------------------------------------------------------------
+
+def _is_fcm_token(token: str) -> bool:
+    """
+    Valida se um token parece ser um FCM token válido.
+    FCM tokens geralmente têm 152-163 caracteres e são alfanuméricos com underscores/hífens.
+    """
+    if not token or not isinstance(token, str):
+        return False
+
+    # FCM tokens têm padrão específico
+    # Exemplo: eA1B2c3D4...xyz (longo, alfanumérico)
+    if len(token) < 100 or len(token) > 200:
+        return False
+
+    # Não deve conter espaços
+    if ' ' in token:
+        return False
+
+    # Padrão básico: alfanumérico + alguns caracteres especiais
+    allowed_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_:.')
+    if not all(c in allowed_chars for c in token):
+        return False
+
+    return True
+
+
+def _is_apns_token(token: str) -> bool:
+    """
+    Valida se um token parece ser um APNs token válido.
+    APNs tokens são geralmente Base64 URL-safe e têm comprimento diferente do FCM.
+    """
+    if not token or not isinstance(token, str):
+        return False
+
+    # APNs Web Push tokens tendem a ser mais curtos que FCM
+    # Tipicamente entre 50-150 caracteres
+    if len(token) < 30:
+        return False
+
+    # Não deve conter espaços
+    if ' ' in token:
+        return False
+
+    # Se for muito longo, provavelmente é FCM
+    if len(token) > 200:
+        return False
+
+    return True
+
+
+def _limpar_tokens_duplicados(tokens: List[str]) -> List[str]:
+    """Remove duplicatas mantendo apenas a última ocorrência de cada token."""
+    # Usa dict para manter ordem de inserção (Python 3.7+) e eliminar duplicatas
+    seen = {}
+    for token in tokens:
+        seen[token] = True
+    return list(seen.keys())
+
+
+# ---------------------------------------------------------------------
+# FUNÇÕES DE GERENCIAMENTO DE FCM TOKENS (CORRIGIDAS)
+# ---------------------------------------------------------------------
+
 def adicionar_fcm_token(db: firestore.client, firebase_uid: str, fcm_token: str):
-    """Adiciona um FCM token a um usuário, evitando duplicatas."""
+    """
+    Adiciona/atualiza um FCM token para um usuário.
+
+    CORREÇÕES IMPLEMENTADAS:
+    1. Remove ArrayUnion - usa SET direto com merge
+    2. Valida que o token é realmente FCM (não APNs)
+    3. Remove duplicatas automaticamente
+    4. Mantém apenas os últimos 5 tokens (limpa tokens antigos)
+    5. Remove tokens inválidos do banco
+    """
     try:
         logger.info(f"🔥 ADICIONANDO FCM TOKEN - UID: {firebase_uid}, Token: {fcm_token[:20]}...")
+
+        # VALIDAÇÃO: Verifica se é realmente um FCM token
+        if not _is_fcm_token(fcm_token):
+            logger.error(f"❌ Token inválido ou não é FCM: {fcm_token[:30]}...")
+            return
+
         user_doc = buscar_usuario_por_firebase_uid(db, firebase_uid)
 
         if user_doc:
             logger.info(f"✅ Usuário encontrado: ID={user_doc['id']}, Nome={user_doc.get('nome', 'N/A')[:20]}")
             doc_ref = db.collection('usuarios').document(user_doc['id'])
 
-            # Atualiza o campo fcm_tokens
-            doc_ref.update({
-                'fcm_tokens': firestore.ArrayUnion([fcm_token])
-            })
+            # Busca tokens existentes
+            current_doc = doc_ref.get()
+            current_data = current_doc.to_dict() or {}
+            existing_tokens = current_data.get('fcm_tokens', [])
 
-            # Verifica se salvou
-            updated_doc = doc_ref.get()
-            tokens_salvos = updated_doc.to_dict().get('fcm_tokens', [])
-            logger.info(f"✅ TOKEN SALVO COM SUCESSO! Total de tokens: {len(tokens_salvos)}")
+            # Remove o token se já existir (para reposicioná-lo no final como "mais recente")
+            if fcm_token in existing_tokens:
+                existing_tokens.remove(fcm_token)
+
+            # Adiciona o novo token no final
+            existing_tokens.append(fcm_token)
+
+            # Remove duplicatas
+            existing_tokens = _limpar_tokens_duplicados(existing_tokens)
+
+            # LIMITE: Mantém apenas os últimos 5 tokens (evita acúmulo infinito)
+            if len(existing_tokens) > 5:
+                tokens_removidos = existing_tokens[:-5]
+                logger.info(f"🧹 Removendo {len(tokens_removidos)} tokens antigos (limite de 5 atingido)")
+                existing_tokens = existing_tokens[-5:]
+
+            # ATUALIZAÇÃO: Usa SET com merge em vez de ArrayUnion
+            doc_ref.set({
+                'fcm_tokens': existing_tokens
+            }, merge=True)
+
+            logger.info(f"✅ FCM Token salvo. Total de tokens FCM: {len(existing_tokens)}")
+
         else:
             logger.error(f"❌ USUÁRIO NÃO ENCONTRADO PARA UID: {firebase_uid}")
+
     except Exception as e:
         logger.error(f"❌ ERRO ao adicionar FCM token para o UID {firebase_uid}: {e}", exc_info=True)
 
+
 def remover_fcm_token(db: firestore.client, firebase_uid: str, fcm_token: str):
-    """Remove um FCM token de um usuário."""
+    """
+    Remove um FCM token específico de um usuário.
+    Útil para quando um token falha ou o usuário faz logout.
+    """
     try:
         user_doc = buscar_usuario_por_firebase_uid(db, firebase_uid)
+
         if user_doc:
             doc_ref = db.collection('usuarios').document(user_doc['id'])
-            doc_ref.update({
-                'fcm_tokens': firestore.ArrayRemove([fcm_token])
-            })
+
+            # Busca tokens atuais
+            current_doc = doc_ref.get()
+            current_data = current_doc.to_dict() or {}
+            existing_tokens = current_data.get('fcm_tokens', [])
+
+            # Remove o token se existir
+            if fcm_token in existing_tokens:
+                existing_tokens.remove(fcm_token)
+
+                # Atualiza o documento
+                doc_ref.set({
+                    'fcm_tokens': existing_tokens
+                }, merge=True)
+
+                logger.info(f"🗑️ FCM Token removido. Tokens restantes: {len(existing_tokens)}")
+            else:
+                logger.warning(f"⚠️ Token não encontrado para remoção: {fcm_token[:20]}...")
+
     except Exception as e:
-        logger.error(f"Erro ao remover FCM token para o UID {firebase_uid}: {e}")
+        logger.error(f"❌ Erro ao remover FCM token para o UID {firebase_uid}: {e}", exc_info=True)
+
+
+def remover_fcm_token_por_id_usuario(db: firestore.client, usuario_id: str, fcm_token: str):
+    """
+    Remove um FCM token usando o ID do usuário diretamente (não Firebase UID).
+    Útil para limpeza quando um envio de notificação falha.
+    """
+    try:
+        doc_ref = db.collection('usuarios').document(usuario_id)
+
+        # Busca tokens atuais
+        current_doc = doc_ref.get()
+        if not current_doc.exists:
+            logger.warning(f"⚠️ Usuário {usuario_id} não encontrado para remover token")
+            return
+
+        current_data = current_doc.to_dict() or {}
+        existing_tokens = current_data.get('fcm_tokens', [])
+
+        # Remove o token se existir
+        if fcm_token in existing_tokens:
+            existing_tokens.remove(fcm_token)
+
+            # Atualiza o documento
+            doc_ref.set({
+                'fcm_tokens': existing_tokens
+            }, merge=True)
+
+            logger.info(f"🗑️ FCM Token inválido removido do usuário {usuario_id}. Tokens restantes: {len(existing_tokens)}")
+
+    except Exception as e:
+        logger.error(f"❌ Erro ao remover FCM token do usuário {usuario_id}: {e}", exc_info=True)
+
+
+# ---------------------------------------------------------------------
+# FUNÇÕES DE GERENCIAMENTO DE APNS TOKENS (CORRIGIDAS)
+# ---------------------------------------------------------------------
 
 def adicionar_apns_token(db: firestore.client, firebase_uid: str, apns_token: str):
-    """Adiciona um APNs token (Safari/iOS) a um usuário, evitando duplicatas."""
+    """
+    Adiciona/atualiza um APNs token (Safari/iOS) para um usuário.
+
+    CORREÇÕES IMPLEMENTADAS:
+    1. Remove ArrayUnion - usa SET direto com merge
+    2. Valida que o token é realmente APNs (não FCM)
+    3. Remove duplicatas automaticamente
+    4. Mantém apenas os últimos 5 tokens
+    5. Remove tokens inválidos do banco
+    """
     try:
+        logger.info(f"🍎 ADICIONANDO APNs TOKEN - UID: {firebase_uid}, Token: {apns_token[:20]}...")
+
+        # VALIDAÇÃO: Verifica se é realmente um APNs token
+        if not _is_apns_token(apns_token):
+            logger.error(f"❌ Token inválido ou não é APNs: {apns_token[:30]}...")
+            return
+
+        # VALIDAÇÃO EXTRA: Não aceita tokens FCM no campo APNs
+        if _is_fcm_token(apns_token):
+            logger.error(f"❌ ERRO: Token FCM detectado no campo APNs! Token: {apns_token[:30]}...")
+            logger.error("❌ Use adicionar_fcm_token() para tokens FCM!")
+            return
+
         user_doc = buscar_usuario_por_firebase_uid(db, firebase_uid)
+
         if user_doc:
+            logger.info(f"✅ Usuário encontrado: ID={user_doc['id']}, Nome={user_doc.get('nome', 'N/A')[:20]}")
             doc_ref = db.collection('usuarios').document(user_doc['id'])
-            doc_ref.update({
-                'apns_tokens': firestore.ArrayUnion([apns_token])
-            })
-            logger.info(f"✅ Token APNs adicionado com sucesso para o UID {firebase_uid}")
+
+            # Busca tokens existentes
+            current_doc = doc_ref.get()
+            current_data = current_doc.to_dict() or {}
+            existing_tokens = current_data.get('apns_tokens', [])
+
+            # Remove o token se já existir (para reposicioná-lo no final como "mais recente")
+            if apns_token in existing_tokens:
+                existing_tokens.remove(apns_token)
+
+            # Adiciona o novo token no final
+            existing_tokens.append(apns_token)
+
+            # Remove duplicatas
+            existing_tokens = _limpar_tokens_duplicados(existing_tokens)
+
+            # LIMITE: Mantém apenas os últimos 5 tokens
+            if len(existing_tokens) > 5:
+                tokens_removidos = existing_tokens[:-5]
+                logger.info(f"🧹 Removendo {len(tokens_removidos)} tokens APNs antigos (limite de 5 atingido)")
+                existing_tokens = existing_tokens[-5:]
+
+            # ATUALIZAÇÃO: Usa SET com merge em vez de ArrayUnion
+            doc_ref.set({
+                'apns_tokens': existing_tokens
+            }, merge=True)
+
+            logger.info(f"✅ APNs Token salvo. Total de tokens APNs: {len(existing_tokens)}")
+
+        else:
+            logger.error(f"❌ USUÁRIO NÃO ENCONTRADO PARA UID: {firebase_uid}")
+
     except Exception as e:
-        logger.error(f"Erro ao adicionar APNs token para o UID {firebase_uid}: {e}")
+        logger.error(f"❌ ERRO ao adicionar APNs token para o UID {firebase_uid}: {e}", exc_info=True)
+
 
 def remover_apns_token(db: firestore.client, firebase_uid: str, apns_token: str):
-    """Remove um APNs token de um usuário."""
+    """Remove um APNs token específico de um usuário."""
     try:
         user_doc = buscar_usuario_por_firebase_uid(db, firebase_uid)
+
         if user_doc:
             doc_ref = db.collection('usuarios').document(user_doc['id'])
-            doc_ref.update({
-                'apns_tokens': firestore.ArrayRemove([apns_token])
-            })
-            logger.info(f"✅ Token APNs removido com sucesso para o UID {firebase_uid}")
+
+            # Busca tokens atuais
+            current_doc = doc_ref.get()
+            current_data = current_doc.to_dict() or {}
+            existing_tokens = current_data.get('apns_tokens', [])
+
+            # Remove o token se existir
+            if apns_token in existing_tokens:
+                existing_tokens.remove(apns_token)
+
+                # Atualiza o documento
+                doc_ref.set({
+                    'apns_tokens': existing_tokens
+                }, merge=True)
+
+                logger.info(f"🗑️ APNs Token removido. Tokens restantes: {len(existing_tokens)}")
+            else:
+                logger.warning(f"⚠️ APNs Token não encontrado para remoção: {apns_token[:20]}...")
+
     except Exception as e:
-        logger.error(f"Erro ao remover APNs token para o UID {firebase_uid}: {e}")
+        logger.error(f"❌ Erro ao remover APNs token para o UID {firebase_uid}: {e}", exc_info=True)
+
+
+def remover_apns_token_por_id_usuario(db: firestore.client, usuario_id: str, apns_token: str):
+    """
+    Remove um APNs token usando o ID do usuário diretamente (não Firebase UID).
+    Útil para limpeza quando um envio de notificação falha.
+    """
+    try:
+        doc_ref = db.collection('usuarios').document(usuario_id)
+
+        # Busca tokens atuais
+        current_doc = doc_ref.get()
+        if not current_doc.exists:
+            logger.warning(f"⚠️ Usuário {usuario_id} não encontrado para remover APNs token")
+            return
+
+        current_data = current_doc.to_dict() or {}
+        existing_tokens = current_data.get('apns_tokens', [])
+
+        # Remove o token se existir
+        if apns_token in existing_tokens:
+            existing_tokens.remove(apns_token)
+
+            # Atualiza o documento
+            doc_ref.set({
+                'apns_tokens': existing_tokens
+            }, merge=True)
+
+            logger.info(f"🗑️ APNs Token inválido removido do usuário {usuario_id}. Tokens restantes: {len(existing_tokens)}")
+
+    except Exception as e:
+        logger.error(f"❌ Erro ao remover APNs token do usuário {usuario_id}: {e}", exc_info=True)
 
 # =================================================================================
 # FUNÇÕES DE ADMINISTRAÇÃO DA PLATAFORMA (SUPER-ADMIN)
@@ -2626,19 +2887,30 @@ def adicionar_exame(db: firestore.client, exame_data: schemas.ExameBase, criador
     """Salva um novo exame, adicionando os campos de auditoria."""
     exame_dict = exame_data.model_dump(mode='json')
     now = datetime.utcnow()
-    
+
     exame_dict['criado_por'] = criador_uid
     exame_dict['data_criacao'] = now
     exame_dict['data_atualizacao'] = now
-    
+
     paciente_ref = db.collection('usuarios').document(exame_data.paciente_id)
     doc_ref = paciente_ref.collection('exames').document()
     doc_ref.set(exame_dict)
-    
+
     exame_dict['id'] = doc_ref.id
 
-    # NOVA LINHA: Notificar paciente sobre o exame criado
+    # Notificar paciente sobre o exame criado (imediato)
     _notificar_paciente_exame_criado(db, exame_data.paciente_id, exame_dict)
+
+    # Agendar lembrete via Cloud Task
+    agendar_lembrete_exame(
+        db=db,
+        exame_id=doc_ref.id,
+        paciente_id=exame_data.paciente_id,
+        negocio_id=exame_data.negocio_id,
+        nome_exame=exame_data.nome_exame,
+        data_exame=exame_data.data_exame,
+        horario_exame=exame_data.horario_exame
+    )
 
     return exame_dict
 
@@ -6345,115 +6617,88 @@ def _notificar_tarefa_concluida(db: firestore.client, tarefa: Dict):
 
 def _notificar_tarefa_atrasada(db: firestore.client, tarefa_a_verificar: Dict):
     """
-    Notifica sobre tarefa atrasada:
-    - Responsável pela tarefa
-    - Criador da tarefa
-    - Todos os admins do negócio
+    Notifica sobre tarefa atrasada seguindo o PADRÃO DE 6 PASSOS OBRIGATÓRIO.
     """
     try:
+        # PASSO 1: Coletar IDs
         criador_id = tarefa_a_verificar.get('criadoPorId')
         paciente_id = tarefa_a_verificar.get('pacienteId')
         tarefa_id = tarefa_a_verificar.get('tarefaId')
+        negocio_id = tarefa_a_verificar.get('negocioId')
 
-        if not all([criador_id, paciente_id, tarefa_id]):
-            logger.warning("Dados insuficientes no registro de verificação para notificar atraso.")
+        if not all([criador_id, paciente_id, tarefa_id, negocio_id]):
+            logger.warning(f"Dados insuficientes no registro de verificação para notificar atraso: {tarefa_a_verificar}")
             return
 
+        # PASSO 2: Buscar Dados Completos
         tarefa_doc = db.collection('tarefas_essenciais').document(tarefa_id).get()
         if not tarefa_doc.exists:
-            logger.error(f"Tarefa original {tarefa_id} não encontrada para notificação de atraso.")
+            logger.error(f"TAREFA_ATRASADA: Tarefa original {tarefa_id} não encontrada.")
             return
 
         tarefa_data = tarefa_doc.to_dict()
         descricao_tarefa = tarefa_data.get('descricao', 'Nome da tarefa não encontrado')
         responsavel_id = tarefa_data.get('responsavelId')
-        negocio_id = tarefa_data.get('negocioId')
 
-        if not negocio_id:
-            logger.warning(f"Tarefa {tarefa_id} sem negocioId. Notificando apenas criador.")
+        paciente_doc = db.collection('usuarios').document(paciente_id).get()
+        nome_paciente = decrypt_data(paciente_doc.to_dict().get('nome', '')) if paciente_doc.exists and paciente_doc.to_dict().get('nome') else "o paciente"
 
-        # Buscar nome do paciente
-        try:
-            paciente_doc = db.collection('usuarios').document(paciente_id).get()
-            if paciente_doc.exists:
-                nome_raw = paciente_doc.to_dict().get('nome', '')
-                nome_paciente = decrypt_data(nome_raw) if nome_raw else "o paciente"
-            else:
-                nome_paciente = "o paciente"
-        except Exception as e:
-            logger.warning(f"Erro ao buscar nome do paciente {paciente_id}: {e}")
-            nome_paciente = "o paciente"
+        destinatarios = set()
+        if responsavel_id:
+            destinatarios.add(responsavel_id)
+        destinatarios.add(criador_id)
+        
+        admins = _buscar_admins_do_negocio(db, negocio_id)
+        for admin_id in admins:
+            destinatarios.add(admin_id)
+        
+        if paciente_doc.exists:
+            enfermeiro_id = paciente_doc.to_dict().get('enfermeiro_id')
+            if enfermeiro_id:
+                destinatarios.add(enfermeiro_id)
+        
+        logger.info(f"📧 TAREFA_ATRASADA: Destinatários para a tarefa {tarefa_id}: {list(destinatarios)}")
 
+        # PASSO 3: Construir a Mensagem Visual
         titulo = "Alerta: Tarefa Atrasada!"
         corpo = f"A tarefa '{descricao_tarefa[:30]}...' para o paciente {nome_paciente} não foi concluída até o prazo final."
 
+        # PASSO 4: Construir os Dados de Lógica
         data_payload = {
             "tipo": "TAREFA_ATRASADA",
             "tarefa_id": tarefa_id,
             "paciente_id": paciente_id,
         }
-
+        
         webpush_tag = f"TAREFA_ATRASADA-tarefa-{tarefa_id}-paciente-{paciente_id}"
 
-        # Conjunto de destinatários (usa set para evitar duplicatas)
-        destinatarios = set()
-
-        # 1. Adiciona o responsável pela tarefa (se existir)
-        if responsavel_id:
-            destinatarios.add(responsavel_id)
-            logger.info(f"📧 TAREFA_ATRASADA: Adicionado responsável: {responsavel_id}")
-
-        # 2. SEMPRE adiciona o criador
-        destinatarios.add(criador_id)
-        logger.info(f"📧 TAREFA_ATRASADA: Adicionado criador: {criador_id}")
-
-        # 3. SEMPRE adiciona todos os admins do negócio
-        if negocio_id:
-            admins = _buscar_admins_do_negocio(db, negocio_id)
-            for admin_id in admins:
-                destinatarios.add(admin_id)
-                logger.info(f"📧 TAREFA_ATRASADA: Adicionado admin: {admin_id}")
-
-        # 4. Adiciona enfermeiro associado ao paciente (se existir)
-        try:
-            paciente_doc_enferm = db.collection('usuarios').document(paciente_id).get()
-            if paciente_doc_enferm.exists:
-                paciente_data_enferm = paciente_doc_enferm.to_dict()
-                enfermeiro_id = paciente_data_enferm.get('enfermeiro_id')
-                if enfermeiro_id:
-                    destinatarios.add(enfermeiro_id)
-                    logger.info(f"📧 TAREFA_ATRASADA: Adicionado enfermeiro do paciente: {enfermeiro_id}")
-        except Exception as e:
-            logger.error(f"Erro ao buscar enfermeiro do paciente {paciente_id}: {e}")
-
-        logger.info(f"📧 TAREFA_ATRASADA: Total de {len(destinatarios)} destinatário(s)")
-
-        # Enviar notificação para cada destinatário
+        # Loop principal para cada destinatário
         for destinatario_id in destinatarios:
             try:
-                # Persistir no Firestore (com dedupe_key para evitar duplicatas)
+                destinatario_doc = db.collection('usuarios').document(destinatario_id).get()
+                if not destinatario_doc.exists:
+                    logger.warning(f"Destinatário {destinatario_id} não encontrado. Pulando.")
+                    continue
+                
+                destinatario_data = destinatario_doc.to_dict()
+                fcm_tokens = destinatario_data.get('fcm_tokens', [])
+                apns_tokens = destinatario_data.get('apns_tokens', [])
+
+                # PASSO 5: Persistir a Notificação no Histórico
                 db.collection('usuarios').document(destinatario_id).collection('notificacoes').add({
                     "title": titulo,
                     "body": corpo,
                     "tipo": "TAREFA_ATRASADA",
-                    "relacionado": {
-                        "tarefa_id": tarefa_id,
-                        "paciente_id": paciente_id
-                    },
+                    "relacionado": {"tarefa_id": tarefa_id, "paciente_id": paciente_id},
                     "lida": False,
                     "data_criacao": firestore.SERVER_TIMESTAMP,
                     "dedupe_key": f"TAREFA_ATRASADA_{tarefa_id}_{destinatario_id}"
                 })
 
-                # Enviar push notification (FCM + APNs)
-                destinatario_doc = db.collection('usuarios').document(destinatario_id).get()
-                if destinatario_doc.exists:
-                    destinatario_data = destinatario_doc.to_dict()
-                    fcm_tokens = destinatario_data.get('fcm_tokens', [])
-                    apns_tokens = destinatario_data.get('apns_tokens', [])
-
-                    # Enviar FCM
-                    sucessos = 0
+                # PASSO 6: Enviar o Push em Loop (Método Funcional)
+                # Envio FCM
+                if fcm_tokens:
+                    sucessos_fcm = 0
                     for token in fcm_tokens:
                         try:
                             message = messaging.Message(
@@ -6465,25 +6710,21 @@ def _notificar_tarefa_atrasada(db: firestore.client, tarefa_a_verificar: Dict):
                                 )
                             )
                             messaging.send(message)
-                            sucessos += 1
+                            sucessos_fcm += 1
                         except Exception as e:
                             logger.error(f"Erro ao enviar FCM para {destinatario_id}: {e}")
+                    logger.info(f"✅ Notificação TAREFA_ATRASADA (FCM) enviada para: {destinatario_id} (Sucessos: {sucessos_fcm})")
 
-                    # Enviar APNs se houver tokens
-                    if apns_tokens:
-                        from notification_helper import enviar_notificacao_para_usuario
-                        try:
-                            enviar_notificacao_para_usuario(
-                                destinatario_data,
-                                titulo,
-                                corpo,
-                                data_payload,
-                                webpush_tag
-                            )
-                        except Exception as e:
-                            logger.error(f"Erro ao enviar APNs para {destinatario_id}: {e}")
-
-                    logger.info(f"✅ Notificação TAREFA_ATRASADA enviada para: {destinatario_id} (FCM: {sucessos})")
+                # Envio APNs (CORRIGIDO PARA SEGUIR O PADRÃO)
+                if apns_tokens:
+                    from apns_service import get_apns_service
+                    apns_service = get_apns_service()
+                    sucessos_apns = 0
+                    if apns_service.enabled:
+                        for token in apns_tokens:
+                            if apns_service.send_notification(token=token, titulo=titulo, corpo=corpo, data_payload=data_payload):
+                                sucessos_apns += 1
+                        logger.info(f"✅ Notificação TAREFA_ATRASADA (APNs) enviada para: {destinatario_id} (Sucessos: {sucessos_apns})")
 
             except Exception as e:
                 logger.error(f"❌ Erro ao notificar {destinatario_id} sobre tarefa atrasada: {e}")
@@ -6491,7 +6732,7 @@ def _notificar_tarefa_atrasada(db: firestore.client, tarefa_a_verificar: Dict):
         logger.info(f"🎉 Notificação TAREFA_ATRASADA concluída para tarefa {tarefa_id}")
 
     except Exception as e:
-        logger.error(f"Erro ao notificar tarefa atrasada: {e}")
+        logger.error(f"Erro GERAL ao notificar tarefa atrasada: {e}")
 
 
 def processar_tarefas_atrasadas(db: firestore.client) -> Dict:
@@ -6620,6 +6861,21 @@ def _notificar_paciente_exame_criado(db: firestore.client, paciente_id: str, exa
                 logger.error(f"Erro ao enviar APNs para paciente {paciente_id}: {e}")
 
         logger.info(f"✅ Notificação EXAME_CRIADO enviada para paciente {paciente_id} (FCM: {sucessos_fcm}, APNs: {len(apns_tokens)})")
+
+        # Salva na coleção principal de notificações
+        negocio_id = exame_data.get('negocio_id', 'unknown')
+        salvar_notificacao_firestore(
+            db=db,
+            usuario_id=paciente_id,
+            negocio_id=negocio_id,
+            tipo='EXAME_CRIADO',
+            titulo=titulo,
+            mensagem=corpo,
+            relacionado={
+                'exame_id': exame_id,
+                'paciente_id': paciente_id
+            }
+        )
 
     except Exception as e:
         logger.error(f"❌ Erro ao notificar exame criado para paciente {paciente_id}: {e}")
@@ -7106,3 +7362,763 @@ def get_usuario_por_id(db: firestore.client, usuario_id: str) -> Optional[Dict]:
     except Exception as e:
         logger.error(f"Erro ao buscar usuário por ID {usuario_id}: {e}")
         return None
+# =================================================================================
+# CLOUD TASKS - NOTIFICAÇÕES AGENDADAS
+# =================================================================================
+
+from google.cloud import tasks_v2
+from google.protobuf import timestamp_pb2
+import json
+import os
+
+def _get_cloud_tasks_client():
+    """Retorna o cliente do Cloud Tasks (singleton)."""
+    if not hasattr(_get_cloud_tasks_client, 'client'):
+        _get_cloud_tasks_client.client = tasks_v2.CloudTasksClient()
+    return _get_cloud_tasks_client.client
+
+
+def _get_cloud_tasks_queue_path():
+    """Retorna o caminho completo da fila do Cloud Tasks."""
+    project_id = os.getenv('GCP_PROJECT_ID') or os.getenv('GOOGLE_CLOUD_PROJECT') or 'teste-notificacao-barbearia'
+    location = os.getenv('CLOUD_TASKS_LOCATION') or 'southamerica-east1'  # HARDCODED PORRA!
+    queue_name = os.getenv('CLOUD_TASKS_QUEUE') or 'notificacoes-atrasadas'
+
+    logger.info(f"🔍 DEBUG Cloud Tasks - project_id: {project_id}, location: {location}, queue_name: {queue_name}")
+
+    if not project_id:
+        logger.error("❌ GCP_PROJECT_ID não configurado! Cloud Tasks não funcionará.")
+        return None
+
+    client = _get_cloud_tasks_client()
+    queue_path = client.queue_path(project_id, location, queue_name)
+    logger.info(f"🔍 DEBUG queue_path: {queue_path}")
+    return queue_path
+
+
+def agendar_notificacao_tarefa_atrasada(
+    db: firestore.client,
+    tarefa: Dict,
+    service_url: str = None
+):
+    """
+    Cria uma Cloud Task para enviar notificação quando a tarefa ficar atrasada.
+    """
+    try:
+        tarefa_id = tarefa['id']
+        data_hora_limite = tarefa['dataHoraLimite']
+
+        # Converte para timestamp Unix
+        if isinstance(data_hora_limite, datetime):
+            timestamp_unix = int(data_hora_limite.timestamp())
+        else:
+            dt = datetime.fromisoformat(data_hora_limite.replace('Z', '+00:00'))
+            timestamp_unix = int(dt.timestamp())
+
+        # Obtém a URL do serviço
+        if not service_url:
+            service_url = os.getenv('CLOUD_RUN_SERVICE_URL') or 'https://barbearia-backend-service-je3t25fkiq-rj.a.run.app'  # HARDCODED PORRA!
+
+        # Garante que a URL comece com https:// (obrigatório para OIDC)
+        if not service_url.startswith('https://') and not service_url.startswith('http://'):
+            service_url = f'https://{service_url}'
+        elif service_url.startswith('http://'):
+            service_url = service_url.replace('http://', 'https://', 1)
+
+        endpoint_url = f"{service_url}/internal/notificar-tarefa-atrasada"
+        logger.info(f"🔍 DEBUG endpoint_url: {endpoint_url}")
+
+        # Payload da task
+        task_payload = {
+            "tarefa_id": tarefa_id,
+            "paciente_id": tarefa['pacienteId'],
+            "negocio_id": tarefa['negocioId'],
+            "criado_por_id": tarefa['criadoPorId'],
+            "descricao": tarefa.get('descricao', 'Tarefa sem descrição'),
+            "data_hora_limite": data_hora_limite.isoformat() if isinstance(data_hora_limite, datetime) else data_hora_limite
+        }
+
+        queue_path = _get_cloud_tasks_queue_path()
+        if not queue_path:
+            logger.error(f"❌ Não foi possível obter queue_path. Task não agendada para tarefa {tarefa_id}")
+            return
+
+        # Monta a task
+        task = {
+            'http_request': {
+                'http_method': tasks_v2.HttpMethod.POST,
+                'url': endpoint_url,
+                'headers': {
+                    'Content-Type': 'application/json',
+                },
+                'body': json.dumps(task_payload).encode()
+            },
+            'schedule_time': timestamp_pb2.Timestamp(seconds=timestamp_unix)
+        }
+
+        # Adiciona autenticação OIDC para Cloud Run
+        if 'run.app' in service_url:
+            service_account = os.getenv('CLOUD_RUN_SERVICE_ACCOUNT') or '862082955632-compute@developer.gserviceaccount.com'
+            task['http_request']['oidc_token'] = {
+                'service_account_email': service_account,
+                'audience': service_url
+            }
+            logger.info(f"🔐 OIDC token configurado com service account: {service_account}")
+
+        # Cria a task
+        client = _get_cloud_tasks_client()
+        response = client.create_task(parent=queue_path, task=task)
+
+        # Salva o nome da task no Firestore
+        db.collection('tarefas_essenciais').document(tarefa_id).update({
+            'cloud_task_name': response.name
+        })
+
+        logger.info(
+            f"✅ Cloud Task criada para tarefa {tarefa_id}. "
+            f"Notificação em: {datetime.fromtimestamp(timestamp_unix, tz=timezone.utc).isoformat()}"
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Erro ao agendar Cloud Task para tarefa {tarefa['id']}: {e}", exc_info=True)
+
+
+def cancelar_notificacao_tarefa_atrasada(db: firestore.client, tarefa_id: str):
+    """Cancela a Cloud Task agendada quando a tarefa é concluída."""
+    try:
+        tarefa_ref = db.collection('tarefas_essenciais').document(tarefa_id)
+        tarefa_doc = tarefa_ref.get()
+
+        if not tarefa_doc.exists:
+            logger.warning(f"⚠️ Tarefa {tarefa_id} não encontrada para cancelar Cloud Task")
+            return
+
+        tarefa_data = tarefa_doc.to_dict()
+        cloud_task_name = tarefa_data.get('cloud_task_name')
+
+        if not cloud_task_name:
+            logger.info(f"ℹ️ Tarefa {tarefa_id} não tem Cloud Task agendada")
+            return
+
+        client = _get_cloud_tasks_client()
+        client.delete_task(name=cloud_task_name)
+
+        tarefa_ref.update({
+            'cloud_task_name': firestore.DELETE_FIELD
+        })
+
+        logger.info(f"✅ Cloud Task cancelada para tarefa {tarefa_id}")
+
+    except Exception as e:
+        if 'NOT_FOUND' in str(e):
+            logger.info(f"ℹ️ Cloud Task para tarefa {tarefa_id} já executada/expirada")
+        else:
+            logger.error(f"❌ Erro ao cancelar Cloud Task: {e}", exc_info=True)
+
+
+def buscar_destinatarios_notificacao_tarefa(
+    db: firestore.client,
+    negocio_id: str,
+    criado_por_id: str,
+    paciente_id: str
+) -> List[Dict]:
+    """
+    Busca destinatários: criador + todos admins + enfermeiro responsável.
+    """
+    destinatarios = []
+    destinatarios_ids = set()
+
+    try:
+        # 1. Criador
+        criador_ref = db.collection('usuarios').document(criado_por_id)
+        criador_doc = criador_ref.get()
+
+        if criador_doc.exists:
+            criador_data = criador_doc.to_dict()
+            criador_data['id'] = criado_por_id
+            destinatarios.append(criador_data)
+            destinatarios_ids.add(criado_por_id)
+            logger.info(f"📌 Destinatário: Criador - {criador_data.get('nome', 'N/A')}")
+
+        # 2. Todos os admins
+        admins_query = db.collection('usuarios').where('negocioId', '==', negocio_id).where('role', '==', 'admin').stream()
+
+        for admin_doc in admins_query:
+            admin_id = admin_doc.id
+            if admin_id not in destinatarios_ids:
+                admin_data = admin_doc.to_dict()
+                admin_data['id'] = admin_id
+                destinatarios.append(admin_data)
+                destinatarios_ids.add(admin_id)
+                logger.info(f"📌 Destinatário: Admin - {admin_data.get('nome', 'N/A')}")
+
+        # 3. Enfermeiro responsável
+        paciente_ref = db.collection('pacientes').document(paciente_id)
+        paciente_doc = paciente_ref.get()
+
+        if paciente_doc.exists:
+            paciente_data = paciente_doc.to_dict()
+            enfermeiro_id = paciente_data.get('usuarioEnfermeiroId') or paciente_data.get('usuario_enfermeiro_id')
+
+            if enfermeiro_id and enfermeiro_id not in destinatarios_ids:
+                enfermeiro_ref = db.collection('usuarios').document(enfermeiro_id)
+                enfermeiro_doc = enfermeiro_ref.get()
+
+                if enfermeiro_doc.exists:
+                    enfermeiro_data = enfermeiro_doc.to_dict()
+                    enfermeiro_data['id'] = enfermeiro_id
+                    destinatarios.append(enfermeiro_data)
+                    destinatarios_ids.add(enfermeiro_id)
+                    logger.info(f"📌 Destinatário: Enfermeiro - {enfermeiro_data.get('nome', 'N/A')}")
+
+        logger.info(f"📊 Total de destinatários: {len(destinatarios)}")
+        return destinatarios
+
+    except Exception as e:
+        logger.error(f"❌ Erro ao buscar destinatários: {e}", exc_info=True)
+        return []
+
+
+def enviar_notificacoes_tarefa_atrasada(
+    db: firestore.client,
+    tarefa_id: str,
+    paciente_id: str,
+    negocio_id: str,
+    criado_por_id: str,
+    descricao: str
+):
+    """Envia notificações push para todos os destinatários."""
+    from notification_helper import enviar_notificacao_hibrida
+
+    try:
+        logger.info(f"🔔 Iniciando envio de notificações para tarefa {tarefa_id}")
+
+        # Busca usuário (paciente está na coleção 'usuarios')
+        usuario_ref = db.collection('usuarios').document(paciente_id)
+        usuario_doc = usuario_ref.get()
+
+        if not usuario_doc.exists:
+            logger.error(f"❌ Usuário/Paciente {paciente_id} não encontrado")
+            return
+
+        paciente_data = usuario_doc.to_dict()
+
+        # Tenta descriptografar o nome do paciente
+        paciente_nome = None
+
+        # Primeiro tenta campo nome (criptografado)
+        nome_encrypted = paciente_data.get('nome')
+        if nome_encrypted and isinstance(nome_encrypted, str) and nome_encrypted.startswith('gAAAAA'):
+            try:
+                paciente_nome = decrypt_data(nome_encrypted)
+                logger.info(f"✅ Nome do paciente descriptografado: {paciente_nome}")
+            except Exception as e:
+                logger.warning(f"⚠️ Erro ao descriptografar nome: {e}")
+
+        # Se falhou, tenta nomeCompleto (não criptografado)
+        if not paciente_nome:
+            paciente_nome = paciente_data.get('nomeCompleto') or 'Paciente'
+            logger.info(f"📝 Nome do paciente (não criptografado): {paciente_nome}")
+
+        # Monta mensagem
+        titulo = "⚠️ Tarefa Atrasada"
+        corpo = f"A tarefa '{descricao[:50]}...' do paciente {paciente_nome} está atrasada!"
+
+        data_payload = {
+            "tipo": "TAREFA_ATRASADA",
+            "tarefa_id": tarefa_id,
+            "paciente_id": paciente_id,
+            "negocio_id": negocio_id
+        }
+
+        # Busca destinatários (tokens frescos!)
+        destinatarios = buscar_destinatarios_notificacao_tarefa(
+            db=db,
+            negocio_id=negocio_id,
+            criado_por_id=criado_por_id,
+            paciente_id=paciente_id
+        )
+
+        if not destinatarios:
+            logger.warning(f"⚠️ Nenhum destinatário encontrado")
+            return
+
+        # Envia para cada destinatário
+        total_enviadas = 0
+        total_falhas = 0
+
+        for destinatario in destinatarios:
+            usuario_id = destinatario['id']
+            usuario_nome = destinatario.get('nome', 'Usuário')
+
+            fcm_tokens = destinatario.get('fcm_tokens', [])
+            apns_tokens = destinatario.get('apns_tokens', [])
+
+            if not fcm_tokens and not apns_tokens:
+                logger.warning(f"⚠️ Usuário {usuario_nome} sem tokens")
+                continue
+
+            logger.info(f"📤 Enviando para {usuario_nome}: {len(fcm_tokens)} FCM + {len(apns_tokens)} APNs")
+
+            resultado = enviar_notificacao_hibrida(
+                fcm_tokens=fcm_tokens,
+                apns_tokens=apns_tokens,
+                titulo=titulo,
+                corpo=corpo,
+                data_payload=data_payload,
+                webpush_tag=f"tarefa-atrasada-{tarefa_id}"
+            )
+
+            total_enviadas += resultado['fcm_sucessos'] + resultado['apns_sucessos']
+            total_falhas += resultado['fcm_falhas'] + resultado['apns_falhas']
+
+            # Salva notificação no Firestore para persistência
+            salvar_notificacao_firestore(
+                db=db,
+                usuario_id=usuario_id,
+                negocio_id=negocio_id,
+                tipo='TAREFA_ATRASADA',
+                titulo=titulo,
+                mensagem=corpo,
+                relacionado={
+                    'tarefa_id': tarefa_id,
+                    'paciente_id': paciente_id
+                }
+            )
+
+        logger.info(f"✅ Notificações: {total_enviadas} sucessos, {total_falhas} falhas")
+
+        # Log opcional
+        db.collection('logs_notificacoes').add({
+            'tipo': 'TAREFA_ATRASADA',
+            'tarefa_id': tarefa_id,
+            'paciente_id': paciente_id,
+            'negocio_id': negocio_id,
+            'destinatarios_count': len(destinatarios),
+            'enviadas': total_enviadas,
+            'falhas': total_falhas,
+            'timestamp': firestore.SERVER_TIMESTAMP
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Erro ao enviar notificações: {e}", exc_info=True)
+
+
+# =================================================================================
+# CLOUD TASKS - LEMBRETES DE EXAME
+# =================================================================================
+
+def agendar_lembrete_exame(
+    db: firestore.client,
+    exame_id: str,
+    paciente_id: str,
+    negocio_id: str,
+    nome_exame: str,
+    data_exame,  # datetime
+    horario_exame: Optional[str] = None,
+    service_url: Optional[str] = None
+):
+    """
+    Agenda Cloud Task para lembrete de exame.
+
+    REGRAS:
+    - Se TEM horário: notifica 1 hora antes do horário (horário em BRT)
+    - Se NÃO TEM horário: notifica às 09:00 da manhã do dia do exame (BRT)
+    """
+    try:
+        # Timezone do Brasil
+        BRT = ZoneInfo("America/Sao_Paulo")
+
+        # Converte data_exame para datetime se necessário
+        if isinstance(data_exame, str):
+            data_exame = datetime.fromisoformat(data_exame.replace('Z', '+00:00'))
+
+        logger.info(f"🔍 [DEBUG TIMEZONE] Dados recebidos:")
+        logger.info(f"   data_exame: {data_exame}")
+        logger.info(f"   horario_exame: {horario_exame}")
+
+        # Pega apenas a data (sem hora)
+        data_base = data_exame.date()
+        logger.info(f"   data_base (sem TZ): {data_base}")
+
+        # Calcula horário do lembrete
+        if horario_exame:
+            # TEM horário: 1 hora antes do horário LOCAL (BRT)
+            hora, minuto = map(int, horario_exame.split(':'))
+            logger.info(f"   hora: {hora}, minuto: {minuto}")
+
+            # Combina data + horário + timezone BRT (horário LOCAL)
+            data_hora_exame_brt = datetime(
+                data_base.year,
+                data_base.month,
+                data_base.day,
+                hora,
+                minuto,
+                0,  # segundo
+                0,  # microsegundo
+                tzinfo=BRT
+            )
+            logger.info(f"   data_hora_exame_brt: {data_hora_exame_brt}")
+
+            # Converte para UTC
+            data_hora_exame_utc = data_hora_exame_brt.astimezone(ZoneInfo("UTC"))
+            logger.info(f"   data_hora_exame_utc: {data_hora_exame_utc}")
+
+            # Calcula lembrete: 1 hora antes em UTC
+            data_hora_lembrete = data_hora_exame_utc - timedelta(hours=1)
+            logger.info(f"📅 Exame COM horário: {data_hora_exame_brt.strftime('%d/%m/%Y %H:%M BRT')} → Lembrete: {data_hora_lembrete.strftime('%d/%m/%Y %H:%M UTC')}")
+        else:
+            # NÃO TEM horário: 09:00 BRT do dia do exame
+            data_hora_lembrete_brt = datetime(
+                data_base.year,
+                data_base.month,
+                data_base.day,
+                9,  # 09:00
+                0,  # minuto
+                0,  # segundo
+                0,  # microsegundo
+                tzinfo=BRT
+            )
+            # Converte para UTC
+            data_hora_lembrete = data_hora_lembrete_brt.astimezone(ZoneInfo("UTC"))
+            logger.info(f"📅 Exame SEM horário: {data_base} → Lembrete: {data_hora_lembrete.strftime('%d/%m/%Y %H:%M UTC')} (09:00 BRT)")
+
+        # Converte para timestamp Unix
+        timestamp_unix = int(data_hora_lembrete.timestamp())
+
+        # Não agenda se já passou
+        agora_utc = datetime.now(ZoneInfo("UTC"))
+        logger.info(f"   agora_utc: {agora_utc}")
+
+        if data_hora_lembrete <= agora_utc:
+            logger.warning(f"⚠️ [AVISO] Horário do lembrete já passou!")
+            logger.warning(f"   Lembrete seria em: {data_hora_lembrete}")
+            logger.warning(f"   Mas agora já são: {agora_utc}")
+            return
+
+        # Obtém a URL do serviço
+        if not service_url:
+            service_url = os.getenv('CLOUD_RUN_SERVICE_URL') or 'https://barbearia-backend-service-je3t25fkiq-rj.a.run.app'
+
+        # Garante que a URL comece com https://
+        if not service_url.startswith('https://') and not service_url.startswith('http://'):
+            service_url = f'https://{service_url}'
+        elif service_url.startswith('http://'):
+            service_url = service_url.replace('http://', 'https://', 1)
+
+        endpoint_url = f"{service_url}/internal/notificar-lembrete-exame"
+        logger.info(f"🔍 DEBUG endpoint_url: {endpoint_url}")
+
+        # Payload da task
+        task_payload = {
+            "exame_id": exame_id,
+            "paciente_id": paciente_id,
+            "negocio_id": negocio_id,
+            "nome_exame": nome_exame,
+            "data_exame": data_exame.isoformat() if isinstance(data_exame, datetime) else data_exame,
+            "horario_exame": horario_exame
+        }
+
+        queue_path = _get_cloud_tasks_queue_path()
+        if not queue_path:
+            logger.error(f"❌ Não foi possível obter queue_path. Task não agendada para exame {exame_id}")
+            return
+
+        # Monta a task
+        task = {
+            'http_request': {
+                'http_method': tasks_v2.HttpMethod.POST,
+                'url': endpoint_url,
+                'headers': {
+                    'Content-Type': 'application/json',
+                },
+                'body': json.dumps(task_payload).encode()
+            },
+            'schedule_time': timestamp_pb2.Timestamp(seconds=timestamp_unix)
+        }
+
+        # Adiciona autenticação OIDC para Cloud Run
+        if 'run.app' in service_url:
+            service_account = os.getenv('CLOUD_RUN_SERVICE_ACCOUNT') or '862082955632-compute@developer.gserviceaccount.com'
+            task['http_request']['oidc_token'] = {
+                'service_account_email': service_account,
+                'audience': service_url
+            }
+            logger.info(f"🔐 OIDC token configurado com service account: {service_account}")
+
+        # Cria a task
+        client = _get_cloud_tasks_client()
+        response = client.create_task(parent=queue_path, task=task)
+
+        # Salva o nome da task no exame
+        db.collection('usuarios').document(paciente_id).collection('exames').document(exame_id).update({
+            'cloud_task_name': response.name,
+            'lembrete_agendado_para': data_hora_lembrete
+        })
+
+        logger.info(
+            f"✅ Cloud Task criada para exame {exame_id}. "
+            f"Lembrete em: {data_hora_lembrete.isoformat()}"
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Erro ao agendar Cloud Task para exame {exame_id}: {e}", exc_info=True)
+
+
+def cancelar_lembrete_exame(db: firestore.client, paciente_id: str, exame_id: str):
+    """Cancela a Cloud Task agendada para lembrete de exame."""
+    try:
+        exame_ref = db.collection('usuarios').document(paciente_id).collection('exames').document(exame_id)
+        exame_doc = exame_ref.get()
+
+        if not exame_doc.exists:
+            logger.warning(f"⚠️ Exame {exame_id} não encontrado para cancelar Cloud Task")
+            return
+
+        exame_data = exame_doc.to_dict()
+        cloud_task_name = exame_data.get('cloud_task_name')
+
+        if not cloud_task_name:
+            logger.info(f"ℹ️ Exame {exame_id} não tem Cloud Task agendada")
+            return
+
+        client = _get_cloud_tasks_client()
+        client.delete_task(name=cloud_task_name)
+
+        exame_ref.update({
+            'cloud_task_name': firestore.DELETE_FIELD,
+            'lembrete_agendado_para': firestore.DELETE_FIELD
+        })
+
+        logger.info(f"✅ Cloud Task cancelada para exame {exame_id}")
+
+    except Exception as e:
+        if 'NOT_FOUND' in str(e):
+            logger.info(f"ℹ️ Cloud Task para exame {exame_id} já executada/expirada")
+        else:
+            logger.error(f"❌ Erro ao cancelar Cloud Task: {e}", exc_info=True)
+
+
+def enviar_lembrete_exame(
+    db: firestore.client,
+    exame_id: str,
+    paciente_id: str,
+    negocio_id: str,
+    nome_exame: str,
+    data_exame: str,
+    horario_exame: Optional[str] = None
+):
+    """Envia notificação de lembrete de exame."""
+    from notification_helper import enviar_notificacao_hibrida
+
+    try:
+        logger.info(f"🔔 Iniciando envio de lembrete para exame {exame_id}")
+
+        # Busca nome do paciente
+        usuario_ref = db.collection('usuarios').document(paciente_id)
+        usuario_doc = usuario_ref.get()
+
+        if not usuario_doc.exists:
+            logger.error(f"❌ Usuário/Paciente {paciente_id} não encontrado")
+            return
+
+        paciente_data = usuario_doc.to_dict()
+
+        # Descriptografa o nome do paciente
+        paciente_nome = None
+        nome_encrypted = paciente_data.get('nome')
+        if nome_encrypted and isinstance(nome_encrypted, str) and nome_encrypted.startswith('gAAAAA'):
+            try:
+                paciente_nome = decrypt_data(nome_encrypted)
+                logger.info(f"✅ Nome do paciente descriptografado: {paciente_nome}")
+            except Exception as e:
+                logger.warning(f"⚠️ Erro ao descriptografar nome: {e}")
+
+        if not paciente_nome:
+            paciente_nome = paciente_data.get('nomeCompleto') or 'Paciente'
+            logger.info(f"📝 Nome do paciente (não criptografado): {paciente_nome}")
+
+        # Monta mensagem
+        if horario_exame:
+            titulo = f"🩺 Lembrete: Exame às {horario_exame}"
+            corpo = f"{paciente_nome}, você tem o exame '{nome_exame}' hoje às {horario_exame}!"
+        else:
+            titulo = "🩺 Lembrete: Exame Hoje"
+            corpo = f"{paciente_nome}, você tem o exame '{nome_exame}' agendado para hoje!"
+
+        data_payload = {
+            "tipo": "LEMBRETE_EXAME",
+            "exame_id": exame_id,
+            "paciente_id": paciente_id,
+            "negocio_id": negocio_id
+        }
+
+        # Busca tokens do paciente
+        fcm_tokens = paciente_data.get('fcm_tokens', [])
+        apns_tokens = paciente_data.get('apns_tokens', [])
+
+        if not fcm_tokens and not apns_tokens:
+            logger.warning(f"⚠️ Paciente sem tokens de notificação")
+            return
+
+        logger.info(f"📤 Enviando para paciente: {len(fcm_tokens)} FCM + {len(apns_tokens)} APNs")
+
+        resultado = enviar_notificacao_hibrida(
+            fcm_tokens=fcm_tokens,
+            apns_tokens=apns_tokens,
+            titulo=titulo,
+            corpo=corpo,
+            data_payload=data_payload,
+            webpush_tag=f"lembrete-exame-{exame_id}"
+        )
+
+        total_enviadas = resultado['fcm_sucessos'] + resultado['apns_sucessos']
+        total_falhas = resultado['fcm_falhas'] + resultado['apns_falhas']
+
+        logger.info(f"✅ Notificações: {total_enviadas} sucessos, {total_falhas} falhas")
+
+        # Salva notificação no Firestore para persistência
+        salvar_notificacao_firestore(
+            db=db,
+            usuario_id=paciente_id,
+            negocio_id=negocio_id,
+            tipo='LEMBRETE_EXAME',
+            titulo=titulo,
+            mensagem=corpo,
+            relacionado={
+                'exame_id': exame_id,
+                'paciente_id': paciente_id
+            }
+        )
+
+        # Log opcional
+        db.collection('logs_notificacoes').add({
+            'tipo': 'LEMBRETE_EXAME',
+            'exame_id': exame_id,
+            'paciente_id': paciente_id,
+            'negocio_id': negocio_id,
+            'enviadas': total_enviadas,
+            'falhas': total_falhas,
+            'timestamp': firestore.SERVER_TIMESTAMP
+        })
+
+    except Exception as e:
+        logger.error(f"❌ Erro ao enviar lembrete de exame: {e}", exc_info=True)
+
+
+# =================================================================================
+# PERSISTÊNCIA DE NOTIFICAÇÕES NO FIRESTORE
+# =================================================================================
+
+def salvar_notificacao_firestore(
+    db: firestore.client,
+    usuario_id: str,
+    negocio_id: str,
+    tipo: str,
+    titulo: str,
+    mensagem: str,
+    relacionado: dict = None
+) -> str:
+    """
+    Salva uma notificação na SUBCOLEÇÃO do usuário: /usuarios/{id}/notificacoes/
+
+    Args:
+        db: Cliente Firestore
+        usuario_id: ID do usuário que receberá a notificação
+        negocio_id: ID do negócio
+        tipo: Tipo da notificação (TAREFA_ATRASADA, LEMBRETE_EXAME, EXAME_CRIADO, etc)
+        titulo: Título da notificação
+        mensagem: Corpo da mensagem
+        relacionado: Dict com IDs relacionados (tarefa_id, exame_id, paciente_id, etc)
+
+    Returns:
+        ID do documento criado
+    """
+    try:
+        notificacao_data = {
+            'title': titulo,  # Usa 'title' para compatibilidade com código existente
+            'body': mensagem,  # Usa 'body' para compatibilidade com código existente
+            'tipo': tipo,
+            'relacionado': relacionado if relacionado else {},
+            'lida': False,
+            'data_criacao': firestore.SERVER_TIMESTAMP  # Usa 'data_criacao' para compatibilidade
+        }
+
+        # DEBUG: Log dos dados ANTES de salvar
+        logger.info(f"🔍 DEBUG salvar_notificacao - Dados: tipo={tipo}, title={titulo}, body_len={len(mensagem) if mensagem else 0}, lida=False, usuario_id={usuario_id}")
+
+        # Salva na SUBCOLEÇÃO /usuarios/{id}/notificacoes/
+        doc_ref = db.collection('usuarios').document(usuario_id).collection('notificacoes').add(notificacao_data)
+        notificacao_id = doc_ref[1].id
+
+        logger.info(f"✅ Notificação salva no Firestore: {notificacao_id} (tipo: {tipo}, usuário: {usuario_id}, title: {titulo}, lida: False)")
+        return notificacao_id
+
+    except Exception as e:
+        logger.error(f"❌ Erro ao salvar notificação no Firestore: {e}", exc_info=True)
+        return None
+
+
+def criar_tarefa_v2(
+    db: firestore.client,
+    paciente_id: str,
+    negocio_id: str,
+    tarefa_data,
+    criador,
+    service_url: str = None
+) -> Dict:
+    """Versão atualizada que usa Cloud Tasks."""
+    tarefa_dict = {
+        "pacienteId": paciente_id,
+        "negocioId": negocio_id,
+        "descricao": tarefa_data.descricao,
+        "dataHoraLimite": tarefa_data.dataHoraLimite,
+        "criadoPorId": criador.id,
+        "foiConcluida": False,
+        "dataConclusao": None,
+        "executadoPorId": None
+    }
+
+    doc_ref = db.collection('tarefas_essenciais').add(tarefa_dict)
+    tarefa_dict['id'] = doc_ref[1].id
+
+    # Agenda Cloud Task
+    agendar_notificacao_tarefa_atrasada(db, tarefa_dict, service_url)
+
+    return tarefa_dict
+
+
+def marcar_tarefa_como_concluida_v2(
+    db: firestore.client,
+    tarefa_id: str,
+    tecnico
+) -> Optional[Dict]:
+    """Versão atualizada que cancela Cloud Task."""
+    tarefa_ref = db.collection('tarefas_essenciais').document(tarefa_id)
+    tarefa_doc = tarefa_ref.get()
+
+    if not tarefa_doc.exists:
+        return None
+
+    tarefa_data = tarefa_doc.to_dict()
+
+    if tarefa_data.get('foiConcluida'):
+        return tarefa_data
+
+    update_data = {
+        'foiConcluida': True,
+        'dataConclusao': datetime.now(timezone.utc),
+        'executadoPorId': tecnico.id
+    }
+
+    tarefa_ref.update(update_data)
+    tarefa_data.update(update_data)
+    tarefa_data['id'] = tarefa_id
+
+    # Cancela Cloud Task
+    cancelar_notificacao_tarefa_atrasada(db, tarefa_id)
+
+    updated_doc = tarefa_ref.get().to_dict()
+    updated_doc['id'] = tarefa_id
+
+    return updated_doc
