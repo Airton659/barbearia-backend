@@ -61,7 +61,12 @@ def validate_negocio_id(
 ):
     """
     Valida se o usuário tem permissão para acessar o negócio especificado.
+    Super Admin tem acesso a todos os negócios.
     """
+    # Se for super_admin, permite o acesso a qualquer negócio
+    if current_user.roles.get("platform") == "super_admin":
+        return negocio_id
+
     if negocio_id not in current_user.roles:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -151,6 +156,7 @@ def get_current_profissional_user(
 ) -> schemas.UsuarioProfile:
     """
     Verifica se o usuário atual é um profissional do negócio especificado no header.
+    Super Admin tem acesso total.
     Esta função é a dependência de segurança para endpoints de autogestão do profissional.
     """
     if not negocio_id:
@@ -158,6 +164,10 @@ def get_current_profissional_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="O header 'negocio-id' é obrigatório para esta operação."
         )
+
+    # Super Admin tem acesso total
+    if current_user.roles.get("platform") == "super_admin":
+        return current_user
 
     # Verifica se o usuário tem a role 'profissional' OU 'admin' (pois um admin também é um profissional)
     user_role_for_negocio = current_user.roles.get(negocio_id)
@@ -193,11 +203,17 @@ def get_paciente_autorizado(
     """
     Dependência de segurança para garantir que o usuário atual tem permissão
     para acessar ou modificar os dados de um paciente específico.
+    Super Admin tem acesso total.
     """
     print("--- INICIANDO VERIFICAÇÃO DE ACESSO AO PACIENTE ---")
     print(f"ID do Paciente alvo: {paciente_id}")
     print(f"ID do Usuário tentando acessar: {current_user.id}")
     print(f"Roles do Usuário: {current_user.roles}")
+
+    # 0. Super Admin tem acesso total a todos os pacientes
+    if current_user.roles.get("platform") == "super_admin":
+        print("DEBUG: Acesso permitido. Usuário é Super Admin.")
+        return current_user
 
     # 1. O próprio paciente sempre tem acesso.
     if current_user.id == paciente_id:
@@ -250,8 +266,13 @@ def get_current_tecnico_user(
 ) -> schemas.UsuarioProfile:
     """
     Verifica se o usuário atual tem a role 'tecnico' em algum dos negócios.
+    Super Admin tem acesso total.
     Esta é uma verificação genérica; a lógica do endpoint deve validar o negócio específico.
     """
+    # Super Admin tem acesso total
+    if current_user.roles.get("platform") == "super_admin":
+        return current_user
+
     # Extrai a primeira role 'tecnico' que encontrar para validação.
     # A validação de negócio específico acontecerá no endpoint.
     user_roles = current_user.roles
@@ -275,9 +296,13 @@ def get_paciente_autorizado_anamnese(
 ) -> schemas.UsuarioProfile:
     """
     Dependência de segurança para Anamnese.
-    Permite acesso apenas ao próprio paciente, ao admin, ou ao enfermeiro vinculado.
+    Permite acesso ao próprio paciente, ao admin, ao enfermeiro vinculado, ou ao Super Admin.
     BLOQUEIA O ACESSO DE TÉCNICOS.
     """
+    # 0. Super Admin tem acesso total
+    if current_user.roles.get("platform") == "super_admin":
+        return current_user
+
     # 1. O próprio paciente sempre tem acesso.
     if current_user.id == paciente_id:
         return current_user
@@ -315,7 +340,12 @@ def get_current_medico_user(
 ) -> schemas.UsuarioProfile:
     """
     Verifica se o usuário atual tem a role 'medico' em algum dos negócios.
+    Super Admin tem acesso total.
     """
+    # Super Admin tem acesso total
+    if current_user.roles.get("platform") == "super_admin":
+        return current_user
+
     # Como o Header agora é obrigatório (definido com ...), o FastAPI garante que ele existe.
     # A verificação 'if not negocio_id:' pode ser removida para um código mais limpo.
     user_role_for_negocio = current_user.roles.get(negocio_id)
@@ -333,17 +363,21 @@ def get_admin_or_profissional_autorizado_paciente(
 ) -> schemas.UsuarioProfile:
     """
     Dependência de segurança restritiva para operações de escrita no plano de cuidado.
-    Permite acesso apenas a administradores e profissionais (enfermeiros).
+    Permite acesso a administradores, profissionais (enfermeiros), ou Super Admin.
     BLOQUEIA O ACESSO DE TÉCNICOS para operações de escrita.
     """
+    # 0. Super Admin tem acesso total
+    if current_user.roles.get("platform") == "super_admin":
+        return current_user
+
     # Busca o documento completo do paciente para obter o negócio
     paciente_doc_ref = db.collection('usuarios').document(paciente_id)
     paciente_doc = paciente_doc_ref.get()
     if not paciente_doc.exists:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paciente não encontrado.")
-    
+
     paciente_data = paciente_doc.to_dict()
-    
+
     # Extrai o negocio_id do paciente
     negocio_id_paciente = list(paciente_data.get('roles', {}).keys())[0] if paciente_data.get('roles') else None
     if not negocio_id_paciente:
@@ -356,7 +390,7 @@ def get_admin_or_profissional_autorizado_paciente(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Acesso negado: apenas administradores e profissionais podem modificar o plano de cuidado."
         )
-    
+
     return current_user
 
 def get_relatorio_autorizado(
@@ -366,7 +400,7 @@ def get_relatorio_autorizado(
 ) -> Dict:
     """
     Dependência que busca um relatório e valida se o usuário atual tem permissão para acessá-lo.
-    Permite acesso ao Admin/Profissional do negócio ou ao Médico atribuído.
+    Permite acesso ao Admin/Profissional do negócio, ao Médico atribuído, ou ao Super Admin.
     Retorna o dicionário do relatório se autorizado.
     """
     import crud  # Import local para evitar dependência circular
@@ -381,6 +415,11 @@ def get_relatorio_autorizado(
     medico_id = relatorio_data.get('medico_id')
 
     user_roles = current_user.roles
+
+    # 0. Super Admin tem acesso total
+    if user_roles.get("platform") == "super_admin":
+        # Popula o criado_por antes de retornar
+        return crud._popular_criado_por(db, relatorio_data)
 
     # 1. Admin ou Profissional do negócio têm acesso
     if user_roles.get(negocio_id) in ['admin', 'profissional']:

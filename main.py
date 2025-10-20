@@ -1146,19 +1146,22 @@ def listar_meus_pacientes(
     db: firestore.client = Depends(get_db)
 ):
     """
-    (Gestor, Enfermeiro ou Técnico)
-    Lista os pacientes. Para Gestores, retorna TODOS os pacientes do negócio.
+    (Gestor, Enfermeiro, Técnico ou Super Admin)
+    Lista os pacientes. Para Gestores e Super Admin, retorna TODOS os pacientes do negócio.
     Para Enfermeiros/Técnicos, retorna apenas os pacientes vinculados.
     """
-    user_role = current_user.roles.get(negocio_id)
-    
-    # ***** A CORREÇÃO ESTÁ AQUI *****
-    # Adiciona 'admin' à lista de roles permitidas.
-    if user_role not in ["profissional", "tecnico", "admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Acesso negado: seu perfil não tem permissão para visualizar pacientes."
-        )
+    # Super Admin tem acesso total como se fosse admin
+    if current_user.roles.get("platform") == "super_admin":
+        user_role = "admin"
+    else:
+        user_role = current_user.roles.get(negocio_id)
+
+        # Verifica se o usuário tem permissão para acessar este endpoint
+        if user_role not in ["profissional", "tecnico", "admin"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Acesso negado: seu perfil não tem permissão para visualizar pacientes."
+            )
 
     pacientes = crud.listar_pacientes_por_profissional_ou_tecnico(db, negocio_id, current_user.id, user_role)
     return pacientes
