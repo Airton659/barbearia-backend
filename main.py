@@ -565,25 +565,6 @@ def get_exames(
     # O filtro por 'consulta_id' foi removido
     return crud.listar_exames(db, paciente_id)
 
-@app.get("/pacientes/{paciente_id}/prontuarios", response_model=List[schemas.ProntuarioResponse], tags=["Ficha do Paciente"])
-def get_prontuarios(
-    paciente_id: str,
-    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
-    db: firestore.client = Depends(get_db)
-):
-    """(Autorizado) Lista os prontuários do paciente."""
-    return crud.listar_prontuarios(db, paciente_id)
-
-@app.post("/pacientes/{paciente_id}/prontuarios", response_model=schemas.ProntuarioResponse, tags=["Ficha do Paciente"])
-def create_prontuario(
-    paciente_id: str,
-    prontuario_data: schemas.ProntuarioCreate,
-    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase),
-    db: firestore.client = Depends(get_db)
-):
-    """(Autorizado) Cria um novo prontuário para o paciente."""
-    return crud.criar_prontuario(db, paciente_id, prontuario_data.texto, prontuario_data.tecnico_nome)
-
 @app.put("/pacientes/{paciente_id}/exames/{exame_id}", response_model=schemas.ExameResponse, tags=["Ficha do Paciente"])
 def update_exame(
     paciente_id: str,
