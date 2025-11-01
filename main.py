@@ -883,8 +883,10 @@ def criar_registro_diario_estruturado_endpoint(
             }
         }
     except Exception as e:
+        import traceback
         logger.error(f"Erro inesperado ao criar prontuário/registro: {e}")
-        raise HTTPException(status_code=500, detail="Ocorreu um erro interno no servidor.")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Erro ao criar registro: {str(e)}")
 
 @app.get("/pacientes/{paciente_id}/registros", response_model=List[schemas.RegistroDiarioResponse], tags=["Registros Estruturados"])
 def listar_registros_diario_estruturado_endpoint(

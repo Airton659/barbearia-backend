@@ -3197,7 +3197,10 @@ def criar_prontuario(db: firestore.client, paciente_id: str, texto: str, tecnico
         return data
 
     except Exception as e:
+        import traceback
         logger.error(f"Erro ao criar prontuário para paciente {paciente_id}: {e}")
+        logger.error(f"Traceback completo: {traceback.format_exc()}")
+        logger.error(f"Dados sendo salvos: {prontuario_data}")
         raise e
 
 # =================================================================================
