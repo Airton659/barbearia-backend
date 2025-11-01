@@ -885,7 +885,7 @@ def criar_registro_diario_estruturado_endpoint(
             'tecnico': {
                 'id': current_user.id,
                 'nome': usuario_nome,
-                'email': current_user.email if current_user.email else 'nao-disponivel@sistema.local'
+                'email': current_user.email
             },
             'conteudo': {
                 'descricao': texto_registro
@@ -906,8 +906,7 @@ def listar_registros_diario_estruturado_endpoint(
     db: firestore.client = Depends(get_db)
 ):
     """(Clínico Autorizado) Lista prontuários/registros diários de um paciente no formato estruturado."""
-    # CONVERTE PRONTUARIOS PARA FORMATO ESTRUTURADO COM OBJETO TECNICO COMPLETO
-    return crud.listar_prontuarios_estruturados(db, paciente_id)
+    return crud.listar_prontuarios(db, paciente_id)
 
 @app.patch("/pacientes/{paciente_id}/registros/{registro_id}", response_model=schemas.RegistroDiarioResponse, tags=["Registros Estruturados"])
 def atualizar_registro_diario_estruturado_endpoint(
