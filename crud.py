@@ -4008,14 +4008,15 @@ def get_checklist_diario_plano_ativo(db: firestore.client, paciente_id: str, dia
 
 # Em crud.py, substitua esta função
 
-def criar_registro_diario_estruturado(db: firestore.client, registro_data: schemas.RegistroDiarioCreate, tecnico_id: str) -> Dict:
+def criar_registro_diario_estruturado(db: firestore.client, registro_data: schemas.RegistroDiarioCreate, usuario_id: str) -> Dict:
     """
     Adiciona um novo registro estruturado ao diário de acompanhamento de um paciente, criptografando dados sensíveis e notificando o enfermeiro.
+    Pode ser usado por qualquer perfil autorizado (admin, profissional, médico, técnico).
     """
     try:
         conteudo_ok = registro_data.conteudo
         conteudo_dict = conteudo_ok.model_dump()
-        
+
         if 'descricao' in conteudo_dict and conteudo_dict['descricao']:
             conteudo_dict['descricao'] = encrypt_data(conteudo_dict['descricao'])
 
@@ -4024,7 +4025,7 @@ def criar_registro_diario_estruturado(db: firestore.client, registro_data: schem
             "paciente_id": registro_data.paciente_id,
             "tipo": registro_data.tipo,
             "conteudo": conteudo_dict,
-            "tecnico_id": tecnico_id,
+            "usuario_id": usuario_id,  # Renomeado de tecnico_id para usuario_id
             "data_registro": registro_data.data_hora,
         }
 
@@ -4035,17 +4036,17 @@ def criar_registro_diario_estruturado(db: firestore.client, registro_data: schem
         # Prepara a resposta da API
         resposta_dict = registro_dict_para_salvar.copy()
         resposta_dict['id'] = doc_ref.id
-        
-        tecnico_doc = db.collection('usuarios').document(tecnico_id).get()
-        if tecnico_doc.exists:
-            tdat = tecnico_doc.to_dict() or {}
+
+        usuario_doc = db.collection('usuarios').document(usuario_id).get()
+        if usuario_doc.exists:
+            udat = usuario_doc.to_dict() or {}
             resposta_dict['tecnico'] = {
-                "id": tecnico_doc.id,
-                "nome": decrypt_data(tdat.get('nome', '')) if tdat.get('nome') else 'Técnico',
-                "email": tdat.get('email', ''),
+                "id": usuario_doc.id,
+                "nome": decrypt_data(udat.get('nome', '')) if udat.get('nome') else 'Usuário',
+                "email": udat.get('email', ''),
             }
         else:
-            resposta_dict['tecnico'] = {"id": tecnico_id, "nome": "Técnico Desconhecido", "email": ""}
+            resposta_dict['tecnico'] = {"id": usuario_id, "nome": "Usuário Desconhecido", "email": ""}
         
         if 'descricao' in conteudo_dict and conteudo_dict['descricao']:
              resposta_dict['conteudo']['descricao'] = decrypt_data(conteudo_dict['descricao'])
@@ -4134,14 +4135,14 @@ def listar_registros_diario_estruturado(
             # Monta o objeto de conteúdo final, que é sempre uma anotação simples
             conteudo_final = schemas.AnotacaoConteudo(descricao=descricao_final)
 
-            # Monta o objeto 'tecnico' (lógica reaproveitada)
-            tecnico_id = d.get('tecnico_id')
+            # Monta o objeto 'tecnico' (compatível com campo antigo e novo)
+            autor_id = d.get('usuario_id') or d.get('tecnico_id')
             tecnico_perfil = None
-            if tecnico_id:
-                if tecnico_id in tecnicos_cache:
-                    tecnico_perfil = tecnicos_cache[tecnico_id]
+            if autor_id:
+                if autor_id in tecnicos_cache:
+                    tecnico_perfil = tecnicos_cache[autor_id]
                 else:
-                    tdoc = db.collection('usuarios').document(tecnico_id).get()
+                    tdoc = db.collection('usuarios').document(autor_id).get()
                     if tdoc.exists:
                         tdat = tdoc.to_dict() or {}
                         nome_tecnico = tdat.get('nome')
@@ -4149,13 +4150,13 @@ def listar_registros_diario_estruturado(
                             try:
                                 nome_tecnico = decrypt_data(nome_tecnico)
                             except Exception as e:
-                                logger.error(f"Erro ao descriptografar nome do técnico {tecnico_id}: {e}")
+                                logger.error(f"Erro ao descriptografar nome do usuário {autor_id}: {e}")
                                 nome_tecnico = "[Erro na descriptografia]"
-                        
+
                         tecnico_perfil = {'id': tdoc.id, 'nome': nome_tecnico, 'email': tdat.get('email')}
                     else:
-                        tecnico_perfil = {'id': tecnico_id, 'nome': 'Técnico Desconhecido', 'email': ''}
-                    tecnicos_cache[tecnico_id] = tecnico_perfil
+                        tecnico_perfil = {'id': autor_id, 'nome': 'Usuário Desconhecido', 'email': ''}
+                    tecnicos_cache[autor_id] = tecnico_perfil
             
             # Constrói a resposta final
             registro_data = {
@@ -4182,34 +4183,40 @@ def listar_registros_diario_estruturado(
     return registros_pydantic
 
 def atualizar_registro_diario_estruturado(
-    db: firestore.client, 
-    paciente_id: str, 
-    registro_id: str, 
+    db: firestore.client,
+    paciente_id: str,
+    registro_id: str,
     update_data: schemas.RegistroDiarioCreate,
-    tecnico_id: str
+    usuario_id: str
 ) -> Optional[Dict]:
-    """Atualiza um registro estruturado, validando a autoria."""
+    """
+    Atualiza um registro estruturado, validando a autoria.
+    Permite que o próprio autor edite seu registro.
+    """
     try:
         item_ref = db.collection('usuarios').document(paciente_id).collection('registros_diarios_estruturados').document(registro_id)
         doc = item_ref.get()
         if not doc.exists:
             logger.warning(f"Registro estruturado {registro_id} não encontrado.")
             return None
-        
-        if doc.to_dict().get('tecnico_id') != tecnico_id:
+
+        doc_data = doc.to_dict()
+        # Verifica se o usuário é o autor do registro (compatível com campo antigo e novo)
+        autor_id = doc_data.get('usuario_id') or doc_data.get('tecnico_id')
+        if autor_id != usuario_id:
             raise PermissionError("Você só pode editar seus próprios registros.")
-            
+
         update_dict = update_data.model_dump(exclude_unset=True)
         if not update_dict:
             data = doc.to_dict()
             data['id'] = doc.id
             return data
-            
+
         item_ref.update(update_dict)
         updated_doc = item_ref.get()
         data = updated_doc.to_dict()
         data['id'] = updated_doc.id
-        logger.info(f"Registro estruturado {registro_id} do paciente {paciente_id} atualizado pelo técnico {tecnico_id}.")
+        logger.info(f"Registro estruturado {registro_id} do paciente {paciente_id} atualizado pelo usuário {usuario_id}.")
         return data
     except Exception as e:
         logger.error(f"Erro ao atualizar registro estruturado {registro_id} do paciente {paciente_id}: {e}")
@@ -4219,20 +4226,26 @@ def deletar_registro_diario_estruturado(
     db: firestore.client,
     paciente_id: str,
     registro_id: str,
-    tecnico_id: str
+    usuario_id: str
 ) -> bool:
-    """Deleta um registro estruturado, validando a autoria."""
+    """
+    Deleta um registro estruturado, validando a autoria.
+    Permite que o próprio autor delete seu registro.
+    """
     try:
         item_ref = db.collection('usuarios').document(paciente_id).collection('registros_diarios_estruturados').document(registro_id)
         doc = item_ref.get()
         if not doc.exists:
             return False
-            
-        if doc.to_dict().get('tecnico_id') != tecnico_id:
+
+        doc_data = doc.to_dict()
+        # Verifica se o usuário é o autor do registro (compatível com campo antigo e novo)
+        autor_id = doc_data.get('usuario_id') or doc_data.get('tecnico_id')
+        if autor_id != usuario_id:
             raise PermissionError("Você só pode deletar seus próprios registros.")
-            
+
         item_ref.delete()
-        logger.info(f"Registro estruturado {registro_id} do paciente {paciente_id} deletado pelo técnico {tecnico_id}.")
+        logger.info(f"Registro estruturado {registro_id} do paciente {paciente_id} deletado pelo usuário {usuario_id}.")
         return True
     except Exception as e:
         logger.error(f"Erro ao deletar registro estruturado {registro_id} do paciente {paciente_id}: {e}")
