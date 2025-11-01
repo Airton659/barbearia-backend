@@ -850,8 +850,8 @@ def criar_registro_diario_estruturado_endpoint(
         # Extrai o texto do registro (pode vir como 'texto' ou 'conteudo.descricao')
         texto_registro = registro_data.texto if registro_data.texto else registro_data.conteudo.descricao if registro_data.conteudo else ""
 
-        # Pega o nome do usuário atual
-        usuario_nome = decrypt_data(current_user.nome) if current_user.nome else "Usuário"
+        # Pega o nome do usuário atual (já vem descriptografado do Firebase)
+        usuario_nome = current_user.nome if current_user.nome else "Usuário"
 
         # Monta objeto técnico
         tecnico_dict = {
