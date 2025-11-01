@@ -3184,7 +3184,7 @@ def listar_prontuarios_estruturados(db: firestore.client, paciente_id: str) -> L
                 'tecnico': {
                     'id': '',
                     'nome': p.get('tecnico_nome', 'Usuário Desconhecido') or 'Usuário Desconhecido',
-                    'email': ''
+                    'email': 'nao-disponivel@sistema.local'
                 },
                 'conteudo': {
                     'descricao': p.get('texto', '')

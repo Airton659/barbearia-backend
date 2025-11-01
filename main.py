@@ -885,7 +885,7 @@ def criar_registro_diario_estruturado_endpoint(
             'tecnico': {
                 'id': current_user.id,
                 'nome': usuario_nome,
-                'email': current_user.email or ''
+                'email': current_user.email if current_user.email else 'nao-disponivel@sistema.local'
             },
             'conteudo': {
                 'descricao': texto_registro
