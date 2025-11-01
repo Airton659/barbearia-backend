@@ -850,14 +850,17 @@ def delete_registro_diario(
 def criar_registro_diario_estruturado_endpoint(
     paciente_id: str,
     registro_data: schemas.RegistroDiarioCreate,
-    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
-    """(Técnico) Adiciona um novo registro estruturado ao diário de acompanhamento."""
-    leitura_confirmada_status = crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, date.today())
-    if not leitura_confirmada_status.get("leitura_confirmada"):
-        raise HTTPException(status_code=403, detail="Leitura do Plano Ativo pendente para hoje.")
-    
+    """(Clínico Autorizado) Adiciona um novo registro estruturado ao diário de acompanhamento."""
+    # Verifica leitura do plano APENAS se o usuário for técnico
+    user_roles_values = list(current_user.roles.values())
+    if "tecnico" in user_roles_values:
+        leitura_confirmada_status = crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, date.today())
+        if not leitura_confirmada_status.get("leitura_confirmada"):
+            raise HTTPException(status_code=403, detail="Leitura do Plano Ativo pendente para hoje.")
+
     # O paciente_id já é esperado no corpo da requisição conforme o schema corrigido.
     if registro_data.paciente_id != paciente_id:
         raise HTTPException(status_code=400, detail="ID do paciente na URL e no corpo da requisição não correspondem.")
@@ -885,14 +888,17 @@ def atualizar_registro_diario_estruturado_endpoint(
     paciente_id: str,
     registro_id: str,
     update_data: schemas.RegistroDiarioCreate,
-    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
-    """(Técnico) Atualiza um de seus registros diários estruturados."""
-    leitura_confirmada_status = crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, date.today())
-    if not leitura_confirmada_status.get("leitura_confirmada"):
-        raise HTTPException(status_code=403, detail="Leitura do Plano Ativo pendente para hoje.")
-    
+    """(Clínico Autorizado) Atualiza um de seus registros diários estruturados."""
+    # Verifica leitura do plano APENAS se o usuário for técnico
+    user_roles_values = list(current_user.roles.values())
+    if "tecnico" in user_roles_values:
+        leitura_confirmada_status = crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, date.today())
+        if not leitura_confirmada_status.get("leitura_confirmada"):
+            raise HTTPException(status_code=403, detail="Leitura do Plano Ativo pendente para hoje.")
+
     try:
         registro_atualizado = crud.atualizar_registro_diario_estruturado(db, paciente_id, registro_id, update_data, current_user.id)
         if not registro_atualizado:
@@ -908,10 +914,17 @@ def atualizar_registro_diario_estruturado_endpoint(
 def deletar_registro_diario_estruturado_endpoint(
     paciente_id: str,
     registro_id: str,
-    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
-    """(Técnico) Deleta um de seus registros diários estruturados."""
+    """(Clínico Autorizado) Deleta um de seus registros diários estruturados."""
+    # Verifica leitura do plano APENAS se o usuário for técnico
+    user_roles_values = list(current_user.roles.values())
+    if "tecnico" in user_roles_values:
+        leitura_confirmada_status = crud.verificar_leitura_plano_do_dia(db, paciente_id, current_user.id, date.today())
+        if not leitura_confirmada_status.get("leitura_confirmada"):
+            raise HTTPException(status_code=403, detail="Leitura do Plano Ativo pendente para hoje.")
+
     try:
         if not crud.deletar_registro_diario_estruturado(db, paciente_id, registro_id, current_user.id):
             raise HTTPException(status_code=404, detail="Registro não encontrado.")
