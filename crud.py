@@ -3161,6 +3161,43 @@ def listar_prontuarios(db: firestore.client, paciente_id: str) -> List[Dict]:
         logger.error(f"Erro ao listar prontuários do paciente {paciente_id}: {e}")
         return []
 
+def listar_prontuarios_estruturados(db: firestore.client, paciente_id: str) -> List[Dict]:
+    """
+    Lista prontuários convertidos para o formato estruturado esperado pelo frontend.
+    Converte formato antigo (tecnico_nome) para formato novo (objeto tecnico completo).
+    """
+    try:
+        coll_ref = db.collection('usuarios').document(paciente_id).collection('prontuarios')
+        docs = coll_ref.order_by('data', direction=firestore.Query.DESCENDING).stream()
+
+        prontuarios_estruturados = []
+        for doc in docs:
+            p = doc.to_dict() or {}
+
+            # Converte para formato estruturado
+            prontuario_estruturado = {
+                'id': doc.id,
+                'paciente_id': paciente_id,
+                'negocio_id': '',  # Prontuários antigos não têm negocio_id
+                'tipo': 'anotacao',
+                'data_registro': p.get('data', datetime.utcnow()),
+                'tecnico': {
+                    'id': '',
+                    'nome': p.get('tecnico_nome', 'Usuário Desconhecido') or 'Usuário Desconhecido',
+                    'email': ''
+                },
+                'conteudo': {
+                    'descricao': p.get('texto', '')
+                }
+            }
+
+            prontuarios_estruturados.append(prontuario_estruturado)
+
+        return prontuarios_estruturados
+    except Exception as e:
+        logger.error(f"Erro ao listar prontuários estruturados do paciente {paciente_id}: {e}")
+        return []
+
 def criar_prontuario(db: firestore.client, paciente_id: str, texto: str, tecnico_nome: Optional[str] = None) -> Dict:
     """Cria um novo prontuário para o paciente."""
     try:

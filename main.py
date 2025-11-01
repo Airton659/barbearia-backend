@@ -846,7 +846,7 @@ def delete_registro_diario(
 # ENDPOINTS DE REGISTROS DIÁRIOS ESTRUTURADOS
 # =================================================================================
 
-@app.post("/pacientes/{paciente_id}/registros", response_model=schemas.ProntuarioResponse, status_code=status.HTTP_201_CREATED, tags=["Registros Estruturados"])
+@app.post("/pacientes/{paciente_id}/registros", response_model=schemas.RegistroDiarioResponse, status_code=status.HTTP_201_CREATED, tags=["Registros Estruturados"])
 def criar_registro_diario_estruturado_endpoint(
     paciente_id: str,
     registro_data: schemas.RegistroDiarioCreate,
@@ -872,14 +872,32 @@ def criar_registro_diario_estruturado_endpoint(
         # Pega o nome do usuário atual para o campo tecnico_nome
         usuario_nome = decrypt_data(current_user.nome) if current_user.nome else "Usuário"
 
-        # USA A MESMA FUNÇÃO QUE /prontuarios
+        # Cria prontuário
         novo_prontuario = crud.criar_prontuario(db, paciente_id, texto_registro, usuario_nome)
-        return novo_prontuario
+
+        # Converte para formato estruturado antes de retornar
+        prontuario_estruturado = {
+            'id': novo_prontuario['id'],
+            'paciente_id': paciente_id,
+            'negocio_id': registro_data.negocio_id,
+            'tipo': 'anotacao',
+            'data_registro': novo_prontuario.get('data'),
+            'tecnico': {
+                'id': current_user.id,
+                'nome': usuario_nome,
+                'email': current_user.email or ''
+            },
+            'conteudo': {
+                'descricao': texto_registro
+            }
+        }
+
+        return prontuario_estruturado
     except Exception as e:
         logger.error(f"Erro inesperado ao criar prontuário/registro: {e}")
         raise HTTPException(status_code=500, detail="Ocorreu um erro interno no servidor.")
 
-@app.get("/pacientes/{paciente_id}/registros", response_model=List[schemas.ProntuarioResponse], tags=["Registros Estruturados"])
+@app.get("/pacientes/{paciente_id}/registros", response_model=List[schemas.RegistroDiarioResponse], tags=["Registros Estruturados"])
 def listar_registros_diario_estruturado_endpoint(
     paciente_id: str,
     data: Optional[date] = Query(None, description="Data para filtrar os registros (formato: AAAA-MM-DD)."),
@@ -887,9 +905,9 @@ def listar_registros_diario_estruturado_endpoint(
     current_user: schemas.UsuarioProfile = Depends(get_paciente_autorizado),
     db: firestore.client = Depends(get_db)
 ):
-    """(Clínico Autorizado) Lista prontuários/registros diários de um paciente."""
-    # USA A MESMA COLLECTION QUE O POST /prontuarios
-    return crud.listar_prontuarios(db, paciente_id)
+    """(Clínico Autorizado) Lista prontuários/registros diários de um paciente no formato estruturado."""
+    # CONVERTE PRONTUARIOS PARA FORMATO ESTRUTURADO COM OBJETO TECNICO COMPLETO
+    return crud.listar_prontuarios_estruturados(db, paciente_id)
 
 @app.patch("/pacientes/{paciente_id}/registros/{registro_id}", response_model=schemas.RegistroDiarioResponse, tags=["Registros Estruturados"])
 def atualizar_registro_diario_estruturado_endpoint(
