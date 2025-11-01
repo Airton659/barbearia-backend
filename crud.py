@@ -4012,9 +4012,11 @@ def criar_registro_diario_estruturado(db: firestore.client, registro_data: schem
     """
     Adiciona um novo registro estruturado ao diário de acompanhamento de um paciente, criptografando dados sensíveis e notificando o enfermeiro.
     Pode ser usado por qualquer perfil autorizado (admin, profissional, médico, técnico).
+    Aceita tanto 'texto' (frontend) quanto 'conteudo' (estruturado).
     """
     try:
-        conteudo_ok = registro_data.conteudo
+        # Usa get_conteudo para obter conteúdo estruturado (converte 'texto' se necessário)
+        conteudo_ok = registro_data.get_conteudo
         conteudo_dict = conteudo_ok.model_dump()
 
         if 'descricao' in conteudo_dict and conteudo_dict['descricao']:

@@ -586,8 +586,24 @@ class RegistroDiarioCreate(BaseModel):
     tipo: str = Field(..., description="O tipo do registro (ex: 'sinais_vitais', 'medicacao', 'anotacao').")
     # Adiciona o timestamp enviado pelo app
     data_hora: datetime = Field(..., description="Timestamp exato do evento, enviado pelo app.")
-    # Usa o novo modelo de conteúdo simplificado
-    conteudo: RegistroDiarioConteudo
+    # Aceita tanto 'texto' (frontend) quanto 'conteudo' (formato interno)
+    texto: Optional[str] = Field(None, description="Texto do registro (formato simplificado do frontend)")
+    conteudo: Optional[RegistroDiarioConteudo] = Field(None, description="Conteúdo estruturado do registro")
+
+    def model_post_init(self, __context):
+        """Valida que pelo menos um dos campos foi fornecido"""
+        if not self.texto and not self.conteudo:
+            raise ValueError("É necessário fornecer 'texto' ou 'conteudo'")
+
+    @property
+    def get_conteudo(self) -> RegistroDiarioConteudo:
+        """Retorna conteudo estruturado, convertendo texto se necessário"""
+        if self.conteudo:
+            return self.conteudo
+        elif self.texto:
+            return AnotacaoConteudo(descricao=self.texto)
+        else:
+            raise ValueError("É necessário fornecer 'texto' ou 'conteudo'")
 
 class RegistroDiarioUpdate(BaseModel):
     tipo: Optional[str] = Field(None, description="O tipo do registro (ex: 'sinais_vitais', 'medicacao', 'anotacao').")
