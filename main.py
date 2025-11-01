@@ -869,30 +869,38 @@ def criar_registro_diario_estruturado_endpoint(
         # Extrai o texto do registro (pode vir como 'texto' ou 'conteudo.descricao')
         texto_registro = registro_data.texto if registro_data.texto else registro_data.conteudo.descricao if registro_data.conteudo else ""
 
-        # Pega o nome do usuário atual para o campo tecnico_nome
+        # Pega o nome do usuário atual
         usuario_nome = decrypt_data(current_user.nome) if current_user.nome else "Usuário"
 
-        # Cria prontuário
-        novo_prontuario = crud.criar_prontuario(db, paciente_id, texto_registro, usuario_nome)
-
-        # Converte para formato estruturado antes de retornar
-        prontuario_estruturado = {
-            'id': novo_prontuario['id'],
-            'paciente_id': paciente_id,
-            'negocio_id': registro_data.negocio_id,
-            'tipo': 'anotacao',
-            'data_registro': novo_prontuario.get('data'),
-            'tecnico': {
-                'id': current_user.id,
-                'nome': usuario_nome,
-                'email': current_user.email
-            },
-            'conteudo': {
-                'descricao': texto_registro
-            }
+        # Monta objeto técnico
+        tecnico_dict = {
+            'id': current_user.id,
+            'nome': usuario_nome,
+            'email': current_user.email
         }
 
-        return prontuario_estruturado
+        # Cria prontuário com formato estruturado
+        novo_prontuario = crud.criar_prontuario(
+            db,
+            paciente_id,
+            texto_registro,
+            tecnico_dict,
+            registro_data.negocio_id,
+            'anotacao'
+        )
+
+        # Retorna no formato esperado pelo schema
+        return {
+            'id': novo_prontuario['id'],
+            'paciente_id': paciente_id,
+            'negocio_id': novo_prontuario.get('negocio_id'),
+            'tipo': novo_prontuario.get('tipo', 'anotacao'),
+            'data_registro': novo_prontuario.get('data'),
+            'tecnico': novo_prontuario.get('tecnico'),
+            'conteudo': {
+                'descricao': novo_prontuario.get('texto')
+            }
+        }
     except Exception as e:
         logger.error(f"Erro inesperado ao criar prontuário/registro: {e}")
         raise HTTPException(status_code=500, detail="Ocorreu um erro interno no servidor.")

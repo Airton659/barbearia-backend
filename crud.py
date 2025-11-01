@@ -3145,31 +3145,45 @@ def get_ficha_completa_paciente(db: firestore.client, paciente_id: str, consulta
     return ficha
 
 def listar_prontuarios(db: firestore.client, paciente_id: str) -> List[Dict]:
-    """Lista os prontuários simples de um paciente."""
+    """Lista os prontuários de um paciente no formato estruturado."""
     try:
         coll_ref = db.collection('usuarios').document(paciente_id).collection('prontuarios')
         docs = coll_ref.order_by('data', direction=firestore.Query.DESCENDING).stream()
 
         prontuarios = []
         for doc in docs:
-            data = doc.to_dict()
-            data['id'] = doc.id
-            prontuarios.append(data)
+            p = doc.to_dict()
+
+            # Retorna no formato esperado pelo RegistroDiarioResponse
+            prontuario_estruturado = {
+                'id': doc.id,
+                'paciente_id': paciente_id,
+                'negocio_id': p.get('negocio_id', ''),
+                'tipo': p.get('tipo', 'anotacao'),
+                'data_registro': p.get('data'),
+                'tecnico': p.get('tecnico', {'id': '', 'nome': 'Usuário Desconhecido', 'email': 'nao-disponivel@exemplo.com'}),
+                'conteudo': {
+                    'descricao': p.get('texto', '')
+                }
+            }
+            prontuarios.append(prontuario_estruturado)
 
         return prontuarios
     except Exception as e:
         logger.error(f"Erro ao listar prontuários do paciente {paciente_id}: {e}")
         return []
 
-def criar_prontuario(db: firestore.client, paciente_id: str, texto: str, tecnico_nome: Optional[str] = None) -> Dict:
-    """Cria um novo prontuário para o paciente."""
+def criar_prontuario(db: firestore.client, paciente_id: str, texto: str, tecnico_dict: Dict, negocio_id: str, tipo: str = 'anotacao') -> Dict:
+    """Cria um novo prontuário para o paciente no formato estruturado."""
     try:
         coll_ref = db.collection('usuarios').document(paciente_id).collection('prontuarios')
 
         prontuario_data = {
             'data': firestore.SERVER_TIMESTAMP,
             'texto': texto,
-            'tecnico_nome': tecnico_nome
+            'tecnico': tecnico_dict,  # Objeto completo com {id, nome, email}
+            'negocio_id': negocio_id,
+            'tipo': tipo
         }
 
         doc_ref = coll_ref.add(prontuario_data)[1]
