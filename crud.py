@@ -4745,11 +4745,15 @@ def criar_relatorio_medico(db: firestore.client, paciente_id: str, relatorio_dat
     Cria um novo relatório médico para um paciente.
     """
     # 1. Encontrar a consulta mais recente (plano de cuidado ativo)
+    # CORREÇÃO: Tornar consulta_id opcional para permitir relatórios de pacientes novos
     consultas = listar_consultas(db, paciente_id)
-    if not consultas:
-        raise HTTPException(status_code=404, detail="Nenhum plano de cuidado (consulta) encontrado para este paciente.")
-    
-    consulta_id_recente = consultas[0]['id']
+    consulta_id_recente = None
+
+    if consultas:
+        consulta_id_recente = consultas[0]['id']
+        logger.info(f"Relatório será vinculado à consulta {consulta_id_recente}")
+    else:
+        logger.warning(f"Paciente {paciente_id} não possui plano de cuidado. Criando relatório sem consulta vinculada.")
 
     # 2. Montar o dicionário do novo relatório
     relatorio_dict = {
@@ -4757,7 +4761,7 @@ def criar_relatorio_medico(db: firestore.client, paciente_id: str, relatorio_dat
         "negocio_id": relatorio_data.negocio_id,
         "criado_por_id": autor.id,
         "medico_id": relatorio_data.medico_id,
-        "consulta_id": consulta_id_recente,
+        "consulta_id": consulta_id_recente,  # Pode ser None agora
         "conteudo": relatorio_data.conteudo,
         "status": "pendente",
         "fotos": [],

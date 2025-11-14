@@ -842,7 +842,7 @@ class RelatorioMedicoBase(BaseModel):
     negocio_id: str
     criado_por_id: str
     medico_id: str
-    consulta_id: str
+    consulta_id: Optional[str] = Field(None, description="ID da consulta/plano vinculado (opcional para pacientes novos)")
     conteudo: Optional[str] = Field(None, description="Conteúdo/texto livre do relatório médico")
     status: str = "pendente"
     fotos: List[str] = Field(default_factory=list)
