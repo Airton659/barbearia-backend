@@ -17,6 +17,7 @@ from auth import (
     get_current_profissional_user, get_optional_current_user_firebase,
     validate_negocio_id, validate_path_negocio_id, get_paciente_autorizado,
     get_current_admin_or_profissional_user, get_current_tecnico_user,
+    get_current_admin_or_tecnico_user,
     get_paciente_autorizado_anamnese, get_current_medico_user, get_relatorio_autorizado,
     get_admin_or_profissional_autorizado_paciente
 )
@@ -2119,10 +2120,10 @@ def listar_tarefas_essenciais(
 @app.patch("/tarefas/{tarefa_id}/concluir", response_model=schemas.TarefaAgendadaResponse, tags=["Tarefas Essenciais"])
 def concluir_tarefa_essencial(
     tarefa_id: str,
-    current_user: schemas.UsuarioProfile = Depends(get_current_tecnico_user),
+    current_user: schemas.UsuarioProfile = Depends(get_current_admin_or_tecnico_user),
     db: firestore.client = Depends(get_db)
 ):
-    """(Técnico) Marca uma tarefa como concluída."""
+    """(Admin/Profissional/Técnico) Marca uma tarefa como concluída."""
     # USA A NOVA VERSÃO QUE CANCELA CLOUD TASKS
     tarefa_concluida = crud.marcar_tarefa_como_concluida_v2(db, tarefa_id, current_user)
     if not tarefa_concluida:

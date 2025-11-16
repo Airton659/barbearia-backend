@@ -287,6 +287,31 @@ def get_current_tecnico_user(
 # --- FIM DO NOVO BLOCO DE CÓDIGO ---
 
 
+def get_current_admin_or_tecnico_user(
+    current_user: schemas.UsuarioProfile = Depends(get_current_user_firebase)
+) -> schemas.UsuarioProfile:
+    """
+    Verifica se o usuário atual tem a role 'admin', 'profissional' ou 'tecnico' em algum dos negócios.
+    Super Admin tem acesso total.
+    Esta é uma verificação genérica; a lógica do endpoint deve validar o negócio específico.
+    """
+    # Super Admin tem acesso total
+    if current_user.roles.get("platform") == "super_admin":
+        return current_user
+
+    # Verifica se tem alguma das roles permitidas
+    user_roles = current_user.roles
+    allowed_roles = ['admin', 'profissional', 'tecnico']
+    has_allowed_role = any(role in allowed_roles for role in user_roles.values())
+
+    if not has_allowed_role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado: você não tem permissão de Admin, Profissional ou Técnico."
+        )
+    return current_user
+
+
 # Em auth.py, adicione esta nova função no final do arquivo
 
 def get_paciente_autorizado_anamnese(
